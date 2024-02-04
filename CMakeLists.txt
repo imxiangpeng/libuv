@@ -17,6 +17,8 @@ include(CheckCCompilerFlag)
 include(GNUInstallDirs)
 include(CTest)
 
+add_subdirectory(hrmgt)
+
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
