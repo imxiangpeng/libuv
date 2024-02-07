@@ -1,4 +1,4 @@
-// simple database
+// mxp, a very simple json table manipulated using j2sobject
 
 #ifndef _J2STABLE_H_
 #define _J2STABLE_H_
@@ -9,7 +9,7 @@
 #define J2STBL_OBJECT_SELF(self) ((struct j2stbl_object *)self)
 
 #define J2STBL_OBJECT_PRIV_FIELDS \
-{.name = "__id__", .type = J2S_INT, .offset = offsetof(struct j2stbl_object, __id__), .offset_len = 0}
+    {.name = "__id__", .type = J2S_INT, .offset = offsetof(struct j2stbl_object, __id__), .offset_len = 0}
 
 enum {
   J2STBL_OPBIT_INSERT = 0x1,
@@ -34,6 +34,8 @@ void j2stable_deinit(struct j2stable *tbl);
 
 int j2stable_empty(struct j2stable *tbl);
 
+int j2stable_update(struct j2stable *tbl, struct j2stbl_object *self);
+int j2stable_delete(struct j2stable *tbl, struct j2stbl_object *self);
 // object.id will auto increase ++
 int j2stable_insert(struct j2stable *tbl, struct j2stbl_object *self);
 #endif // _J2STABLE_H_

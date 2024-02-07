@@ -1,3 +1,4 @@
+// mxp, a very simple json table based on j2sobject
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -15,7 +16,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define HRTBL_BASE_DB_PATH "./hrtbls"  //"./hrtbls"
+#ifndef J2STBL_BASE_DB_PATH
+#define J2STBL_BASE_DB_PATH "./j2stbls"
+#endif
 
 static int _j2stable_init(struct j2stable *tbl) {
     int ret = 0;
@@ -34,7 +37,6 @@ static int _j2stable_init(struct j2stable *tbl) {
 
     ret = j2sobject_deserialize_file(J2SOBJECT(&tbl->object), tbl->path);
     if (0 != ret) {
-        //printf("%s(%d): failed ...\n", __FUNCTION__, __LINE__);
     }
 
     return 0;
@@ -42,13 +44,11 @@ static int _j2stable_init(struct j2stable *tbl) {
 
 // db: database name
 struct j2stable *j2stable_init(const char *name,
-                         struct j2sobject_prototype *proto) {
+                               struct j2sobject_prototype *proto) {
     struct j2stable *tbl = NULL;
     if (!name || !proto || !proto->ctor || 0 == proto->size) {
         return NULL;
     }
-
-    printf("%s(%d): .......\n", __FUNCTION__, __LINE__);
 
     tbl = (struct j2stable *)calloc(1, sizeof(struct j2stable));
     if (!tbl) {
@@ -62,7 +62,7 @@ struct j2stable *j2stable_init(const char *name,
     // real fields id started from 1
     tbl->object.__id__ = 0;
 
-    if (asprintf(&tbl->path, "%s/%s.json", HRTBL_BASE_DB_PATH, name) < 0) {
+    if (asprintf(&tbl->path, "%s/%s.json", J2STBL_BASE_DB_PATH, name) < 0) {
         free(tbl);
         return NULL;
     }
@@ -117,7 +117,25 @@ int j2stable_update(struct j2stable *tbl, struct j2stbl_object *self) {
     if (!tbl || !self)
         return -1;
 
-    tbl->state |= J2STBL_OPBIT_INSERT;
+    tbl->state |= J2STBL_OPBIT_UPDATE;
+    _j2stable_commit(tbl);
+    return 0;
+}
+
+int j2stable_delete(struct j2stable *tbl, struct j2stbl_object *self) {
+    if (!tbl || !self)
+        return -1;
+
+    // tick off from link
+    J2SOBJECT(self)->prev->next = J2SOBJECT(self)->next;
+    J2SOBJECT(self)->next->prev = J2SOBJECT(self)->prev;
+
+    // reset link point
+    J2SOBJECT(self)->next = J2SOBJECT(self);
+    J2SOBJECT(self)->prev = J2SOBJECT(self);
+
+    tbl->state |= J2STBL_OPBIT_DELETE;
+    _j2stable_commit(tbl);
     return 0;
 }
 
@@ -127,20 +145,23 @@ int j2stable_insert(struct j2stable *tbl, struct j2stbl_object *self) {
     if (!tbl || !self)
         return -1;
 
-    // if (j2stable_empty(tbl))
-    //    _j2stable_init(tbl);
     // 1. target self is already on object list?
     // you should call update when it's exits!
-    printf("self:%p\n", self);
-
+#if 0
     for (e = J2SOBJECT(&tbl->object)->next; e != J2SOBJECT(&tbl->object); e = e->next) {
-        printf("object:%p\n", e);
-        printf("object:%d\n", J2STBL_OBJECT_SELF(e)->__id__);
         if (e == J2SOBJECT(self)) {
             printf("Insert: Error target is already exist!\n");
             return -1;
         }
     }
+#else
+    (void)e;
+    // or make sure current object is not on any link list
+    if ((J2SOBJECT(self)->next !=J2SOBJECT(self)) || (J2SOBJECT(self)->next != J2SOBJECT(self)->prev)) {
+        printf("Insert: Error target maybe already exist!\n");
+        return -1;
+    }
+#endif
 
     // 2. only access new self object
     J2SOBJECT(&tbl->object)->prev->next = J2SOBJECT(self);
@@ -155,6 +176,7 @@ int j2stable_insert(struct j2stable *tbl, struct j2stbl_object *self) {
         printf("2 object __id__: %d\n", J2STBL_OBJECT_SELF(e)->__id__);
     }
     tbl->state |= J2STBL_OPBIT_INSERT;
+
     // 3 schedule task to flush data to persist...
     _j2stable_commit(tbl);
     return 0;
