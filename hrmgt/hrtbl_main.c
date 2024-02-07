@@ -5,7 +5,7 @@
 #include "j2s/j2sobject.h"
 
 typedef struct {
-    J2SOBJECT_DECLARE_OBJECT;
+    J2STBL_DECLARE_OBJECT;
     int id;
     char mac[18];
     int type;
@@ -26,6 +26,7 @@ struct j2sobject_prototype hrtbl_mac_tbl_prototype = {.name = "mac_tbl",
 };
 
 static struct j2sobject_fields_prototype _hrtbl_mactbl_fields_prototype[] = {
+J2STBL_OBJECT_PRIV_FIELDS,
     {.name = "id", .type = J2S_INT, .offset = _MACTBL_DATA_OFFSET(id), .offset_len = 0},
     {.name = "mac", .type = J2S_STRING, .offset = _MACTBL_DATA_OFFSET(mac), .offset_len = _MACTBL_DATA_LEN(mac)},
     {.name = "type", .type = J2S_INT, .offset = _MACTBL_DATA_OFFSET(type), .offset_len = 0},
@@ -52,6 +53,7 @@ int main(int argc, char** argv) {
 
     for (t = (hrtbl_mactbl_t*)J2SOBJECT(&tbl->object)->next; t != (hrtbl_mactbl_t*)J2SOBJECT(&tbl->object); t = (hrtbl_mactbl_t*)J2SOBJECT(t)->next) {
         printf("mac tbl:%p\n", t);
+        printf("mac tbl __id__:%d\n", J2STBL_OBJECT_SELF(t)->__id__);
         printf("mac tbl id:%d\n", t->id);
         printf("mac tbl mac:%s\n", t->mac);
         printf("mac tbl type:%d\n", t->type);
@@ -61,7 +63,7 @@ int main(int argc, char** argv) {
     item->id = 10;
     item->type = 1;
     snprintf(item->mac, sizeof(item->mac), "%s", "6c:0b:84:3c:71:9e");
-    hrtbl_insert(tbl, J2SOBJECT(item));
+    hrtbl_insert(tbl, J2STBL_OBJECT_SELF(item));
 
     hrtbl_deinit(tbl);
     return 0;

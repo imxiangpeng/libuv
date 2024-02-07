@@ -3,10 +3,10 @@
 #define _GNU_SOURCE
 #endif
 
-#include <errno.h>
+#include "hr_tbl.h"
 
-#include "j2s/j2sobject.h"
 #include <cjson/cJSON.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "hr_tbl.h"
+#include "j2s/j2sobject.h"
 
 #define HRTBL_BASE_DB_PATH "/home/alex/workspace/workspace/libuv/libuv/build/hrtbls"  //"./hrtbls"
 
@@ -61,23 +61,14 @@ struct hrtbl *hrtbl_init(const char *name,
     J2SOBJECT(&tbl->object)->type = J2S_ARRAY;
     J2SOBJECT(&tbl->object)->proto = proto;
     J2SOBJECT(&tbl->object)->next = J2SOBJECT(&tbl->object)->prev = J2SOBJECT(&tbl->object);
+    // real fields id started from 1
+    tbl->object.__id__ = 0;
 
     if (asprintf(&tbl->path, "%s/%s.json", HRTBL_BASE_DB_PATH, name) < 0) {
         free(tbl);
         return NULL;
     }
 
-    if (access(tbl->path, R_OK | W_OK) != 0) {
-        printf("%s(%d): .......:%s\n", __FUNCTION__, __LINE__, strerror(errno));
-        printf("can not read write :%s\n", tbl->path);
-    }
-
-    // using lazy method, do not open db file directly
-    // also we should using temp file when replace ...
-    // how verify data? using md5sum or crc?
-    // sdb->fd = open(path, R_OK | W_OK);
-
-    printf("%s(%d): .......\n", __FUNCTION__, __LINE__);
     _hrtbl_init(tbl);
 
     return tbl;
@@ -133,7 +124,7 @@ int hrtbl_update(struct hrtbl *tbl, struct j2sobject *self) {
 }
 
 // after insert you should not free it again, it will be auto free when posible
-int hrtbl_insert(struct hrtbl *tbl, struct j2sobject *self) {
+int hrtbl_insert(struct hrtbl *tbl, struct hrtbl_object *self) {
     struct j2sobject *e = NULL;
     if (!tbl || !self)
         return -1;
@@ -146,20 +137,24 @@ int hrtbl_insert(struct hrtbl *tbl, struct j2sobject *self) {
 
     for (e = J2SOBJECT(&tbl->object)->next; e != J2SOBJECT(&tbl->object); e = e->next) {
         printf("object:%p\n", e);
-        if (e == self) {
+        printf("object:%d\n", J2STBL_OBJECT_SELF(e)->__id__);
+        if (e == J2SOBJECT(self)) {
             printf("Insert: Error target is already exist!\n");
             return -1;
         }
     }
 
     // 2. only access new self object
-    J2SOBJECT(&tbl->object)->prev->next = self;
-    self->prev = J2SOBJECT(&tbl->object)->prev;
-    self->next = J2SOBJECT(&tbl->object);
-    J2SOBJECT(&tbl->object)->prev = self;
+    J2SOBJECT(&tbl->object)->prev->next = J2SOBJECT(self);
+    J2SOBJECT(self)->prev = J2SOBJECT(&tbl->object)->prev;
+    J2SOBJECT(self)->next = J2SOBJECT(&tbl->object);
+    J2SOBJECT(&tbl->object)->prev = J2SOBJECT(self);
+
+    self->__id__ = J2STBL_OBJECT_SELF(J2SOBJECT(self)->prev)->__id__ + 1;
 
     for (e = J2SOBJECT(&tbl->object)->next; e != J2SOBJECT(&tbl->object); e = e->next) {
-        printf("2 object:%p\n", e);
+        printf("2 object:%p, next:%p\n", e, e->next);
+        printf("2 object __id__: %d\n", J2STBL_OBJECT_SELF(e)->__id__);
     }
     tbl->state |= TBL_OPBIT_INSERT;
     // 3 schedule task to flush data to persist...

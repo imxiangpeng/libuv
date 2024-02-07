@@ -75,6 +75,7 @@ struct j2sobject {
 
 //struct j2sobject *j2sobject_create(enum j2stype type, size_t size);
 struct j2sobject *j2sobject_create(struct j2sobject_prototype *proto);
+struct j2sobject *j2sobject_create_array(struct j2sobject_prototype *proto);
 void j2sobject_free(struct j2sobject *self);
 
 // clear all payload data memory
