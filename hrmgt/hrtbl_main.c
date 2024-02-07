@@ -40,6 +40,9 @@ static int hrtbl_mactbl_ctor(struct j2sobject* obj) {
 }
 
 int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+
     struct hrtbl* tbl = hrtbl_init("mac_tbl", &hrtbl_mac_tbl_prototype);
     if (!tbl) {
         printf("can not init mac tbl\n");
@@ -54,7 +57,7 @@ int main(int argc, char** argv) {
         printf("mac tbl type:%d\n", t->type);
     }
 
-    hrtbl_mactbl_t *item = (hrtbl_mactbl_t *)j2sobject_create(&hrtbl_mac_tbl_prototype);
+    hrtbl_mactbl_t* item = (hrtbl_mactbl_t*)j2sobject_create(&hrtbl_mac_tbl_prototype);
     item->id = 10;
     item->type = 1;
     snprintf(item->mac, sizeof(item->mac), "%s", "6c:0b:84:3c:71:9e");

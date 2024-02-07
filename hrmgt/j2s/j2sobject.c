@@ -1,4 +1,7 @@
 // mxp, 20231229, json <> struct utils
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "j2sobject.h"
 
 #include <errno.h>
@@ -552,7 +555,7 @@ int j2sobject_serialize_file(struct j2sobject *self, const char *path) {
     tmp = (char *)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
     if (!tmp) return -1;
 
-    snprintf(tmp, tmp_len, "%s%s", path,TMPFILE_TEMPLATE);
+    snprintf(tmp, tmp_len, "%s%s", path, TMPFILE_TEMPLATE);
     fd = mkostemp(tmp, O_RDWR | O_TRUNC | O_CREAT);
     if (fd < 0) {
         free(tmp);

@@ -1,7 +1,11 @@
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <errno.h>
 
 #include "j2s/j2sobject.h"
-#define _GNU_SOURCE
 #include <cjson/cJSON.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -110,8 +114,6 @@ int hrtbl_empty(struct hrtbl *tbl) {
 }
 
 static int _hrtbl_commit(struct hrtbl *tbl) {
-    int ret = 0;
-    struct hrtbl_object *p = NULL;
     if (!tbl)
         return -1;
 
@@ -120,11 +122,7 @@ static int _hrtbl_commit(struct hrtbl *tbl) {
         return 0;
     }
 
-    ret = j2sobject_serialize_file(J2SOBJECT(&tbl->object), tbl->path);
-
-      //rename(DHCP6_LEASE".tmp", tbl->path);
-    //unlink(DHCP6_LEASE".tmp");
-    return 0;
+    return j2sobject_serialize_file(J2SOBJECT(&tbl->object), tbl->path);
 }
 int hrtbl_update(struct hrtbl *tbl, struct j2sobject *self) {
     if (!tbl || !self)
