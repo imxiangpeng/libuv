@@ -13,6 +13,8 @@
 
 #include "cjson/cJSON.h"
 
+#define TMPFILE_TEMPLATE ".tmp_XXXXXX"
+
 // create not support none name element
 // array string/int, such as [ 1, 2 ] or  ["xxx", "yyy"]
 
@@ -65,21 +67,12 @@ static size_t _read_file(const char *path, char **buf) {
     return sb.st_size;
 }
 
-static size_t _write_file(const char *path, char *data, size_t size) {
-    int fd = -1;
-
+static ssize_t _write_file_fd(int fd, char *data, size_t size) {
+    ssize_t left = size;
     char *ptr = data;
 
-    if (!data || !path || size <= 0) {
-        return -1;
-    }
+    if (fd < 0 || !data || size == 0) return -1;
 
-    fd = open(path, O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fd < 0) {
-        return -1;
-    }
-
-    size_t left = size;
     while (left > 0) {
         ssize_t n = TEMP_FAILURE_RETRY(write(fd, ptr, left));
         if (n == -1) {
@@ -90,6 +83,21 @@ static size_t _write_file(const char *path, char *data, size_t size) {
         left -= n;
     }
 
+    return size;
+}
+static ssize_t _write_file(const char *path, char *data, size_t size) {
+    int fd = -1;
+
+    if (!data || !path || size <= 0) {
+        return -1;
+    }
+
+    fd = open(path, O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fd < 0) {
+        return -1;
+    }
+
+    size = _write_file_fd(fd, data, size);
     close(fd);
 
     return size;
@@ -184,7 +192,7 @@ void j2sobject_free(struct j2sobject *self) {
             j2sobject_free(p);
         }
 
-        memset((void*)self, 0, sizeof(struct j2sobject));
+        memset((void *)self, 0, sizeof(struct j2sobject));
         free(self);
         return;
     }
@@ -488,38 +496,86 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
     return 0;
 }
 
+int j2sobject_serialize_array_cjson(struct j2sobject *self, struct cJSON *target) {
+    struct j2sobject *e = NULL;
+    if (!self || self->type != J2S_ARRAY || !target || !cJSON_IsArray(target)) return -1;
+
+    // loop all elements free all element
+    for (e = self->next; e != self; e = e->next) {
+        cJSON *object = cJSON_CreateObject();
+        j2sobject_serialize_cjson(e, object);
+        cJSON_AddItemToArray(target, object);
+    }
+
+    return 0;
+}
+
 // please free the memory
 char *j2sobject_serialize(struct j2sobject *self) {
     char *data = NULL;
+    cJSON *root = NULL;
 
-    if (!self || !self->field_protos) {
+    if (!self || !self->proto) {
         return NULL;
     }
 
-    cJSON *root = cJSON_CreateObject();
-    j2sobject_serialize_cjson(self, root);
+    if (self->type == J2S_ARRAY) {
+        root = cJSON_CreateArray();
+        j2sobject_serialize_array_cjson(self, root);
+    } else if (self->type == J2S_OBJECT) {
+        if (!self->field_protos) return NULL;
+        root = cJSON_CreateObject();
+        j2sobject_serialize_cjson(self, root);
+    } else {
+        return NULL;
+    }
     // should be freed manual ...
-    data = cJSON_Print(root);
-    cJSON_Delete(root);
+    if (root) {
+        data = cJSON_Print(root);
+        cJSON_Delete(root);
+    }
 
     return data;
 }
 
 int j2sobject_serialize_file(struct j2sobject *self, const char *path) {
+    int fd = -1;
     char *data = NULL;
+    char *tmp = NULL;
+    int tmp_len = 0;
     if (!self || !path) {
         return -1;
     }
 
-    data = j2sobject_serialize(self);
+    tmp_len = strlen(path) + strlen(TMPFILE_TEMPLATE) + 1;  // + '\0'
 
-    if (!data) {
-        printf("can not got data ...\n");
+    tmp = (char *)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
+    if (!tmp) return -1;
+
+    snprintf(tmp, tmp_len, "%s%s", path,TMPFILE_TEMPLATE);
+    fd = mkostemp(tmp, O_RDWR | O_TRUNC | O_CREAT);
+    if (fd < 0) {
+        free(tmp);
         return -1;
     }
 
-    _write_file(path, data, strlen(data));
+    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
 
+    data = j2sobject_serialize(self);
+    if (!data) {
+        free(tmp);
+        close(fd);
+        return -1;
+    }
+
+    _write_file_fd(fd, data, strlen(data));
+
+    close(fd);
+
+    unlink(path);
+    rename(tmp, path);
+
+    free(tmp);
     free(data);
 
     return 0;

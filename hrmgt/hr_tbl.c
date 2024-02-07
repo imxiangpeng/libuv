@@ -83,6 +83,8 @@ void hrtbl_deinit(struct hrtbl *tbl) {
     struct j2sobject *p = NULL, *n = NULL;
     if (!tbl) return;
 
+    // hrtbl.object is not allocated using j2sobject_create_array
+    // so we should manual release all elements
     // loop all elements free all element
     for (p = J2SOBJECT(&tbl->object)->next, n = p->next; p != J2SOBJECT(&tbl->object); p = n, n = p->next) {
         printf("%s(%d): .....p:%p, head:%p, next:%p\n", __FUNCTION__, __LINE__, p, &tbl->object, p->next);
@@ -107,61 +109,62 @@ int hrtbl_empty(struct hrtbl *tbl) {
     return 0;
 }
 
-int _hrtbl_commit(struct hrtbl *tbl) {
-    int size = 0;
-    int is_array = 0;
+static int _hrtbl_commit(struct hrtbl *tbl) {
+    int ret = 0;
     struct hrtbl_object *p = NULL;
     if (!tbl)
         return -1;
 
-#if 0
-  if (hr_list_empty(&tbl->cached)) {
-    printf("empty do nothing ...\n");
-    return 0;
-  }
-
-  // 1. self is on cached link
-  hr_list_for_each_entry(p, &tbl->cached, list) {
-    size++;
-    printf("%s(%d): foreach :%p vs %p\n", __FUNCTION__, __LINE__, p, self);
-    if (size > 1) {
-      is_array = 1;
-      break;
-    }
-  }
-
-  if (is_array == 0) {
-    p = hr_list_first_entry(&tbl->cached, struct hrtbl_object, list);
-    j2sobject_serialize_file(J2SOBJECT(p), tbl->path);
-  } else {
-    char *data = NULL;
-    cJSON *root = cJSON_CreateArray();
-    hr_list_for_each_entry(p, &tbl->cached, list) {
-      cJSON *ele = cJSON_CreateObject();
-      j2sobject_serialize_cjson(J2SOBJECT(p), ele);
-      cJSON_AddItemToArray(root, ele);
+    // do nothing when no changes
+    if (tbl->state == 0) {
+        return 0;
     }
 
-    data = cJSON_Print(root); // cJSON_PrintUnformatted
-    _write_file(tbl->path, data, strlen(data));
-    free(data);
-    cJSON_Delete(root);
-  }
-#endif
+    ret = j2sobject_serialize_file(J2SOBJECT(&tbl->object), tbl->path);
+
+      //rename(DHCP6_LEASE".tmp", tbl->path);
+    //unlink(DHCP6_LEASE".tmp");
     return 0;
 }
-int hrtbl_update(struct hrtbl *tbl, struct hrtbl_object *self) {
-
+int hrtbl_update(struct hrtbl *tbl, struct j2sobject *self) {
     if (!tbl || !self)
         return -1;
 
+    tbl->state |= TBL_OPBIT_INSERT;
     return 0;
 }
+
+// after insert you should not free it again, it will be auto free when posible
 int hrtbl_insert(struct hrtbl *tbl, struct j2sobject *self) {
+    struct j2sobject *e = NULL;
     if (!tbl || !self)
         return -1;
 
     // if (hrtbl_empty(tbl))
     //    _hrtbl_init(tbl);
+    // 1. target self is already on object list?
+    // you should call update when it's exits!
+    printf("self:%p\n", self);
+
+    for (e = J2SOBJECT(&tbl->object)->next; e != J2SOBJECT(&tbl->object); e = e->next) {
+        printf("object:%p\n", e);
+        if (e == self) {
+            printf("Insert: Error target is already exist!\n");
+            return -1;
+        }
+    }
+
+    // 2. only access new self object
+    J2SOBJECT(&tbl->object)->prev->next = self;
+    self->prev = J2SOBJECT(&tbl->object)->prev;
+    self->next = J2SOBJECT(&tbl->object);
+    J2SOBJECT(&tbl->object)->prev = self;
+
+    for (e = J2SOBJECT(&tbl->object)->next; e != J2SOBJECT(&tbl->object); e = e->next) {
+        printf("2 object:%p\n", e);
+    }
+    tbl->state |= TBL_OPBIT_INSERT;
+    // 3 schedule task to flush data to persist...
+    _hrtbl_commit(tbl);
     return 0;
 }

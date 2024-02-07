@@ -82,11 +82,12 @@ int j2sobject_reset(struct j2sobject *self);
 
 int j2sobject_deserialize(struct j2sobject *self, const char *jstr);
 int j2sobject_deserialize_cjson(struct j2sobject *self, struct cJSON *jobj);
-int j2sobject_deserialize_file(struct j2sobject *self, const char *path);
 int j2sobject_deserialize_array_cjson(struct j2sobject *self, struct cJSON *jobj);
+int j2sobject_deserialize_file(struct j2sobject *self, const char *path);
 // must be freed manually
 char *j2sobject_serialize(struct j2sobject *self);
 int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target);
+int j2sobject_serialize_array_cjson(struct j2sobject *self, struct cJSON *target);
 int j2sobject_serialize_file(struct j2sobject *self, const char *path);
 
 #endif  //_J2SOBJECT_H_

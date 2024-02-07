@@ -7,6 +7,11 @@
 
 struct hrtbl;
 
+enum {
+  TBL_OPBIT_INSERT = 0x1,
+  TBL_OPBIT_UPDATE = 0x2,
+  TBL_OPBIT_DELETE = 0x4
+};
 //struct hrtbl_object {
 //  J2SOBJECT_DECLARE_OBJECT;
 //};
@@ -14,6 +19,7 @@ struct hrtbl {
 
   char *path;
 
+  int state;
   struct j2sobject object;
 };
 
