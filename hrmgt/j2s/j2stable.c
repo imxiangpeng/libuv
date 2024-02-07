@@ -3,7 +3,7 @@
 #define _GNU_SOURCE
 #endif
 
-#include "hr_tbl.h"
+#include "j2stable.h"
 
 #include <cjson/cJSON.h>
 #include <errno.h>
@@ -15,11 +15,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "j2s/j2sobject.h"
+#define HRTBL_BASE_DB_PATH "./hrtbls"  //"./hrtbls"
 
-#define HRTBL_BASE_DB_PATH "/home/alex/workspace/workspace/libuv/libuv/build/hrtbls"  //"./hrtbls"
-
-static int _hrtbl_init(struct hrtbl *tbl) {
+static int _j2stable_init(struct j2stable *tbl) {
     int ret = 0;
     char *path = NULL;
     struct stat st;
@@ -36,23 +34,23 @@ static int _hrtbl_init(struct hrtbl *tbl) {
 
     ret = j2sobject_deserialize_file(J2SOBJECT(&tbl->object), tbl->path);
     if (0 != ret) {
-        printf("%s(%d): failed ...\n", __FUNCTION__, __LINE__);
+        //printf("%s(%d): failed ...\n", __FUNCTION__, __LINE__);
     }
 
     return 0;
 }
 
 // db: database name
-struct hrtbl *hrtbl_init(const char *name,
+struct j2stable *j2stable_init(const char *name,
                          struct j2sobject_prototype *proto) {
-    struct hrtbl *tbl = NULL;
+    struct j2stable *tbl = NULL;
     if (!name || !proto || !proto->ctor || 0 == proto->size) {
         return NULL;
     }
 
     printf("%s(%d): .......\n", __FUNCTION__, __LINE__);
 
-    tbl = (struct hrtbl *)calloc(1, sizeof(struct hrtbl));
+    tbl = (struct j2stable *)calloc(1, sizeof(struct j2stable));
     if (!tbl) {
         return NULL;
     }
@@ -69,12 +67,12 @@ struct hrtbl *hrtbl_init(const char *name,
         return NULL;
     }
 
-    _hrtbl_init(tbl);
+    _j2stable_init(tbl);
 
     return tbl;
 }
 
-void hrtbl_deinit(struct hrtbl *tbl) {
+void j2stable_deinit(struct j2stable *tbl) {
     struct j2sobject *p = NULL, *n = NULL;
     if (!tbl) return;
 
@@ -91,12 +89,12 @@ void hrtbl_deinit(struct hrtbl *tbl) {
     if (tbl->path)
         free(tbl->path);
 
-    memset((void *)tbl, 0, sizeof(struct hrtbl));
+    memset((void *)tbl, 0, sizeof(struct j2stable));
 
     free(tbl);
 }
 
-int hrtbl_empty(struct hrtbl *tbl) {
+int j2stable_empty(struct j2stable *tbl) {
     if (!tbl) return 0;
 
     if (J2SOBJECT(&tbl->object)->next == J2SOBJECT(&tbl->object)) return 1;
@@ -104,7 +102,7 @@ int hrtbl_empty(struct hrtbl *tbl) {
     return 0;
 }
 
-static int _hrtbl_commit(struct hrtbl *tbl) {
+static int _j2stable_commit(struct j2stable *tbl) {
     if (!tbl)
         return -1;
 
@@ -115,22 +113,22 @@ static int _hrtbl_commit(struct hrtbl *tbl) {
 
     return j2sobject_serialize_file(J2SOBJECT(&tbl->object), tbl->path);
 }
-int hrtbl_update(struct hrtbl *tbl, struct j2sobject *self) {
+int j2stable_update(struct j2stable *tbl, struct j2stbl_object *self) {
     if (!tbl || !self)
         return -1;
 
-    tbl->state |= TBL_OPBIT_INSERT;
+    tbl->state |= J2STBL_OPBIT_INSERT;
     return 0;
 }
 
 // after insert you should not free it again, it will be auto free when posible
-int hrtbl_insert(struct hrtbl *tbl, struct hrtbl_object *self) {
+int j2stable_insert(struct j2stable *tbl, struct j2stbl_object *self) {
     struct j2sobject *e = NULL;
     if (!tbl || !self)
         return -1;
 
-    // if (hrtbl_empty(tbl))
-    //    _hrtbl_init(tbl);
+    // if (j2stable_empty(tbl))
+    //    _j2stable_init(tbl);
     // 1. target self is already on object list?
     // you should call update when it's exits!
     printf("self:%p\n", self);
@@ -156,8 +154,8 @@ int hrtbl_insert(struct hrtbl *tbl, struct hrtbl_object *self) {
         printf("2 object:%p, next:%p\n", e, e->next);
         printf("2 object __id__: %d\n", J2STBL_OBJECT_SELF(e)->__id__);
     }
-    tbl->state |= TBL_OPBIT_INSERT;
+    tbl->state |= J2STBL_OPBIT_INSERT;
     // 3 schedule task to flush data to persist...
-    _hrtbl_commit(tbl);
+    _j2stable_commit(tbl);
     return 0;
 }

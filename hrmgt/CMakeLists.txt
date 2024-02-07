@@ -7,7 +7,7 @@ FIND_LIBRARY(cjson_library NAMES cjson)
 
 INCLUDE_DIRECTORIES(j2s)
 
-SET(SOURCES hr_service.h j2s/j2sobject.c hr_tbl.c)
+SET(SOURCES hr_service.h j2s/j2sobject.c j2s/j2stable.c)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 

@@ -1,8 +1,10 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include "hr_tbl.h"
+
 #include "j2s/j2sobject.h"
+#include "j2s/j2stable.h"
+
 
 typedef struct {
     J2STBL_DECLARE_OBJECT;
@@ -44,7 +46,7 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    struct hrtbl* tbl = hrtbl_init("mac_tbl", &hrtbl_mac_tbl_prototype);
+    struct j2stable* tbl = j2stable_init("mac_tbl", &hrtbl_mac_tbl_prototype);
     if (!tbl) {
         printf("can not init mac tbl\n");
         return -1;
@@ -63,8 +65,8 @@ int main(int argc, char** argv) {
     item->id = 10;
     item->type = 1;
     snprintf(item->mac, sizeof(item->mac), "%s", "6c:0b:84:3c:71:9e");
-    hrtbl_insert(tbl, J2STBL_OBJECT_SELF(item));
+    j2stable_insert(tbl, J2STBL_OBJECT_SELF(item));
 
-    hrtbl_deinit(tbl);
+    j2stable_deinit(tbl);
     return 0;
 }
