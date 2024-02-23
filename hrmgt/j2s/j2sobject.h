@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 Inspur Group Co., Ltd. Unpublished
+ * Copyright (C) 2024 Inspur Group Co., Ltd. Unpublished
  *
  * Inspur Group Co., Ltd.
  * Proprietary & Confidential
@@ -63,17 +63,10 @@ struct j2sobject {
     struct j2sobject_prototype *proto;
     const struct j2sobject_fields_prototype *field_protos;  // point to object prototype table(arrary)
 
-    // store json object/array using inner cJSON object
-    //void *priv_data;  // preferred when deserializer
-
-    //size_t size;  // array element numbers
     // support array object
     struct j2sobject *prev, *next;
 };
 
-//typedef struct j2sobject *(*j2sobject_allocate_handler)();
-
-//struct j2sobject *j2sobject_create(enum j2stype type, size_t size);
 struct j2sobject *j2sobject_create(struct j2sobject_prototype *proto);
 struct j2sobject *j2sobject_create_array(struct j2sobject_prototype *proto);
 void j2sobject_free(struct j2sobject *self);
@@ -83,12 +76,10 @@ int j2sobject_reset(struct j2sobject *self);
 
 int j2sobject_deserialize(struct j2sobject *self, const char *jstr);
 int j2sobject_deserialize_cjson(struct j2sobject *self, struct cJSON *jobj);
-int j2sobject_deserialize_array_cjson(struct j2sobject *self, struct cJSON *jobj);
 int j2sobject_deserialize_file(struct j2sobject *self, const char *path);
 // must be freed manually
 char *j2sobject_serialize(struct j2sobject *self);
 int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target);
-int j2sobject_serialize_array_cjson(struct j2sobject *self, struct cJSON *target);
 int j2sobject_serialize_file(struct j2sobject *self, const char *path);
 
 #endif  //_J2SOBJECT_H_

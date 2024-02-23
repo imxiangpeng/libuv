@@ -10,6 +10,7 @@ INCLUDE_DIRECTORIES(j2s)
 SET(SOURCES hr_service.h j2s/j2sobject.c j2s/j2stable.c)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
+ADD_DEFINITIONS(-g )
 
 ADD_EXECUTABLE(hrmgt hrmgt.c ${SOURCES})
 TARGET_LINK_LIBRARIES(hrmgt ${libuv_library})

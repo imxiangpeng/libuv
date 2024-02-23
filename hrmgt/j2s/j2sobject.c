@@ -1,3 +1,17 @@
+/*
+ * Copyright (C) 2024 Inspur Group Co., Ltd. Unpublished
+ *
+ * Inspur Group Co., Ltd.
+ * Proprietary & Confidential
+ *
+ * This source code and the algorithms implemented therein constitute
+ * confidential information and may comprise trade secrets of Inspur
+ * or its associates, and any use thereof is subject to the terms and
+ * conditions of the Non-Disclosure Agreement pursuant to which this
+ * source code was originally received.
+ */
+
+
 // mxp, 20231229, json <> struct utils
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -140,6 +154,9 @@ struct j2sobject *j2sobject_create(struct j2sobject_prototype *proto) {
 
     self = (struct j2sobject *)calloc(1, proto->size);
 
+    // must special array & proto
+    self->type = J2S_OBJECT;
+
     proto->ctor(self);
 
     // setup object proto only when construct not do
@@ -222,6 +239,7 @@ void j2sobject_free(struct j2sobject *self) {
 
                 break;
             }
+            case J2S_ARRAY:
             case J2S_OBJECT: {
                 struct j2sobject *object = NULL;
                 // pt->offset_len 0: -> pointer
@@ -239,9 +257,6 @@ void j2sobject_free(struct j2sobject *self) {
                     if (pt->proto->dtor)
                         pt->proto->dtor(object);
                 }
-                break;
-            }
-            case J2S_ARRAY: {
                 break;
             }
             default:
@@ -264,23 +279,55 @@ int j2sobject_reset(struct j2sobject *self) {
     return 0;
 }
 
+// j2sobject array should contains child's proto, otherwise we can not create
+// child object
+// we only support [{},{}]
+// not support [1,2,3,...] or ["x","y",...]
+static int _j2sobject_deserialize_array_cjson(struct j2sobject *self, cJSON *jobj) {
+    cJSON *ele = NULL;
+    if (!self || self->type != J2S_ARRAY || !jobj || !cJSON_IsArray(jobj)) {
+        return -1;
+    }
+
+    // assert self's prev/next have been inited
+
+    cJSON_ArrayForEach(ele, jobj) {
+        struct j2sobject *child = j2sobject_create(self->proto);
+
+        if (j2sobject_deserialize_cjson(child, ele) != 0) {
+            j2sobject_free(child);
+            return -1;  // continue or fail!
+        }
+
+        // add to array list
+        self->prev->next = child;
+        child->prev = self->prev;
+        child->next = self;
+        self->prev = child;
+    }
+    return 0;
+}
+
 // not support inner loop
 int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
     if (!jobj || !self) return -1;
 
     cJSON *ele = NULL;
 
-    if (!cJSON_IsObject(jobj)) {
-        return -1;
+    if (cJSON_IsArray(jobj)) {
+        return _j2sobject_deserialize_array_cjson(self, jobj);
     }
+
+    if (!cJSON_IsObject(jobj)) return -1;
+
     cJSON_ArrayForEach(ele, jobj) {
         const struct j2sobject_fields_prototype *pt = NULL;
         if (!ele || !ele->string) continue;
 
         pt = j2sobject_field_prototype(J2SOBJECT(self), ele->string);
         if (!pt) {
-            printf("can not find key:%s\n", ele->string);
-            goto error;
+            printf("struct not support key:%s ignored!\n", ele->string);
+            continue;
         }
 
         switch (ele->type) {
@@ -327,8 +374,18 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                 j2sobject_deserialize_cjson(child, ele);
             } break;
             case cJSON_Array: {
-                // we can not do this, because we must known the real object type
-                printf("deserialize: current we do not support array ...\n");
+                // array 's proto is array subobject's proto
+                struct j2sobject *child = NULL;
+                if (pt->offset_len == 0) {
+                    struct j2sobject **ptr = (struct j2sobject **)((char *)self + pt->offset);
+                    child = j2sobject_create_array(pt->proto);
+                    *ptr = child;
+                } else {
+                    child = (struct j2sobject *)((char *)self + pt->offset);
+                    // must call init to setup prototype
+                    pt->proto->ctor(child);
+                }
+                _j2sobject_deserialize_array_cjson(child, ele);
             } break;
 
             default:
@@ -338,42 +395,6 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
 
     return 0;
 error:
-    return -1;
-}
-
-// j2sobject array should contains child's proto, otherwise we can not create
-// child object
-// we only support [{},{}]
-// not support [1,2,3,...] or ["x","y",...]
-int j2sobject_deserialize_array_cjson(struct j2sobject *self, cJSON *jobj) {
-    cJSON *ele = NULL;
-    struct j2sobject *p = NULL, *n = NULL;
-    if (!self || self->type != J2S_ARRAY || !jobj || !cJSON_IsArray(jobj)) {
-        return -1;
-    }
-
-    // assert self's prev/next have been inited
-
-    cJSON_ArrayForEach(ele, jobj) {
-        struct j2sobject *child = j2sobject_create(self->proto);
-        // add to array list
-        self->prev->next = child;
-        child->prev = self->prev;
-        child->next = self;
-        self->prev = child;
-        if (j2sobject_deserialize_cjson(child, ele) != 0) {
-            goto failed;
-        }
-    }
-    return 0;
-
-failed:
-    // loop all elements free all element
-    for (p = self->next, n = p->next; p != self; p = n, n = p->next) {
-        j2sobject_free(p);
-        p->prev->next = p->next;
-        p->next->prev = p->prev;
-    }
     return -1;
 }
 
@@ -388,11 +409,8 @@ int j2sobject_deserialize(struct j2sobject *self, const char *jstr) {
         return -1;
     }
 
-    if (cJSON_IsArray(obj)) {
-        ret = j2sobject_deserialize_array_cjson(self, obj);
-    } else {
-        ret = j2sobject_deserialize_cjson(self, obj);
-    }
+    ret = j2sobject_deserialize_cjson(self, obj);
+
     cJSON_Delete(obj);
 
     return ret;
@@ -419,26 +437,45 @@ int j2sobject_deserialize_file(struct j2sobject *self, const char *path) {
         free(data);
         return -1;
     }
-    if (cJSON_IsArray(root)) {
-        ret = j2sobject_deserialize_array_cjson(self, root);
-    } else {
-        ret = j2sobject_deserialize_cjson(self, root);
-    }
+
+    ret = j2sobject_deserialize_cjson(self, root);
+
     cJSON_Delete(root);
 
     free(data);
     return ret;
 }
+
+static int _j2sobject_serialize_array_cjson(struct j2sobject *self, struct cJSON *target) {
+    struct j2sobject *e = NULL;
+    if (!self || self->type != J2S_ARRAY || !target || !cJSON_IsArray(target)) return -1;
+
+    // loop all elements free all element
+    for (e = self->next; e != self; e = e->next) {
+        cJSON *object = cJSON_CreateObject();
+        j2sobject_serialize_cjson(e, object);
+        cJSON_AddItemToArray(target, object);
+    }
+
+    return 0;
+}
+
 // only support basic data type
 int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
     cJSON *root = target;
+    const struct j2sobject_fields_prototype *pt = NULL;
 
-    if (!self || !self->field_protos || !root) {
+    if (!self || !root) {
         return -1;
     }
 
-    const struct j2sobject_fields_prototype *pt = NULL;
+    if (self->type == J2S_ARRAY) {
+        return _j2sobject_serialize_array_cjson(self, target);
+    }
+
     pt = self->field_protos;
+
+    if (!pt || self->type != J2S_OBJECT) return -1;
 
     for (; pt->name != NULL; pt++) {
         switch (pt->type) {
@@ -488,6 +525,22 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
                 break;
             }
             case J2S_ARRAY: {
+                struct j2sobject *object = NULL;
+                cJSON *array = cJSON_CreateArray();
+                cJSON_AddItemToObject(root, pt->name, array);
+                if (pt->offset_len == 0) {
+                    object = *(struct j2sobject **)((char *)self + pt->offset);
+                } else {
+                    object = (struct j2sobject *)((char *)self + pt->offset);
+                }
+                // must manual init object's fields
+                // when it's sub struct, the header maybe invalid
+                if (!object->name) {
+                    pt->proto->ctor(object);
+                }
+
+                _j2sobject_serialize_array_cjson(object, array);
+
                 break;
             }
             default:
@@ -498,21 +551,6 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
 
     return 0;
 }
-
-int j2sobject_serialize_array_cjson(struct j2sobject *self, struct cJSON *target) {
-    struct j2sobject *e = NULL;
-    if (!self || self->type != J2S_ARRAY || !target || !cJSON_IsArray(target)) return -1;
-
-    // loop all elements free all element
-    for (e = self->next; e != self; e = e->next) {
-        cJSON *object = cJSON_CreateObject();
-        j2sobject_serialize_cjson(e, object);
-        cJSON_AddItemToArray(target, object);
-    }
-
-    return 0;
-}
-
 // please free the memory
 char *j2sobject_serialize(struct j2sobject *self) {
     char *data = NULL;
@@ -522,18 +560,17 @@ char *j2sobject_serialize(struct j2sobject *self) {
         return NULL;
     }
 
+    if (self->type != J2S_OBJECT && self->type != J2S_ARRAY) return NULL;
+
     if (self->type == J2S_ARRAY) {
         root = cJSON_CreateArray();
-        j2sobject_serialize_array_cjson(self, root);
     } else if (self->type == J2S_OBJECT) {
-        if (!self->field_protos) return NULL;
         root = cJSON_CreateObject();
-        j2sobject_serialize_cjson(self, root);
-    } else {
-        return NULL;
     }
+
     // should be freed manual ...
     if (root) {
+        j2sobject_serialize_cjson(self, root);
         data = cJSON_Print(root);
         cJSON_Delete(root);
     }
@@ -566,6 +603,7 @@ int j2sobject_serialize_file(struct j2sobject *self, const char *path) {
 
     data = j2sobject_serialize(self);
     if (!data) {
+        unlink(tmp);
         free(tmp);
         close(fd);
         return -1;

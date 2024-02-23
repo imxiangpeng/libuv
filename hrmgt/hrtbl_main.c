@@ -45,6 +45,8 @@ int main(int argc, char** argv) {
     (void)argv;
     hrtbl_mactbl_t* del = NULL;
 
+    struct j2stbl_object* data = NULL;
+
     struct j2stable* tbl = j2stable_init("mac_tbl", &hrtbl_mac_tbl_prototype);
     if (!tbl) {
         printf("can not init mac tbl\n");
@@ -52,14 +54,18 @@ int main(int argc, char** argv) {
     }
     hrtbl_mactbl_t* t = NULL;
 
-    for (t = (hrtbl_mactbl_t*)J2SOBJECT(&tbl->object)->next; t != (hrtbl_mactbl_t*)J2SOBJECT(&tbl->object); t = (hrtbl_mactbl_t*)J2SOBJECT(t)->next) {
-        printf("mac tbl:%p\n", t);
-        printf("mac tbl __id__:%d\n", J2STBL_OBJECT_SELF(t)->__id__);
-        printf("mac tbl id:%d\n", t->id);
-        printf("mac tbl mac:%s\n", t->mac);
-        printf("mac tbl type:%d\n", t->type);
-        if (t->id == 3) {
-            del = t;
+    data = j2stable_query_all(tbl);
+
+    if (data != NULL) {
+        for (t = (hrtbl_mactbl_t*)J2SOBJECT(data)->next; t != (hrtbl_mactbl_t*)J2SOBJECT(data); t = (hrtbl_mactbl_t*)J2SOBJECT(t)->next) {
+            printf("mac tbl:%p\n", t);
+            printf("mac tbl __id__:%d\n", J2STBL_OBJECT_SELF(t)->__id__);
+            printf("mac tbl id:%d\n", t->id);
+            printf("mac tbl mac:%s\n", t->mac);
+            printf("mac tbl type:%d\n", t->type);
+            if (t->id == 3) {
+                del = t;
+            }
         }
     }
 
@@ -69,7 +75,7 @@ int main(int argc, char** argv) {
     snprintf(item->mac, sizeof(item->mac), "%s", "6c:0b:84:3c:71:9e");
     j2stable_insert(tbl, J2STBL_OBJECT_SELF(item));
     // insert again , trigger error ...
-    j2stable_insert(tbl, J2STBL_OBJECT_SELF(item));
+    // j2stable_insert(tbl, J2STBL_OBJECT_SELF(item));
 
     if (del) {
         printf("press any key delete:%p, which __id__:%d\n", del, J2STBL_OBJECT_SELF(del)->__id__);
