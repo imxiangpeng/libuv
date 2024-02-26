@@ -12,6 +12,10 @@
 #include <unistd.h>
 
 
+#ifndef MD5_DIGEST_LENGTH
+#define MD5_DIGEST_LENGTH 16
+#endif
+
 #define UPGRADE_VERSION_PROP BAD_CAST "LastVersion"
 #define UPGRADE_FILE_TAG BAD_CAST "UpgradeFile"
 #define DOWNLAOD_TYPE_TAG BAD_CAST "DownloadType"
@@ -292,11 +296,6 @@ static int _update_detect(struct hrupdate_desc *desc) {
 
     return _detect_response_parse(desc, &detect_data);
 }
-
-#ifndef MD5_DIGEST_LENGTH
-#define MD5_DIGEST_LENGTH 16
-#endif
-
 static int _update_download(struct hrupdate *update) {
     CURL *curl = NULL;
     char md5sum[MD5_DIGEST_LENGTH * 2 + 1] = {0};
@@ -362,39 +361,75 @@ static int _update_download(struct hrupdate *update) {
         OPENSSL_free(md5_digest);
     }
 
-    printf("md5:%s ...........\n", md5sum);
+    // printf("md5:%s ...........\n", md5sum);
 
-    if (strncasecmp(md5sum, update->desc.md5, strlen(update->desc.md5)) != 0) {
-        printf("md5 not match!\n");
-        // delete file
-        // remove();
+    if (update->desc.md5[0] != '\0') {
+       if (strncasecmp(md5sum, update->desc.md5, strlen(update->desc.md5)) != 0) {
+           printf("md5 not match!\n");
+           // delete file
+           unlink(update->path);
+           return -1;
+       }
     } else {
-        printf("md5 match!\n");
+        printf("ignore md5 verify\n");
     }
     return 0;
 }
+
+// hrupdate -d: detect only
+// hrupdate -o /tmp/xxx.bin: using output name
 int main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    int ret = 0;
+    int ch = 0;
+    int detect_only = 0;
+    int detect_skip = 0;
+
     struct hrupdate update = {.fd = -1, .desc = {{0}, 0, {0}, {0}}};
 
     memset((void *)&update, 0, sizeof(update));
     update.fd = -1;
     snprintf(update.path, sizeof(update.path), "%s", "update.bin");
 
+    // -d: special detect detect only
+    // -o: special output file
+    // -l: using manual direct download url
+    while ((ch = getopt(argc, argv, "do:l:")) != -1) {
+        switch (ch) {
+            case 'd':
+                detect_only = 1;
+                break;
+            case 'o':
+                snprintf(update.path, sizeof(update.path), "%s", optarg);
+                break;
+            case 'l':
+                detect_skip = 1;
+                snprintf(update.desc.url, sizeof(update.desc.url), "%s", optarg);
+                break;
+            default:
+                printf("not support!\n");
+                return -1;
+        }
+    }
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    memory_buffer_alloc(&detect_data, 2048);
-    int ret = _update_detect(&update.desc);
-    memory_buffer_free(&detect_data);
-
-    if (ret < 0) return -1;
-
-    printf("desc: size:%ld, md5sum:%s, url:%s\n", update.desc.size, update.desc.md5, update.desc.url);
-
-    if (update.desc.size == 0 || update.desc.md5[0] == '\0' || update.desc.url[0] == '\0') {
-        printf("no valid update description ...\n");
-        return -1;
+    if (detect_skip != 1) {
+       memory_buffer_alloc(&detect_data, 2048);
+       ret = _update_detect(&update.desc);
+       memory_buffer_free(&detect_data);
+    
+       if (ret < 0) return -1;
+    
+       printf("desc: size:%ld, md5sum:%s, url:%s\n", update.desc.size, update.desc.md5, update.desc.url);
+    
+       if (detect_only == 1) {
+           return 0;
+       }
+    
+       if (update.desc.size == 0 || update.desc.md5[0] == '\0' || update.desc.url[0] == '\0') {
+           printf("no valid update description ...\n");
+           return -1;
+       }
     }
 
     ret = _update_download(&update);
