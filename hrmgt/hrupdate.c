@@ -1,4 +1,5 @@
 #include <curl/curl.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
@@ -9,7 +10,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <uv.h>
+
+
+#define UPGRADE_VERSION_PROP BAD_CAST "LastVersion"
+#define UPGRADE_FILE_TAG BAD_CAST "UpgradeFile"
+#define DOWNLAOD_TYPE_TAG BAD_CAST "DownloadType"
+#define UPGRADESOFTWARE_TAG BAD_CAST "UpgradeSoftware"
 
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(exp)                \
@@ -21,11 +27,6 @@
         _rc;                                   \
     })
 #endif
-
-// a simple message loop async function
-struct _state {
-    int state;
-};
 
 struct hrupdate_desc {
     char version[24];
@@ -40,17 +41,6 @@ struct hrupdate {
     EVP_MD_CTX *mdctx;
     struct hrupdate_desc desc;
 };
-void _async_cb(uv_async_t *handle) {
-    printf("%s(%d): handle:%p\n", __FUNCTION__, __LINE__, handle);
-}
-
-static void work_cb(uv_work_t *req) {
-    printf("%s(%d): req:%p\n", __FUNCTION__, __LINE__, req);
-}
-
-static void after_work_cb(uv_work_t *req, int status) {
-    printf("%s(%d): req:%p, status:%d\n", __FUNCTION__, __LINE__, req, status);
-}
 
 struct _memory_buffer {
     char *data;
@@ -123,7 +113,6 @@ static size_t _data_receive(void *ptr, size_t size, size_t nmemb,
     memcpy((void *)(buf->data + buf->offset), ptr, total);
     buf->offset += total;
 
-    // printf("data:%s\n", buf->data);
     return total;
 }
 
@@ -195,12 +184,6 @@ static xmlNode *nextSibling(xmlNode *node, const xmlChar *tag) {
     }
     return NULL;
 }
-
-#define UPGRADE_VERSION_PROP BAD_CAST "LastVersion"
-#define UPGRADE_FILE_TAG BAD_CAST "UpgradeFile"
-#define DOWNLAOD_TYPE_TAG BAD_CAST "DownloadType"
-#define UPGRADESOFTWARE_TAG BAD_CAST "UpgradeSoftware"
-
 static int _detect_response_parse(struct hrupdate_desc *desc, struct _memory_buffer *buf) {
     xmlDocPtr doc = xmlReadMemory(buf->data, buf->offset, "", NULL, 0);
     if (!doc)
@@ -289,6 +272,8 @@ static int _update_detect(struct hrupdate_desc *desc) {
     if (!curl) return -1;
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    // curl_easy_setopt(curl, CURLOPT_CAINFO, "/data/cacert.pem");
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_SERVER_RESPONSE_TIMEOUT, 60L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _data_receive);
@@ -323,6 +308,8 @@ static int _update_download(struct hrupdate *update) {
     if (!curl) return -1;
 
     curl_easy_setopt(curl, CURLOPT_URL, update->desc.url);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    // curl_easy_setopt(curl, CURLOPT_CAINFO, "/data/cacert.pem");
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_SERVER_RESPONSE_TIMEOUT, 60L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _download_receive);
@@ -412,23 +399,5 @@ int main(int argc, char **argv) {
 
     ret = _update_download(&update);
 
-#if 0
-    uv_loop_t *main_loop = uv_default_loop();
-    uv_async_t async;
-    uv_work_t work;
-
-    // default loop has been inited
-    // uv_loop_init(main_loop);
-    //
-
-    uv_async_init(main_loop, &async, _async_cb);
-
-    uv_async_send(&async);
-
-    uv_queue_work(main_loop, &work, work_cb, after_work_cb);
-
-
-    uv_run(main_loop, UV_RUN_DEFAULT);
-#endif
     return 0;
 }
