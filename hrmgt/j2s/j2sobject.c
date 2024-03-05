@@ -11,7 +11,6 @@
  * source code was originally received.
  */
 
-
 // mxp, 20231229, json <> struct utils
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -374,6 +373,31 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                 j2sobject_deserialize_cjson(child, ele);
             } break;
             case cJSON_Array: {
+                // detect whether it's basic array
+                cJSON *item = cJSON_GetArrayItem(ele, 0);
+
+                if (cJSON_IsNumber(item) || cJSON_IsString(item)) {
+                    unsigned int i = 0;
+                    if (pt->offset_len == 0) {
+                        printf("not support current basic array ...\n");
+                        continue;
+                    }
+                    // now the fields is the int/double array point
+                    cJSON_ArrayForEach(item, ele) {
+                        if (pt->type == J2S_INT) {
+                            int *ptr = (int *)((char *)self + pt->offset);
+                            ptr[i] = (int)cJSON_GetNumberValue(item);
+                        } else if (pt->type == J2S_DOUBLE) {
+                            double *ptr = (double *)((char *)self + pt->offset);
+                            ptr[i] = cJSON_GetNumberValue(item);
+                        }
+                        i++;
+                        // skip when not enough
+                        if (i == pt->offset_len) break;
+                    }
+                    continue;
+                }
+                // now it's no basic array
                 // array 's proto is array subobject's proto
                 struct j2sobject *child = NULL;
                 if (pt->offset_len == 0) {
@@ -480,13 +504,25 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
     for (; pt->name != NULL; pt++) {
         switch (pt->type) {
             case J2S_INT: {
-                int num = *(int *)((char *)self + pt->offset);
-                cJSON_AddNumberToObject(root, pt->name, num);
+                if (pt->offset_len > 0) {
+                    int *ptr = (int *)((char *)self + pt->offset);
+                    cJSON *array = cJSON_CreateIntArray(ptr, pt->offset_len);
+                    cJSON_AddItemToObject(root, pt->name, array);
+                } else {
+                    int num = *(int *)((char *)self + pt->offset);
+                    cJSON_AddNumberToObject(root, pt->name, num);
+                }
                 break;
             }
             case J2S_DOUBLE: {
-                double num = *(double *)((char *)self + pt->offset);
-                cJSON_AddNumberToObject(root, pt->name, num);
+                if (pt->offset_len > 0) {
+                    double *ptr = (double *)((char *)self + pt->offset);
+                    cJSON *array = cJSON_CreateDoubleArray(ptr, pt->offset_len);
+                    cJSON_AddItemToObject(root, pt->name, array);
+                } else {
+                    double num = *(double *)((char *)self + pt->offset);
+                    cJSON_AddNumberToObject(root, pt->name, num);
+                }
                 break;
             }
             case J2S_STRING: {

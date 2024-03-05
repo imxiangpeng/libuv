@@ -174,8 +174,25 @@ struct j2stable *j2stable_init(const char *name,
     return tbl;
 }
 
+struct j2stable *j2stable_init_trigger(const char *table, struct j2sobject_prototype *proto, struct j2stbl_trigger *trigger) {
+    struct j2stable *tbl = j2stable_init(table, proto);
+    if (!tbl) {
+        return NULL;
+    }
+    tbl->trigger = trigger;
+
+    if (tbl->trigger && tbl->trigger->on_load) {
+        tbl->trigger->on_load((struct j2stbl_object *)tbl->priv);
+    }
+
+    return tbl;
+}
 void j2stable_deinit(struct j2stable *tbl) {
     if (!tbl) return;
+
+    if (tbl->trigger && tbl->trigger->on_unload) {
+        tbl->trigger->on_unload((struct j2stbl_object *)tbl->priv);
+    }
 
     j2sobject_free(tbl->priv);
     tbl->priv = NULL;
@@ -245,6 +262,10 @@ int j2stable_update(struct j2stable *tbl, struct j2stbl_object *self) {
 
     tbl->state |= J2STBL_OPBIT_UPDATE;
     _j2stable_commit(tbl);
+    if (tbl->trigger && tbl->trigger->on_update) {
+        tbl->trigger->on_update(self);
+    }
+
     return 0;
 }
 
@@ -256,6 +277,9 @@ int j2stable_delete(struct j2stable *tbl, struct j2stbl_object *self) {
         return -1;
     }
 
+    if (tbl->trigger && tbl->trigger->on_delete) {
+        tbl->trigger->on_delete(self);
+    }
     // tick off from link
     J2SOBJECT(self)->prev->next = J2SOBJECT(self)->next;
     J2SOBJECT(self)->next->prev = J2SOBJECT(self)->prev;
@@ -310,5 +334,9 @@ int j2stable_insert(struct j2stable *tbl, struct j2stbl_object *self) {
 
     // 3 schedule task to flush data to persist...
     _j2stable_commit(tbl);
+
+    if (tbl->trigger && tbl->trigger->on_insert) {
+        tbl->trigger->on_insert(self);
+    }
     return 0;
 }

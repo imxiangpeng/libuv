@@ -488,6 +488,7 @@ int main(int argc, char **argv) {
                 break;
             case 'r':
                 reboot = 1;
+                (void)reboot;
                 break;
             default:
                 printf("not support!\n");

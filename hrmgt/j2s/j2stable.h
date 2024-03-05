@@ -41,9 +41,19 @@ struct j2stable {
   int state;
 
   struct j2sobject* priv;
+  struct j2stbl_trigger *trigger;
+};
+
+struct j2stbl_trigger {
+  void (*on_load)(struct j2stbl_object *head);
+  void (*on_unload)(struct j2stbl_object *head);
+  void (*on_insert)(struct j2stbl_object *item);
+  void (*on_update)(struct j2stbl_object *item);
+  void (*on_delete)(struct j2stbl_object *item);
 };
 
 struct j2stable *j2stable_init(const char *table, struct j2sobject_prototype *proto);
+struct j2stable *j2stable_init_trigger(const char *table, struct j2sobject_prototype *proto, struct j2stbl_trigger* trigger);
 void j2stable_deinit(struct j2stable *tbl);
 
 int j2stable_version(struct j2stable *tbl);

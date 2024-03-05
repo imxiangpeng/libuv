@@ -31,5 +31,24 @@ target_link_libraries(hrupdate -lssl -lcrypto)
 TARGET_COMPILE_OPTIONS(hrupdate PRIVATE -Wall -Wextra -Werror -Wno-error=unused-function)
 
 
+ADD_EXECUTABLE(hrweekalarm hrweekalarm.c ${SOURCES})
+TARGET_LINK_LIBRARIES(hrweekalarm ${cjson_library})
+
+ADD_EXECUTABLE(hrtbl_action hrtable_action.c ${SOURCES})
+TARGET_LINK_LIBRARIES(hrtbl_action ${libuv_library})
+TARGET_LINK_LIBRARIES(hrtbl_action ${cjson_library})
+
+ADD_EXECUTABLE(hrtbl_schedule hrtbl_schedule.c)
+#TARGET_LINK_LIBRARIES(hrtbl_schedule ${libuv_library})
+#TARGET_LINK_LIBRARIES(hrtbl_schedule ${cjson_library})
+ADD_LIBRARY(hrtbl_schedule_module_crontask SHARED hrtbl_schedule_crontask.c ${SOURCES})
+TARGET_LINK_LIBRARIES(hrtbl_schedule_module_crontask ${cjson_library})
+
+
+
+
+
+
+
 TARGET_COMPILE_OPTIONS(hrtbl_test PRIVATE -Wall -Wextra -Werror -Wno-error=unused-function)
 TARGET_LINK_LIBRARIES(hrtbl_test ${cjson_library})
