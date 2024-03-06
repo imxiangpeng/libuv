@@ -1,0 +1,8 @@
+{
+	"intarr":	[6, 16],
+	"name":	"hrupdate",
+	"class":	"default",
+	"disabled":	1,
+	"oneshot":	1,
+	"argv":	["hrupdate", "-o", "/var/update.bin", "-r"]
+}

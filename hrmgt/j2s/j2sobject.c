@@ -12,11 +12,15 @@
  */
 
 // mxp, 20231229, json <> struct utils
+// mxp, 20240228, support basic int/double array according offset_len
+//                break when meet INT_MAX/NAN
+// mxp, 20240306, support basic string array using type J2S_STRING | J2S_ARRAY, offset_len is the array size
+//                do not output null elements
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#include <limits.h>
+#include <math.h>
 #endif
-#include "j2sobject.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
@@ -28,6 +32,8 @@
 #include <unistd.h>
 
 #include "cjson/cJSON.h"
+#include "j2sobject.h"
+
 
 #define TMPFILE_TEMPLATE ".tmp_XXXXXX"
 
@@ -139,6 +145,7 @@ j2sobject_field_prototype(struct j2sobject *self, const char *field) {
 
 struct j2sobject *j2sobject_create(struct j2sobject_prototype *proto) {
     struct j2sobject *self = NULL;
+    const struct j2sobject_fields_prototype *pt = NULL;
     if (!proto)
         return NULL;
     if (proto->type != J2S_OBJECT) {
@@ -164,6 +171,37 @@ struct j2sobject *j2sobject_create(struct j2sobject_prototype *proto) {
 
     // init list
     self->next = self->prev = self;
+
+    // init number array element, so we can break when meeting those element
+    // int -> INT_MAX
+    // double -> NAN
+    pt = self->field_protos;
+
+    for (; pt->name != NULL; pt++) {
+        switch (pt->type) {
+            case J2S_INT:
+            case J2S_INT | J2S_ARRAY: {
+                int *ptr = (int *)((char *)self + pt->offset);
+                for (unsigned i = 0; i < pt->offset_len; i++) {
+                    ptr[i] = INT_MAX;
+                }
+
+                break;
+            }
+            case J2S_DOUBLE:
+            case J2S_DOUBLE | J2S_ARRAY: {
+                double *ptr = (double *)((char *)self + pt->offset);
+                for (unsigned i = 0; i < pt->offset_len; i++) {
+                    ptr[i] = NAN;
+                }
+
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
     return self;
 }
 
@@ -236,6 +274,16 @@ void j2sobject_free(struct j2sobject *self) {
                     }
                 }
 
+                break;
+            }
+            case J2S_STRING | J2S_ARRAY: {
+                char **str = (char **)((char *)self + pt->offset);
+                for (unsigned i = 0; i < pt->offset_len; i++) {
+                    if (str[i] != NULL) {
+                        free(str[i]);
+                        str[i] = 0;
+                    }
+                }
                 break;
             }
             case J2S_ARRAY:
@@ -376,7 +424,7 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                 // detect whether it's basic array
                 cJSON *item = cJSON_GetArrayItem(ele, 0);
 
-                if (cJSON_IsNumber(item) || cJSON_IsString(item)) {
+                if (cJSON_IsNumber(item)) {
                     unsigned int i = 0;
                     if (pt->offset_len == 0) {
                         printf("not support current basic array ...\n");
@@ -384,10 +432,10 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                     }
                     // now the fields is the int/double array point
                     cJSON_ArrayForEach(item, ele) {
-                        if (pt->type == J2S_INT) {
+                        if (pt->type == J2S_INT || pt->type == (J2S_INT | J2S_ARRAY)) {
                             int *ptr = (int *)((char *)self + pt->offset);
                             ptr[i] = (int)cJSON_GetNumberValue(item);
-                        } else if (pt->type == J2S_DOUBLE) {
+                        } else if (pt->type == J2S_DOUBLE || pt->type == (J2S_DOUBLE | J2S_ARRAY)) {
                             double *ptr = (double *)((char *)self + pt->offset);
                             ptr[i] = cJSON_GetNumberValue(item);
                         }
@@ -397,6 +445,33 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                     }
                     continue;
                 }
+                if (cJSON_IsString(item)) {
+                    unsigned int i = 0;
+                    if (pt->type != (J2S_ARRAY | J2S_STRING)) {
+                        continue;
+                    }
+
+                    if (pt->offset_len == 0) {
+                        printf("not support current basic array ...\n");
+                        continue;
+                    }
+
+                    // now the fields is the string array
+                    cJSON_ArrayForEach(item, ele) {
+                        char **ptr = (char **)((char *)self + pt->offset);
+                        *(ptr + i) = strdup(cJSON_GetStringValue(item));
+                        i++;
+                        // skip when not enough
+                        if (i == pt->offset_len) break;
+                    }
+                    continue;
+                }
+
+                // following only support object array
+                if (!cJSON_IsObject(item)) {
+                    continue;
+                }
+
                 // now it's no basic array
                 // array 's proto is array subobject's proto
                 struct j2sobject *child = NULL;
@@ -506,7 +581,11 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
             case J2S_INT: {
                 if (pt->offset_len > 0) {
                     int *ptr = (int *)((char *)self + pt->offset);
-                    cJSON *array = cJSON_CreateIntArray(ptr, pt->offset_len);
+                    cJSON *array = cJSON_CreateArray();
+                    for (unsigned i = 0; i < pt->offset_len; i++) {
+                        if (ptr[i] == INT_MAX) break;
+                        cJSON_AddItemToArray(array, cJSON_CreateNumber((double)ptr[i]));
+                    }
                     cJSON_AddItemToObject(root, pt->name, array);
                 } else {
                     int num = *(int *)((char *)self + pt->offset);
@@ -514,15 +593,46 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
                 }
                 break;
             }
+            case J2S_INT | J2S_ARRAY: {
+                // not support array
+                if (pt->offset_len == 0) continue;
+
+                int *ptr = (int *)((char *)self + pt->offset);
+                cJSON *array = cJSON_CreateArray();
+                for (unsigned i = 0; i < pt->offset_len; i++) {
+                    if (ptr[i] == INT_MAX) break;
+                    cJSON_AddItemToArray(array, cJSON_CreateNumber((double)ptr[i]));
+                }
+                cJSON_AddItemToObject(root, pt->name, array);
+
+                break;
+            }
             case J2S_DOUBLE: {
                 if (pt->offset_len > 0) {
                     double *ptr = (double *)((char *)self + pt->offset);
-                    cJSON *array = cJSON_CreateDoubleArray(ptr, pt->offset_len);
+                    cJSON *array = cJSON_CreateArray();
+                    for (unsigned i = 0; i < pt->offset_len; i++) {
+                        if (ptr[i] == NAN) break;
+                        cJSON_AddItemToArray(array, cJSON_CreateNumber((double)ptr[i]));
+                    }
                     cJSON_AddItemToObject(root, pt->name, array);
                 } else {
                     double num = *(double *)((char *)self + pt->offset);
                     cJSON_AddNumberToObject(root, pt->name, num);
                 }
+                break;
+            }
+            case J2S_DOUBLE | J2S_ARRAY: {
+                // not support array
+                if (pt->offset_len == 0) continue;
+                double *ptr = (double *)((char *)self + pt->offset);
+
+                cJSON *array = cJSON_CreateArray();
+                for (unsigned i = 0; i < pt->offset_len; i++) {
+                    if (ptr[i] == NAN) break;
+                    cJSON_AddItemToArray(array, cJSON_CreateNumber((double)ptr[i]));
+                }
+                cJSON_AddItemToObject(root, pt->name, array);
                 break;
             }
             case J2S_STRING: {
@@ -577,6 +687,15 @@ int j2sobject_serialize_cjson(struct j2sobject *self, struct cJSON *target) {
 
                 _j2sobject_serialize_array_cjson(object, array);
 
+                break;
+            }
+            case J2S_ARRAY | J2S_STRING: {
+                const char *const *strs = (const char *const *)((char *)self + pt->offset);
+                cJSON *array = cJSON_CreateArray();
+                for (unsigned int i = 0; i < pt->offset_len && strs[i] != NULL; i++) {
+                    cJSON_AddItemToArray(array, cJSON_CreateString(strs[i]));
+                }
+                cJSON_AddItemToObject(root, pt->name, array);
                 break;
             }
             default:

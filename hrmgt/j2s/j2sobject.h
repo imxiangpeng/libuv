@@ -25,11 +25,11 @@ struct j2sobject;
 
 enum j2stype {
     J2S_UNKNOWN = 0,
-    J2S_INT,
-    J2S_DOUBLE,
-    J2S_STRING,
-    J2S_OBJECT,
-    J2S_ARRAY,
+    J2S_INT = 1 << 1,
+    J2S_DOUBLE = 1 << 2,
+    J2S_STRING = 1 << 3,
+    J2S_OBJECT = 1 << 4,
+    J2S_ARRAY = 1 << 5,
 };
 
 struct j2sobject_prototype {
