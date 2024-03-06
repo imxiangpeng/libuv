@@ -46,6 +46,8 @@ TARGET_LINK_LIBRARIES(hrtbl_schedule_module_crontask ${cjson_library})
 
 
 
+ADD_EXECUTABLE(hrinit hrinit.c ${SOURCES})
+TARGET_LINK_LIBRARIES(hrinit ${cjson_library})
 
 
 

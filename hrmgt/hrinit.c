@@ -70,6 +70,7 @@ typedef struct j2sobject_service {
     // action list
     // int nargs;
     char *argv[MAX_ARGS];  // max args
+    int flag; // append other not stored fields
 } j2sobject_service_t;
 
 static int j2sobject_service_ctor(struct j2sobject *obj);
@@ -87,6 +88,7 @@ static struct j2sobject_fields_prototype _j2sobject_service_fields_prototype[] =
     {.name = "disabled", .type = J2S_INT, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(disabled), .offset_len = 0},
     {.name = "oneshot", .type = J2S_INT, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(oneshot), .offset_len = 0},
     {.name = "argv", .type = J2S_ARRAY | J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(argv), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(argv) /*string buffer will dynamic allocated when needed*/},
+    // flag not stored
     {0}};
 
 static int j2sobject_service_ctor(struct j2sobject *obj) {
