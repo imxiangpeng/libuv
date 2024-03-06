@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -30,6 +31,8 @@
 
 #define J2STBL_TRIGGER_DIR "./lib_hrtbls"
 
+#define DEFAULT_INIT_SERVICE_DIR "init.d"
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -45,37 +48,21 @@
     })
 #endif
 
-struct hrtbl_schedule {
-    struct hrtbl_schedule_module module;
-    void *dlhandle;  // dlopen handle
-    struct hr_list_head list;
-};
-
-struct hrtbl_schedule_priv {
-    int epoll_fd;
-    int running;
-    struct hr_list_head schedules;
-};
-
-static struct hrtbl_schedule_priv _priv = {
-    .epoll_fd = -1,
-    .running = 0,
-    .schedules = {&_priv.schedules, &_priv.schedules}};
+static struct j2sobject *_service_list = NULL;
 
 // 获取元素 ele 在结构体中偏移量
-#define _J2SOBJECT_CRONTASK_DATA_OFFSET(ele) \
+#define _J2SOBJECT_SERVICE_DATA_OFFSET(ele) \
     offsetof(struct j2sobject_service, ele)
 
 // 获取结构体中 ele 元素大小
-#define _J2SOBJECT_CRONTASK_DATA_LEN(ele) \
+#define _J2SOBJECT_SERVICE_DATA_LEN(ele) \
     sizeof(((struct j2sobject_service *)0)->ele)
 
-#define _J2SOBJECT_CRONTASK_DATA_ARRAY_LEN(ele) \
+#define _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(ele) \
     sizeof(((struct j2sobject_service *)0)->ele) / sizeof(((struct j2sobject_service *)0)->ele[0])
 
 typedef struct j2sobject_service {
     J2SOBJECT_DECLARE_OBJECT;
-    int intarr[30];
     char name[24];   // service name
     char class[24];  // service class boot at which stage
     int disabled;    // auto startup
@@ -95,12 +82,11 @@ static struct j2sobject_prototype _j2sobject_service_prototype = {
     .dtor = NULL};
 
 static struct j2sobject_fields_prototype _j2sobject_service_fields_prototype[] = {
-    {.name = "intarr", .type = J2S_INT | J2S_ARRAY, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(intarr), .offset_len = _J2SOBJECT_CRONTASK_DATA_ARRAY_LEN(intarr)},
-    {.name = "name", .type = J2S_STRING, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(name), .offset_len = _J2SOBJECT_CRONTASK_DATA_ARRAY_LEN(name)},
-    {.name = "class", .type = J2S_STRING, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(class), .offset_len = _J2SOBJECT_CRONTASK_DATA_ARRAY_LEN(class)},
-    {.name = "disabled", .type = J2S_INT, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(disabled), .offset_len = 0},
-    {.name = "oneshot", .type = J2S_INT, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(oneshot), .offset_len = 0},
-    {.name = "argv", .type = J2S_ARRAY | J2S_STRING, .offset = _J2SOBJECT_CRONTASK_DATA_OFFSET(argv), .offset_len = _J2SOBJECT_CRONTASK_DATA_ARRAY_LEN(argv) /*string buffer will dynamic allocated when needed*/},
+    {.name = "name", .type = J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(name), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(name)},
+    {.name = "class", .type = J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(class), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(class)},
+    {.name = "disabled", .type = J2S_INT, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(disabled), .offset_len = 0},
+    {.name = "oneshot", .type = J2S_INT, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(oneshot), .offset_len = 0},
+    {.name = "argv", .type = J2S_ARRAY | J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(argv), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(argv) /*string buffer will dynamic allocated when needed*/},
     {0}};
 
 static int j2sobject_service_ctor(struct j2sobject *obj) {
@@ -111,69 +97,79 @@ static int j2sobject_service_ctor(struct j2sobject *obj) {
     return 0;
 }
 
+static int _load_service(const char *path) {
+    DIR *dir = NULL;
+    struct dirent *entry = NULL;
+    struct stat st;
+
+    if (!path) return -1;
+
+    if (stat(path, &st) || !S_ISDIR(st.st_mode)) {
+        HR_LOGE("it's not a good directory ...\n");
+        return -1;
+    }
+
+    dir = opendir(path);
+    if (!dir) {
+        HR_LOGE("can not open directory ...\n");
+        return -1;
+    }
+
+    while ((entry = readdir(dir))) {
+        void *handle = NULL;
+        char plugin_so[512] = {0};
+        size_t len = 0;
+
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+
+        len = strlen(entry->d_name);
+
+        snprintf(plugin_so, sizeof(plugin_so), "%s/%s", path, entry->d_name);
+
+        printf("now path:%s\n", plugin_so);
+
+        struct j2sobject_service *self = (struct j2sobject_service *)j2sobject_create(&_j2sobject_service_prototype);
+
+        int ret = j2sobject_deserialize_file(J2SOBJECT(self), plugin_so);
+        if (ret != 0) {
+            j2sobject_free(J2SOBJECT(self));
+            continue;
+        }
+
+        printf("+++++++++++++++++++++++++++\n");
+        printf("name: %s\n", self->name);
+        printf("class: %s\n", self->class);
+        printf("disabled : %d\n", self->disabled);
+        printf("oneshot: %d\n", self->oneshot);
+        printf("argv:");
+        for (unsigned i = 0; i < ARRAY_SIZE(self->argv); i++) {
+            if (!self->argv[i]) break;
+            printf(" %s", self->argv[i]);
+        }
+        printf("\n");
+        printf("+++++++++++++++++++++++++++\n");
+        // insert into tail
+        J2SOBJECT(_service_list)->prev->next = J2SOBJECT(self);
+        J2SOBJECT(self)->prev = J2SOBJECT(_service_list)->prev;
+        J2SOBJECT(self)->next = J2SOBJECT(_service_list);
+        J2SOBJECT(_service_list)->prev = J2SOBJECT(self);
+    }
+
+    closedir(dir);
+    return 0;
+}
+
 int main(int argc, const char **argv) {
     (void)argc;
     (void)argv;
 
-    struct j2sobject_service *object = (struct j2sobject_service *)j2sobject_create(&_j2sobject_service_prototype);
+    _service_list = j2sobject_create_array(&_j2sobject_service_prototype);
+    assert(_service_list);
 
-    for (unsigned i = 0; i < ARRAY_SIZE(object->intarr); i++) {
-        // object->intarr[i] = 0xeFFFFFFF;
-    }
+    _load_service(DEFAULT_INIT_SERVICE_DIR);
 
-    object->intarr[0] = 6;
-    object->intarr[1] = 16;
-    printf("---> %p -> 0x%X\n", object->intarr, object->intarr[0]);
-    printf("%s(%d): address:%p\n", __FUNCTION__, __LINE__, object->argv);
-    // 将 json 文件  1.json 反序列化到对象
-    j2sobject_deserialize_file(J2SOBJECT(object), "stringarr.json");
-
-    int mm = INT_MAX;
-    printf("int max:0x%X, max:0x%X\n", mm, INT_MAX);
-    printf("---> %p -> 0x%X\n", object->intarr, object->intarr[0]);
-    printf("nan int:0x%x\n", object->intarr[0]);
-    printf("nan int:%d\n", 0x7FFFFFFF);
-    printf("nan double:%f\n", NAN);
-    printf("name:%s", object->name);
-    printf("class:%s", object->class);
-    printf("disabled:%d", object->disabled);
-    printf("oneshot:%d", object->oneshot);
-
-    printf("string array:\n");
-    for (int i = 0; i < ARRAY_SIZE(object->argv); i++) {
-        printf("i:%d -> %s\n", i, object->argv[i] ? object->argv[i] : "null");
-    }
-
-    {
-        char *str = j2sobject_serialize(J2SOBJECT(object));
-        printf("serialize:%s\n", str);
-        // 注意，内存必须手动释放
-        free(str);
-    }
-    j2sobject_free(J2SOBJECT(object));
-
-    object = (struct j2sobject_service *)j2sobject_create(&_j2sobject_service_prototype);
-
-    // 将对象重新序列化为可打印字符串
-    // char *str = j2sobject_serialize(J2SOBJECT(object));
-    // printf("serialize:%s\n", str);
-    // 注意，内存必须手动释放
-    // free(str);
-
-    snprintf(object->name, sizeof(object->name), "%s", "hrupdate");
-    snprintf(object->class, sizeof(object->class), "%s", "default");
-
-    object->oneshot = 1;
-    object->disabled = 1;
-    object->argv[0] = strdup("hrupdate");
-    object->argv[1] = strdup("-o");
-    object->argv[2] = strdup("/var/update.bin");
-    object->argv[3] = strdup("-r");
-
-    object->intarr[0] = 6;
-    object->intarr[1] = 16;
-    j2sobject_serialize_file(J2SOBJECT(object), "stringarr.json");
-
-    j2sobject_free(J2SOBJECT(object));
+    // all elements on the link will be freed
+    j2sobject_free(_service_list);
+    _service_list = NULL;
     return 0;
 }
