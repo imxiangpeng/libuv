@@ -28,11 +28,15 @@
     })
 #endif
 
+
 #define IPC_MESSAGE_CMD_HEAD 0x12340000
 
+#define HRINIT_MESSAGE_BASE 0x12340000
+#define HRINIT_MESSAGE_SERVICE 0x12340000
+#define HRINIT_MESSAGE_SERVICE_START (HRINIT_MESSAGE_SERVICE | 0x01)
+#define HRINIT_MESSAGE_SERVICE_STOP (HRINIT_MESSAGE_SERVICE | 0x02)
+#define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x03)
 #define IPC_MESSAGE_CMD_ACK 0x12347890
-
-#define IPC_MESSAGE_CMD_LANHOST (IPC_MESSAGE_CMD_HEAD | 0x01)
 
 static int _ipc_channel_fd = -1;
 
@@ -140,10 +144,12 @@ static int _send_string(const char *val) {
 
     return 0;
 }
-static int hrinit_control(const char *name, const char *val) {
+
+
+// hrsvc 
+static int hrinit_control(int op, const char *name) {
     int ret = -1;
     int length = 0;
-    int cmd = IPC_MESSAGE_CMD_HEAD;
     int ack = -1;
     if (_ipc_channel_fd != -1) {
         if (1 != _sock_is_connected(_ipc_channel_fd)) {  // broken ?
@@ -156,7 +162,7 @@ static int hrinit_control(const char *name, const char *val) {
         return -1;
     }
 
-    ret = TEMP_FAILURE_RETRY(send(_ipc_channel_fd, (const void *)&cmd, sizeof(cmd), 0));
+    ret = TEMP_FAILURE_RETRY(send(_ipc_channel_fd, (const void *)&op, sizeof(op), 0));
     if (ret < 0) {
         goto error;
     }
@@ -164,7 +170,7 @@ static int hrinit_control(const char *name, const char *val) {
     // send name
     _send_string(name);
     // send value
-    _send_string(val);
+    // _send_string(val);
 
     ret = _recv_fully(_ipc_channel_fd, &ack, sizeof(ack));
     if (ret != 0) {
@@ -178,9 +184,13 @@ error:
     return -1;
 }
 int main(int argc, char **argv) {
-    hrinit_control("ctrl.start", "hrupdate");
+    hrinit_control(HRINIT_MESSAGE_SERVICE_START, "hrupdate");
+    printf("press any key, quering hrupdate status\n");
     getchar();
-    hrinit_control("ctrl.stop", "hrupdate");
+    hrinit_control(HRINIT_MESSAGE_SERVICE_STATUS, "hrupdate");
+    printf("press any key, stop hrupdate\n");
+    getchar();
+    hrinit_control(HRINIT_MESSAGE_SERVICE_STOP, "hrupdate");
     getchar();
     close(_ipc_channel_fd);
     return 0;
