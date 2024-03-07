@@ -1,5 +1,3 @@
-#include <sys/wait.h>
-#include <time.h>
 #define _GNU_SOURCE
 #include <assert.h>
 #include <dirent.h>
@@ -15,27 +13,21 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
-#include "hr_list.h"
-#include "hrtbl_schedule.h"
 #include "j2sobject.h"
 
 #define MAX_ARGS 64
 
-#ifndef HR_LOGE
-#define HR_LOGE printf
+#ifndef HRSVC_CONFIG_DIR
+#define HRSVC_CONFIG_DIR "init.d"
 #endif
 
-#ifndef J2STBL_BASE_DB_PATH
-#define J2STBL_BASE_DB_PATH "./j2stbls"
+#ifndef HRSVC_UNIX_SOCK
+#define HRSVC_UNIX_SOCK "./var/svcd.sock"
 #endif
-
-#define J2STBL_TRIGGER_DIR "./lib_hrtbls"
-
-#define DEFAULT_INIT_SERVICE_DIR "init.d"
-
-#define HRINIT_PROPERTY_SOCK "./var/property_sock"
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -65,26 +57,31 @@
 #define HRSVC_ONESHOT 0x02    /* do not restart on exit */
 #define HRSVC_RUNNING 0x04    /* currently active */
 #define HRSVC_RESTARTING 0x08 /* waiting to restart */
-struct _hrinit {
+
+struct hrsvcd_priv {
     int epoll_fd;
-    int property_sock;
-    int signal_fd;
+    int svc_fd;
+    struct {
+        int write_fd;
+        int recv_fd;
+    } signal;
+    struct j2sobject *svcs;
 };
-static struct j2sobject *_service_list = NULL;
-static struct _hrinit _priv = {-1};
+// static struct j2sobject *_priv.svcs = NULL;
+static struct hrsvcd_priv _priv = {-1, -1, {-1, -1}, NULL};
 
 // 获取元素 ele 在结构体中偏移量
 #define _J2SOBJECT_SERVICE_DATA_OFFSET(ele) \
-    offsetof(struct j2sobject_service, ele)
+    offsetof(struct hrsvc, ele)
 
 // 获取结构体中 ele 元素大小
 #define _J2SOBJECT_SERVICE_DATA_LEN(ele) \
-    sizeof(((struct j2sobject_service *)0)->ele)
+    sizeof(((struct hrsvc *)0)->ele)
 
 #define _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(ele) \
-    sizeof(((struct j2sobject_service *)0)->ele) / sizeof(((struct j2sobject_service *)0)->ele[0])
+    sizeof(((struct hrsvc *)0)->ele) / sizeof(((struct hrsvc *)0)->ele[0])
 
-typedef struct j2sobject_service {
+typedef struct hrsvc {
     J2SOBJECT_DECLARE_OBJECT;
     char name[24];   // service name
     char class[24];  // service class boot at which stage
@@ -96,18 +93,18 @@ typedef struct j2sobject_service {
     int flags;             // append other not stored fields
     pid_t pid;
     time_t time_started;
-} j2sobject_service_t;
+} hrsvc_t;
 
-static int j2sobject_service_ctor(struct j2sobject *obj);
+static int hrsvc_ctor(struct j2sobject *obj);
 
-static struct j2sobject_prototype _j2sobject_service_prototype = {
+static struct j2sobject_prototype _hrsvc_prototype = {
     .name = "service",
     .type = J2S_OBJECT,
-    .size = sizeof(struct j2sobject_service),
-    .ctor = j2sobject_service_ctor,
+    .size = sizeof(struct hrsvc),
+    .ctor = hrsvc_ctor,
     .dtor = NULL};
 
-static struct j2sobject_fields_prototype _j2sobject_service_fields_prototype[] = {
+static struct j2sobject_fields_prototype _hrsvc_fields_prototype[] = {
     {.name = "name", .type = J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(name), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(name)},
     {.name = "class", .type = J2S_STRING, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(class), .offset_len = _J2SOBJECT_SERVICE_DATA_ARRAY_LEN(class)},
     {.name = "disabled", .type = J2S_INT, .offset = _J2SOBJECT_SERVICE_DATA_OFFSET(disabled), .offset_len = 0},
@@ -116,15 +113,15 @@ static struct j2sobject_fields_prototype _j2sobject_service_fields_prototype[] =
     // flag not stored
     {0}};
 
-static int j2sobject_service_ctor(struct j2sobject *obj) {
+static int hrsvc_ctor(struct j2sobject *obj) {
     if (!obj)
         return -1;
     obj->name = "service";
-    obj->field_protos = _j2sobject_service_fields_prototype;
+    obj->field_protos = _hrsvc_fields_prototype;
     return 0;
 }
 
-static int _load_service(const char *directory) {
+static int hrsvc_load_service(const char *directory) {
     DIR *dir = NULL;
     struct dirent *entry = NULL;
     struct stat st;
@@ -132,13 +129,13 @@ static int _load_service(const char *directory) {
     if (!directory) return -1;
 
     if (stat(directory, &st) || !S_ISDIR(st.st_mode)) {
-        HR_LOGE("it's not a good directory ...\n");
+        printf("it's not a good directory ...\n");
         return -1;
     }
 
     dir = opendir(directory);
     if (!dir) {
-        HR_LOGE("can not open directory ...\n");
+        printf("can not open directory ...\n");
         return -1;
     }
 
@@ -152,7 +149,7 @@ static int _load_service(const char *directory) {
 
         snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
 
-        struct j2sobject_service *svc = (struct j2sobject_service *)j2sobject_create(&_j2sobject_service_prototype);
+        struct hrsvc *svc = (struct hrsvc *)j2sobject_create(&_hrsvc_prototype);
 
         int ret = j2sobject_deserialize_file(J2SOBJECT(svc), path);
         if (ret != 0) {
@@ -182,10 +179,10 @@ static int _load_service(const char *directory) {
         printf("\n");
         printf("+++++++++++++++++++++++++++\n");
         // insert into tail
-        _service_list->prev->next = J2SOBJECT(svc);
-        J2SOBJECT(svc)->prev = _service_list->prev;
-        J2SOBJECT(svc)->next = _service_list;
-        _service_list->prev = J2SOBJECT(svc);
+        _priv.svcs->prev->next = J2SOBJECT(svc);
+        J2SOBJECT(svc)->prev = _priv.svcs->prev;
+        J2SOBJECT(svc)->next = _priv.svcs;
+        _priv.svcs->prev = J2SOBJECT(svc);
     }
 
     closedir(dir);
@@ -209,7 +206,7 @@ static time_t _gettime(void) {
     return ts.tv_sec;
 }
 
-static int _property_sock() {
+static int _hrsvcd_create_socket() {
     int ret = -1;
     int type = SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK;
     struct sockaddr_un addr;
@@ -223,12 +220,13 @@ static int _property_sock() {
     memset((void *)&addr, 0, sizeof(addr));
 
     addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", HRINIT_PROPERTY_SOCK);
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", HRSVC_UNIX_SOCK);
 
     if ((unlink(addr.sun_path) != 0) && (errno != ENOENT)) {
         printf("can not unlink old file\n");
         return -1;
     }
+
     ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret != 0) {
         unlink(addr.sun_path);
@@ -266,12 +264,11 @@ static char *_recv_string(int fd) {
     void *ptr = NULL;
     ret = _recv_fully(fd, (void *)&len, sizeof(len));
     if (ret != 0) {
-        printf("read data error ...size.\n");
+        // printf("read data error ...size.\n");
         return NULL;
     }
 
-    printf("len:%d\n", len);
-    ptr = calloc(1, len);
+    ptr = calloc(1, len + 1);  // '\0'
     if (!ptr) {
         // can not alloc memory, but we should read all data
         int i = 0;
@@ -289,14 +286,14 @@ static char *_recv_string(int fd) {
     return ptr;
 }
 
-static struct j2sobject_service *_service_find_by_name(const char *name) {
+static struct hrsvc *_hrsvcd_find_by_name(const char *name) {
     struct j2sobject *n = NULL;
-    struct j2sobject_service *svc = NULL;
+    struct hrsvc *svc = NULL;
 
     if (!name) return NULL;
 
-    for (n = _service_list->next; n != _service_list; n = n->next) {
-        svc = (struct j2sobject_service *)n;
+    for (n = _priv.svcs->next; n != _priv.svcs; n = n->next) {
+        svc = (struct hrsvc *)n;
         if (0 == strcmp(svc->name, name)) {
             return svc;
         }
@@ -304,12 +301,12 @@ static struct j2sobject_service *_service_find_by_name(const char *name) {
 
     return NULL;
 }
-static struct j2sobject_service *_service_find_by_pid(pid_t pid) {
+static struct hrsvc *_hrsvcd_find_by_pid(pid_t pid) {
     struct j2sobject *n = NULL;
-    struct j2sobject_service *svc = NULL;
+    struct hrsvc *svc = NULL;
 
-    for (n = _service_list->next; n != _service_list; n = n->next) {
-        svc = (struct j2sobject_service *)n;
+    for (n = _priv.svcs->next; n != _priv.svcs; n = n->next) {
+        svc = (struct hrsvc *)n;
         if (pid == svc->pid) {
             return svc;
         }
@@ -318,7 +315,7 @@ static struct j2sobject_service *_service_find_by_pid(pid_t pid) {
     return NULL;
 }
 
-static void _service_start(struct j2sobject_service *svc) {
+static void _hrsvcd_service_start(struct hrsvc *svc) {
     pid_t pid = -1;
 
     if (!svc) return;
@@ -332,10 +329,7 @@ static void _service_start(struct j2sobject_service *svc) {
     svc->time_started = 0;
 
     pid = fork();
-
-    printf("try to start :%s, pid:%d\n", svc->name, pid);
-    // child pid
-    if (pid == 0) {
+    if (pid == 0) {  // child pid
         // service process
         if (execve(svc->argv[0], (char **)svc->argv, (char **)NULL) < 0) {
             printf("can not start process:%s\n", svc->name);
@@ -356,7 +350,7 @@ static void _service_start(struct j2sobject_service *svc) {
     // service started
 }
 
-static void _service_stop(struct j2sobject_service *svc) {
+static void _hrsvcd_service_stop(struct hrsvc *svc) {
     if (!svc) return;
     printf("try to kill %s (%d)\n", svc->name, svc->pid);
     if (svc->pid == 0) return;
@@ -368,67 +362,66 @@ static void _service_stop(struct j2sobject_service *svc) {
     }
 }
 // hr_attribute
-static int _message_available(int fd) {
-    // int val = 0;
-    int cmd = 0;
+static int _hrsvcd_stream_available(int fd) {
+    int op = 0;
     int len = 0;
-    int reply = IPC_MESSAGE_CMD_ACK;
     char *name = NULL;
+    char *response = NULL;
+    int response_size = 0;
 
     if (fd < 0) {
         printf("_data_available: invalid fd:%d\n", fd);
         return -1;
     }
 
-    int ret = _recv_fully(fd, (void *)&cmd, sizeof(cmd));
+    int ret = _recv_fully(fd, (void *)&op, sizeof(op));
     if (ret != 0) {
-        printf("read data error ...cmd .\n");
+        // printf("read data error ...cmd .\n");
         return -1;
     }
 
-    printf("cmd:0x%X\n", cmd);
-    if ((cmd & 0xFFFF0000) != IPC_MESSAGE_CMD_HEAD) {
+    printf("op:0x%X\n", op);
+    if ((op & 0xFFFF0000) != IPC_MESSAGE_CMD_HEAD) {
         printf("invalid header ignore ...\n");
         return -1;
     }
 
-    switch (cmd) {
+    switch (op) {
         case HRINIT_MESSAGE_SERVICE_START: {
-            struct j2sobject_service *svc = NULL;
+            struct hrsvc *svc = NULL;
             name = _recv_string(fd);
             if (!name) return -1;
-            printf("name:%s\n", (char *)name);
-            svc = _service_find_by_name(name);
+            svc = _hrsvcd_find_by_name(name);
             free(name);
             name = NULL;
-            _service_start(svc);
+            _hrsvcd_service_start(svc);
             break;
         }
 
         case HRINIT_MESSAGE_SERVICE_STOP: {
-            struct j2sobject_service *svc = NULL;
+            struct hrsvc *svc = NULL;
             name = _recv_string(fd);
             if (!name) return -1;
-            printf("name:%s\n", (char *)name);
 
-            svc = _service_find_by_name(name);
+            svc = _hrsvcd_find_by_name(name);
             free(name);
             name = NULL;
 
-            _service_stop(svc);
+            _hrsvcd_service_stop(svc);
             break;
         }
         case HRINIT_MESSAGE_SERVICE_STATUS: {
-            struct j2sobject_service *svc = NULL;
+            struct hrsvc *svc = NULL;
             name = _recv_string(fd);
             if (!name) return -1;
-            printf("name:%s\n", (char *)name);
 
-            svc = _service_find_by_name(name);
+            svc = _hrsvcd_find_by_name(name);
             free(name);
             name = NULL;
 
-            printf("service %s(pid:%d) status:0x%x\n", svc->name, svc->pid, svc->flags & HRSVC_RUNNING);
+            response_size = asprintf(&response, "name:%s\npid:%d\nstatus:%d\n", svc->name, svc->pid, (svc->flags & HRSVC_RUNNING) == HRSVC_RUNNING);
+
+            // printf("service %s(pid:%d) status:0x%x\n", svc->name, svc->pid, svc->flags & HRSVC_RUNNING);
             break;
         }
         default:
@@ -437,35 +430,34 @@ static int _message_available(int fd) {
 
     if (name)
         free(name);
+
+    printf("response size:%d -> %s\n", response_size, response);
     // send ack
-    TEMP_FAILURE_RETRY(send(fd, &reply, sizeof(reply), 0));
+    TEMP_FAILURE_RETRY(send(fd, &response_size, sizeof(response_size), 0));
+    if (response) {
+        TEMP_FAILURE_RETRY(send(fd, response, response_size, 0));
+        free(response);
+    }
 
     return 0;
 }
 
-static int signal_fd = -1;
-static int signal_recv_fd = -1;
-
-static void sigchld_handler(int s) {
-    printf("child signal:%d\n", s);
-    write(signal_fd, &s, 1);
+static void _hrsvc_sigchld_handler(int s) {
+    // notify main loop that child finished
+    write(_priv.signal.write_fd, &s, 1);
 }
 
-static int wait_for_one_process(int block) {
+static int _hrsvc_wait_for_one_process(int block) {
     pid_t pid;
     int status;
-    struct socketinfo *si;
-    time_t now;
-    struct listnode *node;
-    struct command *cmd;
-    printf("%s(%d): come in .........\n", __FUNCTION__, __LINE__);
 
     while ((pid = waitpid(-1, &status, block ? 0 : WNOHANG)) == -1 && errno == EINTR)
         ;
     if (pid <= 0) return -1;
+
     printf("waitpid returned pid %d, status = %08x\n", pid, status);
 
-    struct j2sobject_service *svc = _service_find_by_pid(pid);
+    struct hrsvc *svc = _hrsvcd_find_by_pid(pid);
     if (!svc) return 0;
 
     printf("%s(%d): service %s(%d) stopped\n", __FUNCTION__, __LINE__, svc->name, svc->pid);
@@ -479,40 +471,42 @@ static int wait_for_one_process(int block) {
 
     if (!(svc->flags & HRSVC_ONESHOT)) {
         printf("we should restart ...\n");
-        _service_start(svc);
+        _hrsvcd_service_start(svc);
     }
     return 0;
 }
-void handle_signal(void) {
-    char tmp[32];
+static void _hrsvc_handle_signal(int fd) {
+    char tmp[32] = {0};
+
+    if (fd < 0) return;
 
     /* we got a SIGCHLD - reap and restart as needed */
-    read(signal_recv_fd, tmp, sizeof(tmp));
-    while (!wait_for_one_process(0))
+    read(fd, tmp, sizeof(tmp));
+    while (!_hrsvc_wait_for_one_process(0))
         ;
 }
-static int signal_init(void) {
-    int s[2];
+static void signal_init(void) {
+    int s[2] = {-1};
 
     struct sigaction act;
     memset(&act, 0, sizeof(act));
-    act.sa_handler = sigchld_handler;
+    act.sa_handler = _hrsvc_sigchld_handler;
     act.sa_flags = SA_NOCLDSTOP;
     sigaction(SIGCHLD, &act, 0);
 
     /* create a signalling mechanism for the sigchld handler */
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0) {
-        signal_fd = s[0];
-        signal_recv_fd = s[1];
+        _priv.signal.write_fd = s[0];
+        _priv.signal.recv_fd = s[1];
         fcntl(s[0], F_SETFD, FD_CLOEXEC);
         fcntl(s[0], F_SETFL, O_NONBLOCK);
         fcntl(s[1], F_SETFD, FD_CLOEXEC);
         fcntl(s[1], F_SETFL, O_NONBLOCK);
     }
 
-    handle_signal();
+    _hrsvc_handle_signal(_priv.signal.recv_fd);
 
-    return signal_recv_fd;
+    return;
 }
 // hrsvcd
 int main(int argc, const char **argv) {
@@ -525,28 +519,26 @@ int main(int argc, const char **argv) {
     if (_priv.epoll_fd < 0)
         return -1;
 
-    printf("epoll:%d\n", _priv.epoll_fd);
-    _priv.property_sock = _property_sock();
-    if (_priv.property_sock < 0) {
+    _priv.svc_fd = _hrsvcd_create_socket();
+    if (_priv.svc_fd < 0) {
         close(_priv.epoll_fd);
         return -1;
     }
-    _priv.signal_fd = signal_init();
-    printf("sock:%d\n", _priv.property_sock);
-    _service_list = j2sobject_create_array(&_j2sobject_service_prototype);
-    assert(_service_list);
+    signal_init();
+    _priv.svcs = j2sobject_create_array(&_hrsvc_prototype);
+    assert(_priv.svcs);
 
-    _load_service(DEFAULT_INIT_SERVICE_DIR);
-
-    memset((void *)&ev, 0, sizeof(ev));
-    ev.events = EPOLLIN;
-    ev.data.fd = _priv.property_sock;
-    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, _priv.property_sock, &ev);
+    hrsvc_load_service(HRSVC_CONFIG_DIR);
 
     memset((void *)&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
-    ev.data.fd = _priv.signal_fd;
-    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, _priv.signal_fd, &ev);
+    ev.data.fd = _priv.svc_fd;
+    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, _priv.svc_fd, &ev);
+
+    memset((void *)&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.fd = _priv.signal.recv_fd;
+    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, _priv.signal.recv_fd, &ev);
 
     for (;;) {
         int timeout = -1;  // 12000;
@@ -560,15 +552,13 @@ int main(int argc, const char **argv) {
 
         for (int i = 0; i < nr; i++) {
             struct epoll_event *e = evs + i;
-            printf("%d vs %d is ready!\n", e->data.fd, _priv.property_sock);
             // new connection ?
-            if (_priv.property_sock == e->data.fd) {
+            if (_priv.svc_fd == e->data.fd) {
                 int fd = accept4(e->data.fd, NULL, NULL, SOCK_CLOEXEC);
                 if (fd < 0) {
                     continue;
                 }
 
-                printf("fd:%d\n", fd);
                 memset((void *)&ev, 0, sizeof(ev));
                 ev.events = EPOLLIN;
                 ev.data.fd = fd;
@@ -576,30 +566,35 @@ int main(int argc, const char **argv) {
                     close(fd);
                     continue;
                 }
-            } else if (_priv.signal_fd == e->data.fd) {
-                printf("child event, clean child process \n");
-
-                handle_signal();
-
+            } else if (_priv.signal.recv_fd == e->data.fd) {
+                _hrsvc_handle_signal(e->data.fd);
             } else {  // service stream
-
                 // we should read stream
-                printf("please read all stream ...%d\n", e->data.fd);
-                int ret = _message_available(e->data.fd);
+                int ret = _hrsvcd_stream_available(e->data.fd);
                 if (ret < 0) {
                     // we should remove fd from epoll
-                    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_DEL, ev.data.fd, NULL);
-                    close(ev.data.fd);
+                    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_DEL, e->data.fd, NULL);
+                    close(e->data.fd);
                 }
-                sleep(2);
-                // exit(1);
             }
         }
     }
+
+    // never enter here
+
+    printf("stop ...\n");
     // all elements on the link will be freed
-    j2sobject_free(_service_list);
-    _service_list = NULL;
+    j2sobject_free(_priv.svcs);
+    _priv.svcs = NULL;
+
+    // monitored fd ignored, because it will be auto released in loop
     close(_priv.epoll_fd);
     _priv.epoll_fd = -1;
+
+    close(_priv.signal.recv_fd);
+    close(_priv.signal.write_fd);
+    _priv.signal.write_fd = -1;
+    _priv.signal.recv_fd = -1;
+
     return 0;
 }
