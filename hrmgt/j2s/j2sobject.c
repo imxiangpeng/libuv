@@ -98,7 +98,6 @@ static ssize_t _write_file_fd(int fd, char *data, size_t size) {
     while (left > 0) {
         ssize_t n = TEMP_FAILURE_RETRY(write(fd, ptr, left));
         if (n == -1) {
-            close(fd);
             return size - left;
         }
         ptr += n;

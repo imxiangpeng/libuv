@@ -29,6 +29,15 @@
 #define HRSVC_UNIX_SOCK "./var/svcd.sock"
 #endif
 
+// wakeup every seconds to monitor log file size
+#ifndef HRSVC_MONITOR_TIMEOUT
+#define HRSVC_MONITOR_TIMEOUT 1000
+#endif
+
+#ifndef HRSVC_MONITOR_OUTPUT_LIMIT_KB
+#define HRSVC_MONITOR_OUTPUT_LIMIT_KB 1024
+#endif
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -44,14 +53,11 @@
     })
 #endif
 
-#define IPC_MESSAGE_CMD_HEAD 0x12340000
-
 #define HRINIT_MESSAGE_BASE 0x12340000
 #define HRINIT_MESSAGE_SERVICE 0x12340000
 #define HRINIT_MESSAGE_SERVICE_START (HRINIT_MESSAGE_SERVICE | 0x01)
 #define HRINIT_MESSAGE_SERVICE_STOP (HRINIT_MESSAGE_SERVICE | 0x02)
 #define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x03)
-#define IPC_MESSAGE_CMD_ACK 0x12347890
 
 #define HRSVC_DISABLED 0x01   /* do not autostart with class */
 #define HRSVC_ONESHOT 0x02    /* do not restart on exit */
@@ -66,9 +72,14 @@ struct hrsvcd_priv {
         int recv_fd;
     } signal;
     struct j2sobject *svcs;
+    struct {
+        const char *dir;
+        const char *output;
+        int limit_size_kb;  // KB
+    } config;
 };
-// static struct j2sobject *_priv.svcs = NULL;
-static struct hrsvcd_priv _priv = {-1, -1, {-1, -1}, NULL};
+
+static struct hrsvcd_priv _priv = {-1, -1, {-1, -1}, NULL, {HRSVC_CONFIG_DIR, "/var/log/hrsvcd.log", HRSVC_MONITOR_OUTPUT_LIMIT_KB}};
 
 // 获取元素 ele 在结构体中偏移量
 #define _J2SOBJECT_SERVICE_DATA_OFFSET(ele) \
@@ -320,8 +331,6 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
 
     if (!svc) return;
 
-    printf("try to start :%s\n", svc->name);
-
     if (svc->flags & HRSVC_RUNNING) {
         return;
     }
@@ -330,6 +339,19 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
 
     pid = fork();
     if (pid == 0) {  // child pid
+        int fd = -1;
+        // must call setpgid, so we can kill it and all child
+        // otherwise we can not kill it and childs when kill(-svc->pid, SIGKILL)
+        setpgid(0, getpid());
+
+        fd = open("/dev/null", O_RDWR | O_CREAT);
+        fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
+        dup2(fd, 0);
+        dup2(fd, 1);
+        dup2(fd, 2);
+        if (fd > 2) {
+            close(fd);
+        }
         // service process
         if (execve(svc->argv[0], (char **)svc->argv, (char **)NULL) < 0) {
             printf("can not start process:%s\n", svc->name);
@@ -356,9 +378,21 @@ static void _hrsvcd_service_stop(struct hrsvc *svc) {
     if (svc->pid == 0) return;
     if (svc->flags & HRSVC_RUNNING) {
         printf("kill %s (%d)\n", svc->name, svc->pid);
-        kill(svc->pid, SIGKILL);
+        // child must call setpgid(0, getpid()); after created
         kill(-svc->pid, SIGKILL);
         // running will be remove in child signal handle
+    }
+}
+
+static void _hrsvcd_service_start_auto() {
+    struct j2sobject *n = NULL;
+    struct hrsvc *svc = NULL;
+
+    for (n = _priv.svcs->next; n != _priv.svcs; n = n->next) {
+        svc = (struct hrsvc *)n;
+        if ((svc->flags & HRSVC_DISABLED) != HRSVC_DISABLED) {
+            _hrsvcd_service_start(svc);
+        }
     }
 }
 // hr_attribute
@@ -370,19 +404,12 @@ static int _hrsvcd_stream_available(int fd) {
     int response_size = 0;
 
     if (fd < 0) {
-        printf("_data_available: invalid fd:%d\n", fd);
         return -1;
     }
 
     int ret = _recv_fully(fd, (void *)&op, sizeof(op));
     if (ret != 0) {
         // printf("read data error ...cmd .\n");
-        return -1;
-    }
-
-    printf("op:0x%X\n", op);
-    if ((op & 0xFFFF0000) != IPC_MESSAGE_CMD_HEAD) {
-        printf("invalid header ignore ...\n");
         return -1;
     }
 
@@ -431,7 +458,7 @@ static int _hrsvcd_stream_available(int fd) {
     if (name)
         free(name);
 
-    printf("response size:%d -> %s\n", response_size, response);
+    // printf("response size:%d -> %s\n", response_size, response);
     // send ack
     TEMP_FAILURE_RETRY(send(fd, &response_size, sizeof(response_size), 0));
     if (response) {
@@ -455,12 +482,12 @@ static int _hrsvc_wait_for_one_process(int block) {
         ;
     if (pid <= 0) return -1;
 
-    printf("waitpid returned pid %d, status = %08x\n", pid, status);
+    // printf("waitpid returned pid %d, status = %08x\n", pid, status);
 
     struct hrsvc *svc = _hrsvcd_find_by_pid(pid);
     if (!svc) return 0;
 
-    printf("%s(%d): service %s(%d) stopped\n", __FUNCTION__, __LINE__, svc->name, svc->pid);
+    printf("service %s(%d) stopped\n", svc->name, svc->pid);
 
     if (!(svc->flags & HRSVC_ONESHOT)) {
         kill(-pid, SIGKILL);
@@ -470,7 +497,7 @@ static int _hrsvc_wait_for_one_process(int block) {
     svc->flags &= (~HRSVC_RUNNING);
 
     if (!(svc->flags & HRSVC_ONESHOT)) {
-        printf("we should restart ...\n");
+        // printf("we should restart ...\n");
         _hrsvcd_service_start(svc);
     }
     return 0;
@@ -508,12 +535,26 @@ static void signal_init(void) {
 
     return;
 }
+
+// force rewind log file
+static void _output_rewind_when_possible() {
+    struct stat st;
+    if (stat(_priv.config.output, &st) != 0) {
+        return;
+    }
+
+    if (st.st_size >= _priv.config.limit_size_kb * 1024) {
+        lseek(1, 0, SEEK_SET);
+        ftruncate(1, 0);
+    }
+}
 // hrsvcd
-int main(int argc, const char **argv) {
-    (void)argc;
-    (void)argv;
+static int hrsvcd_main() {
     struct epoll_event ev;
     struct epoll_event evs[24];
+    int pipe_fd[2] = {-1};
+
+    if (!_priv.config.dir) return -1;
 
     _priv.epoll_fd = epoll_create1(O_CLOEXEC);
     if (_priv.epoll_fd < 0)
@@ -524,11 +565,12 @@ int main(int argc, const char **argv) {
         close(_priv.epoll_fd);
         return -1;
     }
+
     signal_init();
     _priv.svcs = j2sobject_create_array(&_hrsvc_prototype);
     assert(_priv.svcs);
 
-    hrsvc_load_service(HRSVC_CONFIG_DIR);
+    hrsvc_load_service(_priv.config.dir);
 
     memset((void *)&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
@@ -540,13 +582,20 @@ int main(int argc, const char **argv) {
     ev.data.fd = _priv.signal.recv_fd;
     epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, _priv.signal.recv_fd, &ev);
 
+    pipe2(pipe_fd, O_NONBLOCK);
+
+    ev.data.fd = pipe_fd[0];
+    epoll_ctl(_priv.epoll_fd, EPOLL_CTL_ADD, ev.data.fd, &ev);
+
+    write(pipe_fd[1], (const void *)"s", 1);
     for (;;) {
-        int timeout = -1;  // 12000;
+        // wakeup every seconds to monitor log file size
+        int timeout = HRSVC_MONITOR_TIMEOUT;  // 12000;
 
         int nr = TEMP_FAILURE_RETRY(epoll_wait(_priv.epoll_fd, evs, ARRAY_SIZE(evs), timeout));
         if (nr == 0 || nr == -1) {
             // timeout
-            printf("maybe timeout ...\n");
+            _output_rewind_when_possible();
             continue;
         }
 
@@ -568,6 +617,16 @@ int main(int argc, const char **argv) {
                 }
             } else if (_priv.signal.recv_fd == e->data.fd) {
                 _hrsvc_handle_signal(e->data.fd);
+            } else if (pipe_fd[0] == e->data.fd) {
+                char c = 0;
+                read(pipe_fd[0], (void *)&c, 1);
+
+                epoll_ctl(_priv.epoll_fd, EPOLL_CTL_DEL, e->data.fd, NULL);
+                close(pipe_fd[0]);
+                close(pipe_fd[1]);
+                pipe_fd[0] = -1;
+                pipe_fd[1] = -1;
+                _hrsvcd_service_start_auto();
             } else {  // service stream
                 // we should read stream
                 int ret = _hrsvcd_stream_available(e->data.fd);
@@ -597,4 +656,67 @@ int main(int argc, const char **argv) {
     _priv.signal.recv_fd = -1;
 
     return 0;
+}
+
+static void usage() {
+    printf(
+        "usage: hrsvcd [-bf -c hrsvc.d]\n"
+        "    -f         Foreground\n"
+        "    -b         Background\n"
+        "    -c         hrsvc.d directory\n"
+        "    -L FILE    Log to file, otherwise drop to /dev/null\n"
+        "\n");
+}
+
+int main(int argc, const char **argv) {
+    int fd = -1;
+    int forground = 0;
+    int c = 0;
+
+    while ((c = getopt(argc, (char *const *)argv, "bfc:L:s:")) != -1) {
+        switch (c) {
+            case 'b':
+                forground = 0;
+                break;
+            case 'f':
+                forground = 1;
+                break;
+            case 'c':
+                _priv.config.dir = optarg;
+                break;
+            case 'L':
+                _priv.config.output = optarg;
+                break;
+            case 's':
+                _priv.config.limit_size_kb = atoi(optarg);
+                break;
+            default:
+                usage();
+                exit(0);
+        }
+    }
+
+    fd = open(_priv.config.output, O_RDWR | O_CREAT);
+    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
+    dup2(fd, 0);
+    dup2(fd, 1);
+    dup2(fd, 2);
+    if (fd > 2) {
+        close(fd);
+    }
+
+    // printf("forground:%d, dir:%s\n", forground, _priv.config.dir);
+
+    if (forground == 0) {
+        if (fork() != 0) {
+            exit(0);
+        }
+
+        umask(022);
+
+        setsid();
+
+        // chdir("/");
+    }
+    return hrsvcd_main();
 }
