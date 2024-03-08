@@ -326,6 +326,14 @@ static struct hrsvc *_hrsvcd_find_by_pid(pid_t pid) {
     return NULL;
 }
 
+// 1: executable
+// 0: not executable
+static int file_is_executable(const char *path) {
+    struct stat s;
+    if (stat(path, &s) != 0 || !S_ISREG(s.st_mode)) return 0;
+    return !access(path, X_OK);
+}
+
 static void _hrsvcd_service_start(struct hrsvc *svc) {
     pid_t pid = -1;
 
@@ -352,6 +360,14 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
         if (fd > 2) {
             close(fd);
         }
+
+        if (!file_is_executable(svc->argv[0])) {
+            svc->flags |= HRSVC_DISABLED;
+            svc->flags &= ~HRSVC_ONESHOT;
+            printf("not valid service %s\n", svc->name);
+            exit(127);
+        }
+
         // service process
         if (execve(svc->argv[0], (char **)svc->argv, (char **)NULL) < 0) {
             printf("can not start process:%s\n", svc->name);
@@ -497,7 +513,6 @@ static int _hrsvc_wait_for_one_process(int block) {
     svc->flags &= (~HRSVC_RUNNING);
 
     if (!(svc->flags & HRSVC_ONESHOT)) {
-        // printf("we should restart ...\n");
         _hrsvcd_service_start(svc);
     }
     return 0;
@@ -548,6 +563,7 @@ static void _output_rewind_when_possible() {
         ftruncate(1, 0);
     }
 }
+
 // hrsvcd
 static int hrsvcd_main() {
     struct epoll_event ev;
