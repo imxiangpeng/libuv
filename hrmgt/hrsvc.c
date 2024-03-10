@@ -191,7 +191,7 @@ error:
     return -1;
 }
 int main(int argc, char **argv) {
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START, "hrupdate");
+    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START, "hrupdate:-L xxx.png");
     printf("press any key, quering hrupdate status\n");
     getchar();
     _hrsvc_operator(HRINIT_MESSAGE_SERVICE_STATUS, "hrupdate");
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     getchar();
     _hrsvc_operator(HRINIT_MESSAGE_SERVICE_STOP, "hrupdate");
     getchar();
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_STATUS, "hrupdate");
+    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START, "1");
     close(_hrsvc_socket);
     return 0;
 }

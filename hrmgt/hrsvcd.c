@@ -64,6 +64,7 @@
 #define HRSVC_RUNNING 0x04    /* currently active */
 #define HRSVC_RESTARTING 0x08 /* waiting to restart */
 
+int hr__exit = 0;
 struct hrsvcd_priv {
     int epoll_fd;
     int svc_fd;
@@ -99,9 +100,10 @@ typedef struct hrsvc {
     int disabled;    // auto startup
     int oneshot;     // auto startup
     // action list
-    // int nargs;
     char *argv[MAX_ARGS];  // max args
-    int flags;             // append other not stored fields
+    int nargs;
+    int flags;  // append other not stored fields
+    char *dynamic_args;
     pid_t pid;
     time_t time_started;
 } hrsvc_t;
@@ -177,6 +179,10 @@ static int hrsvc_load_service(const char *directory) {
             svc->flags |= HRSVC_ONESHOT;
         }
 
+        // auto calac nargs from argv
+        for (svc->nargs = 0; svc->argv[svc->nargs] != NULL; svc->nargs++)
+            ;
+
         printf("+++++++++++++++++++++++++++\n");
         printf("name: %s\n", svc->name);
         printf("class: %s\n", svc->class);
@@ -188,6 +194,7 @@ static int hrsvc_load_service(const char *directory) {
             printf(" %s", svc->argv[i]);
         }
         printf("\n");
+        printf("nargs:%d\n", svc->nargs);
         printf("+++++++++++++++++++++++++++\n");
         // insert into tail
         _priv.svcs->prev->next = J2SOBJECT(svc);
@@ -348,10 +355,13 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
     pid = fork();
     if (pid == 0) {  // child pid
         int fd = -1;
+        char *arg = NULL;
+        char *save_ptr = NULL;
         // must call setpgid, so we can kill it and all child
         // otherwise we can not kill it and childs when kill(-svc->pid, SIGKILL)
         setpgid(0, getpid());
 
+#if 0
         fd = open("/dev/null", O_RDWR | O_CREAT);
         fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
         dup2(fd, 0);
@@ -360,12 +370,22 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
         if (fd > 2) {
             close(fd);
         }
+#endif
 
         if (!file_is_executable(svc->argv[0])) {
             svc->flags |= HRSVC_DISABLED;
             svc->flags &= ~HRSVC_ONESHOT;
             printf("not valid service %s\n", svc->name);
             exit(127);
+        }
+
+        // append extra parameter, dynamic_args is allocated in parent, we do nothing, no need free
+        if (svc->dynamic_args) {
+            int i = svc->nargs;
+            for (arg = strtok_r(svc->dynamic_args, " ", &save_ptr);
+                 arg != NULL; arg = strtok_r(NULL, " ", &save_ptr)) {
+                svc->argv[i++] = arg;
+            }
         }
 
         // service process
@@ -432,12 +452,36 @@ static int _hrsvcd_stream_available(int fd) {
     switch (op) {
         case HRINIT_MESSAGE_SERVICE_START: {
             struct hrsvc *svc = NULL;
+            char *ch = NULL;
             name = _recv_string(fd);
             if (!name) return -1;
-            svc = _hrsvcd_find_by_name(name);
-            free(name);
+            printf("name:%s\n", name);
+            if (*name == '1') {
+                printf("exit ...\n");
+                hr__exit = 1;
+            }
+            // directly service name or name:argv
+            if (NULL != (ch = strchr(name, ':'))) {
+                *ch = '\0';
+                svc = _hrsvcd_find_by_name(name);
+                // malloc for dynamic args, freed after we start service
+                svc->dynamic_args = strdup(++ch);
+            } else {
+                svc = _hrsvcd_find_by_name(name);
+            }
+
+            free((void *)name);
             name = NULL;
-            _hrsvcd_service_start(svc);
+
+            if (svc) {
+                _hrsvcd_service_start(svc);
+
+                // free dynamic args if needed
+                if (svc->dynamic_args) {
+                    free(svc->dynamic_args);
+                    svc->dynamic_args = NULL;
+                }
+            }
             break;
         }
 
@@ -450,6 +494,7 @@ static int _hrsvcd_stream_available(int fd) {
             free(name);
             name = NULL;
 
+            if (!svc) break;
             _hrsvcd_service_stop(svc);
             break;
         }
@@ -461,6 +506,8 @@ static int _hrsvcd_stream_available(int fd) {
             svc = _hrsvcd_find_by_name(name);
             free(name);
             name = NULL;
+
+            if (!svc) break;
 
             response_size = asprintf(&response, "name:%s\npid:%d\nstatus:%d\n", svc->name, svc->pid, (svc->flags & HRSVC_RUNNING) == HRSVC_RUNNING);
 
@@ -653,6 +700,9 @@ static int hrsvcd_main() {
                 }
             }
         }
+
+        if (hr__exit)
+            break;
     }
 
     // never enter here
