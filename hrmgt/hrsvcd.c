@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -57,7 +58,8 @@
 #define HRINIT_MESSAGE_SERVICE 0x12340000
 #define HRINIT_MESSAGE_SERVICE_START (HRINIT_MESSAGE_SERVICE | 0x01)
 #define HRINIT_MESSAGE_SERVICE_STOP (HRINIT_MESSAGE_SERVICE | 0x02)
-#define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x03)
+#define HRINIT_MESSAGE_SERVICE_RESTART (HRINIT_MESSAGE_SERVICE | 0x03)
+#define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x04)
 
 #define HRSVC_DISABLED 0x01   /* do not autostart with class */
 #define HRSVC_ONESHOT 0x02    /* do not restart on exit */
@@ -253,16 +255,34 @@ static int _hrsvcd_create_socket() {
         return -1;
     }
 
+    // chown(addr.sun_path, uid, gid);
+    chmod(addr.sun_path, S_IRWXU | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+
     listen(fd, 8);
     return fd;
 }
+static int _poll_in(int fd, int timeout) {
+    int nr = 0;
+    struct pollfd ufds[1];
+    ufds[0].fd = fd;
+    ufds[0].events = POLLIN;
+    ufds[0].revents = 0;
 
+    nr = poll(ufds, 1, timeout);
+
+    return nr;
+}
 static int _recv_fully(int fd, void *data_ptr, size_t size) {
     size_t bytes_left = size;
     char *data = (char *)data_ptr;
 
     if (fd < 0) return -1;
     while (bytes_left > 0) {
+        // error or timeout
+        if (_poll_in(fd, 2000) <= 0) {
+            return -1;
+        }
+
         int result =
             TEMP_FAILURE_RETRY(recv(fd, data, bytes_left, MSG_DONTWAIT));
         if (result <= 0) {
@@ -357,20 +377,28 @@ static void _hrsvcd_service_start(struct hrsvc *svc) {
         int fd = -1;
         char *arg = NULL;
         char *save_ptr = NULL;
+
+        printf("_priv:%p\n", &_priv);
+        // clean parent's file description
+        close(_priv.epoll_fd);
+        _priv.epoll_fd = -1;
+        close(_priv.svc_fd);
+        _priv.svc_fd = -1;
+        close(_priv.signal.recv_fd);
+        _priv.signal.recv_fd = -1;
+        close(_priv.signal.write_fd);
+        _priv.signal.write_fd = -1;
+
         // must call setpgid, so we can kill it and all child
         // otherwise we can not kill it and childs when kill(-svc->pid, SIGKILL)
         setpgid(0, getpid());
 
-#if 0
-        fd = open("/dev/null", O_RDWR | O_CREAT);
+        fd = open("/dev/null", O_RDWR);
         fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
         dup2(fd, 0);
         dup2(fd, 1);
         dup2(fd, 2);
-        if (fd > 2) {
-            close(fd);
-        }
-#endif
+        close(fd);
 
         if (!file_is_executable(svc->argv[0])) {
             svc->flags |= HRSVC_DISABLED;
@@ -463,25 +491,30 @@ static int _hrsvcd_stream_available(int fd) {
             // directly service name or name:argv
             if (NULL != (ch = strchr(name, ':'))) {
                 *ch = '\0';
+                ++ch;
+                printf("name xxx:%s, ex args:%s\n", name, ch);
                 svc = _hrsvcd_find_by_name(name);
-                // malloc for dynamic args, freed after we start service
-                svc->dynamic_args = strdup(++ch);
+                if (svc) {
+                    // malloc for dynamic args, freed after we start service
+                    svc->dynamic_args = strdup(ch);
+                }
             } else {
                 svc = _hrsvcd_find_by_name(name);
             }
 
-            free((void *)name);
+            free(name);
             name = NULL;
 
-            if (svc) {
-                _hrsvcd_service_start(svc);
+            if (!svc) break;
 
-                // free dynamic args if needed
-                if (svc->dynamic_args) {
-                    free(svc->dynamic_args);
-                    svc->dynamic_args = NULL;
-                }
+            _hrsvcd_service_start(svc);
+
+            // free dynamic args if needed
+            if (svc->dynamic_args) {
+                free(svc->dynamic_args);
+                svc->dynamic_args = NULL;
             }
+
             break;
         }
 
@@ -731,6 +764,7 @@ static void usage() {
         "    -b         Background\n"
         "    -c         hrsvc.d directory\n"
         "    -L FILE    Log to file, otherwise drop to /dev/null\n"
+        "    -s size    Limit Log file size\n"
         "\n");
 }
 
@@ -762,14 +796,14 @@ int main(int argc, const char **argv) {
         }
     }
 
-    fd = open(_priv.config.output, O_RDWR | O_CREAT);
+    fd = open(_priv.config.output, O_RDWR | O_CREAT | O_TRUNC );
     fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
     dup2(fd, 0);
     dup2(fd, 1);
     dup2(fd, 2);
-    if (fd > 2) {
-        close(fd);
-    }
+    close(fd);
+    // using line buffer, so popen can read output realtime
+    setvbuf(stdout, NULL, _IOLBF, 0);
 
     // printf("forground:%d, dir:%s\n", forground, _priv.config.dir);
 

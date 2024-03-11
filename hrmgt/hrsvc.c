@@ -32,7 +32,23 @@
 #define HRINIT_MESSAGE_SERVICE 0x12340000
 #define HRINIT_MESSAGE_SERVICE_START (HRINIT_MESSAGE_SERVICE | 0x01)
 #define HRINIT_MESSAGE_SERVICE_STOP (HRINIT_MESSAGE_SERVICE | 0x02)
-#define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x03)
+#define HRINIT_MESSAGE_SERVICE_RESTART (HRINIT_MESSAGE_SERVICE | 0x03)
+#define HRINIT_MESSAGE_SERVICE_STATUS (HRINIT_MESSAGE_SERVICE | 0x04)
+
+enum {
+    HRSVC_OP_START = 0,
+    HRSVC_OP_STOP,
+    HRSVC_OP_RESTART,
+    HRSVC_OP_STATUS,
+    HRSVC_OP_MAX,
+};
+
+static const char *ops[HRSVC_OP_MAX] = {
+    "start",
+    "stop",
+    "restart",
+    "status",
+};
 
 static int _hrsvc_socket = -1;
 
@@ -176,7 +192,7 @@ static int _hrsvc_operator(int op, const char *name) {
         return 0;
     }
 
-    response = calloc(1, size + 1); // '\0'
+    response = calloc(1, size + 1);  // '\0'
     if (!response) return -1;
 
     ret = _recv_fully(_hrsvc_socket, response, size);
@@ -190,16 +206,38 @@ error:
     _hrsvc_socket = -1;
     return -1;
 }
+
 int main(int argc, char **argv) {
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START, "hrupdate:-L xxx.png");
-    printf("press any key, quering hrupdate status\n");
-    getchar();
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_STATUS, "hrupdate");
-    printf("press any key, stop hrupdate\n");
-    getchar();
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_STOP, "hrupdate");
-    getchar();
-    _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START, "1");
+    int op = -1;
+
+    // for (int i = 0; i < argc; i++) {
+    //     printf("arg %d -> %s\n", i, argv[i]);
+    // }
+
+    if (argc < 3) {
+        printf("invalid \n");
+		return -1;
+    }
+
+    for (int i = 0; i < HRSVC_OP_MAX; i++) {
+        if (strcmp(ops[i], argv[1]) == 0) {
+            op = i;
+            break;
+        }
+    }
+
+    if (op == -1) return -1;
+ 
+    if (_hrsvc_init_ensured() != 0) {
+        printf("can not connect hrsvcd! -> %s\n", strerror(errno));
+        return -1;
+    }
+
+
+    int ret = _hrsvc_operator(HRINIT_MESSAGE_SERVICE_START + op, argv[2]);
+    if (ret != 0) {
+        printf("op failed ..%s.\n", strerror(errno));
+    }
     close(_hrsvc_socket);
     return 0;
 }
