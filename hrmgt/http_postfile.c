@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
   char *line = calloc(1, line_max);
 
   int b = 0;
-  while (!feof(rfp)) {
+  while (!feof(rfp) || reserve != 0) {
     printf("try read :%ld(%ld)\n", BUF_SIZE - reserve, reserve);
     size_t ss = fread(buf + reserve, 1, BUF_SIZE - reserve, rfp);
     printf("read :%ld\n", ss);
@@ -160,10 +160,10 @@ int main(int argc, char **argv) {
       }
       case S_CTX_PAYLOAD: {
         char *r = memchr(buf + l, '\r', ss - l);
-        char *n = memchr(buf + l, '\n', ss - l);
+        // char *n = memchr(buf + l, '\n', ss - l);
 
         if (!r) {
-          printf("not found '\r', directly write :%ld\n", ss - l);
+          printf("not found '\\r', directly write :%ld\n", ss - l);
           ssize_t s = write(fd, (void *)(buf + l), ss - l);
           l += s;
           continue;
@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
         }
 
         if (*(r + 1) == '\n' && *(r + 2) == '-' && *(r + 3) == '-') {
-          printf("found '\r\n--' ......->%s.\n", r + 4);
+          printf("found '\\r\\n--' ......->%s.\n", r + 4);
           if (strncmp(r + 4, boundary, strlen(boundary)) == 0) {
             printf("it's end \n");
             return 0;
@@ -218,6 +218,8 @@ int main(int argc, char **argv) {
     l = 0;
   }
 
+    fflush(stdout);
+    usleep(1000);
   fclose(rfp);
   close(fd);
   return 0;
