@@ -51,6 +51,7 @@ TARGET_LINK_LIBRARIES(hrsvcd ${cjson_library})
 
 ADD_EXECUTABLE(hrsvc hrsvc.c)
 
+ADD_EXECUTABLE(http_postfile http_postfile.c)
 
 
 TARGET_COMPILE_OPTIONS(hrtbl_test PRIVATE -Wall -Wextra -Werror -Wno-error=unused-function)
