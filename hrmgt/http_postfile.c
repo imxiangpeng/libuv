@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
                         if (*(ptr + 2) == '-' && *(ptr + 3) == '-') {
                             if (memcmp(ptr + 4, boundary, strlen(boundary)) == 0) {
                                 printf("real stop .or next trunck..\n");
-                                pos += 2;  // skip \r\n
+                                pos += 2;  // skip \r\n, -- and boundary will be parsed in next loop
                                 state = S_BOUNDARY;
                                 break;
                             }
