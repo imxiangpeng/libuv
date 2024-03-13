@@ -6,10 +6,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#define BUF_SIZE 24 * 1024
 enum {
-    S_INIT = 0,
-    S_BOUNDARY,
-    S_CTX_DISP,
+    S_BOUNDARY = 0,
+    S_BOUNDARY_META,
     S_CTX_TYPE,
     S_BOUNDARY_END,
     S_CTX_PAYLOAD,
@@ -17,53 +17,44 @@ enum {
 
 // return line with \r\n
 // return 0 means we need read more data
-int _memcontext(void *data, size_t max) {
+int _memcontext_without_crlf(void *data, size_t max) {
     char *ptr = data;
     char *rn = (char *)memmem(data, max, "\r\n", 2);
     if (rn) {
-        printf("%s(%d): found '\\r\\n'\n", __FUNCTION__, __LINE__);
         return rn - (char *)data;
     }
 
     // not found '\r\n', but last char is '\r'
     // then consume all bytes before '\r'
+    // notify we should swrap last '\r' to begin and read more data
     if (ptr[max - 1] == '\r') {
-        printf("%s(%d): found '\\r' in last, we need more data\n", __FUNCTION__, __LINE__);
         return max - 1;
     }
 
+    // not found any \r at end or \r\n
     return max;
 }
-int _memline(char **ptr, size_t *size, void *data, size_t max) {
+
+// parse data which size is max, finding \r\n, and return all data
+int _memline_with_crlf(char **ptr, size_t *size, void *data, size_t max) {
     int len = 0;
     if (!ptr || !size || !data) {
         return -1;
     }
-#if 0
-    char *p = memchr(data, '\n', max);
-    if (!p)
-        return 0;
-    if (*(p - 1) != '\r') {
-        printf("p[-1] not is '\r'\n");
-    }
-    len = p - (char *)data + 1;
 
-#endif
-    len = _memcontext(data, max);
+    len = _memcontext_without_crlf(data, max);
     if (len == max) {
         // data not enough ...
     } else {
         len += 2;  // skip \r\n
     }
-    printf("len:%d\n", len);
+
     if (*size < len + 1) {
         *ptr = realloc(*ptr, len + 1);
         *size = len + 1;
     }
 
     memcpy(*ptr, data, len);
-    // strncat(*ptr, data, len);
-    // *(*ptr-1) = '\0';
 
     *(*ptr + len) = '\0';
 
@@ -71,8 +62,7 @@ int _memline(char **ptr, size_t *size, void *data, size_t max) {
 }
 
 int main(int argc, char **argv) {
-#define BUF_SIZE 24 * 1024
-    char *buf = calloc(1, BUF_SIZE);
+    char *data = calloc(1, BUF_SIZE);
     int idx = 0;
 
     // const char *boundary = "----WebKitFormBoundaryTmNn7iRszae1RJ8N";
@@ -93,84 +83,85 @@ int main(int argc, char **argv) {
     }
 
     int state = S_BOUNDARY;
-    size_t l = 0;
-    size_t reserve = 0;
+    size_t pos = 0;
+    size_t rewind = 0;
     size_t line_max = 1024;
     char *line = calloc(1, line_max);
 
     int b = 0;
-    while (!feof(rfp) || reserve != 0) {
-        printf("try read :%ld(%ld)\n", BUF_SIZE - reserve, reserve);
+    while (!feof(rfp) || rewind != 0) {
+        size_t total_size = 0;
+        printf("try read :%ld(%ld)\n", BUF_SIZE - rewind, rewind);
 
     readdata:
 
-        size_t ss = fread(buf + reserve, 1, BUF_SIZE - reserve, rfp);
-        printf("read :%ld\n", ss);
-        ss += reserve;
-        reserve = 0;
-        printf("read2 :%ld\n", ss);
-        // rewind
-        l = 0;
+        total_size = 0;
 
-        if (ss == 0) {
+        total_size = fread(data + rewind, 1, BUF_SIZE - rewind, rfp);
+        total_size += rewind;
+        // must reset rewind flag
+        rewind = 0;
+
+        // read from begin
+        pos = 0;
+
+        if (total_size == 0) {
             printf("no data anymore ...\n");
             break;
         }
 
-        while (l < ss) {
-            printf("state:%d, l:%ld\n", state, l);
+        while (pos < total_size) {
             switch (state) {
                 case S_BOUNDARY: {  // search boundary
-                    // our line is large enough if -- begin
-
-                    if (buf[l] != '-' || buf[l + 1] != '-') {
+                    // must begin with --, otherwise data broken
+                    if (data[pos] != '-' || data[pos + 1] != '-') {
                         printf("boundary error not expected data \n");
-                        return -1;
+                        goto out;  // error
                     }
-                    l += 2;
 
-                    if (memcmp((void *)buf + l, boundary, strlen(boundary)) != 0) {
+                    pos += 2;  // skip --
+
+                    // verify boundary string
+                    if (memcmp((void *)data + pos, boundary, strlen(boundary)) != 0) {
                         printf("boundary error not expected data, found -- but not boundary ...\n");
-                        return -1;
+                        goto out;  // error
                     }
-                    // verify new data
-                    printf("buf +l:%s vs %s\n", buf + l, boundary);
 
-                    l += strlen(boundary);
-                    if (buf[l] == '-' && buf[l + 1] == '-') {
+                    // skip boundary to verify wether it's end with --
+                    pos += strlen(boundary);
+                    // if boundary end with --, it's end
+                    if (data[pos] == '-' && data[pos + 1] == '-') {
                         printf("all boundary end ...\n");
-                        return 0;
+                        // success
+                        goto out;
                     }
-                    l += 2;  // skip \r\n
-                    state = S_CTX_DISP;
+                    // not end with --, it means that it's a new part
+                    // now it must be \r\n
+                    pos += 2;  // skip \r\n
+                    state = S_BOUNDARY_META;
                     break;
                 }
-                case S_CTX_DISP: {  // metadata
+                case S_BOUNDARY_META: {  // metadata
                     int ret = 0;
                     memset((void *)line, 0, line_max);
-                    while (l < ss && ((ret = _memline(&line, &line_max, buf + l, ss - l)) != 2)) {
-                        printf("read line:ss -l: %ld vs %d -> %s\n", ss - l, ret, line);
-                        if (ret == ss - l) {
+                    // read all lines until empty \r\n line
+                    while ((ret = _memline_with_crlf(&line, &line_max, data + pos, total_size - pos)) != 2) {
+                        // printf("read line:total_size - pos: %ld vs %d -> %s\n", total_size - pos, ret, line);
+                        printf("line ->:%s\n", line);
+                        if (ret == total_size - pos) {
                             printf("data not enough, read more ...\n");
                             // not found line end, data is not enough!
-                            // memcpy(buf, buf + l, ss - l);
-                            // reserve = ss - l;
-                            // ss = 0;
-                            // goto readdata;
+                            memcpy(data, data + pos, total_size - pos);
+                            rewind = total_size - pos;
+                            total_size = 0;
+                            goto readdata;
                         }
-                        l += ret;
+                        pos += ret;
                         memset((void *)line, 0, line_max);
                     }
 
-                    printf("l:%ld, ss:%ld, ret:%d\n", l, ss, ret);
-                    if (l >= ss) {
-                        printf("%s(%d): maybe error data: %ld vs %ld\n", __FUNCTION__, __LINE__, l, ss);
-                        // return -1;
-                        goto readdata;
-                    }
-
                     // meet empty \r\n
-                    l += 2;  // skip empty \r\n
+                    pos += 2;  // skip empty \r\n
 
                     state = S_CTX_PAYLOAD;
 
@@ -179,31 +170,36 @@ int main(int argc, char **argv) {
 
                 case S_CTX_PAYLOAD: {
                     // return data length before \r\n, not contains \r\n
-                    ssize_t available = _memcontext((void *)(buf + l), ss - l);
+                    ssize_t available = _memcontext_without_crlf((void *)(data + pos), total_size - pos);
                     if (available > 0) {
-                        ssize_t s = write(fd, (void *)(buf + l), available);
-                        printf("all: %ld, write s:%ld, l:%ld\n", ss - l, s, l);
-                        l += s;
-                        printf("2s:%ld, l:%ld\n", s, l);
+                        // we should directly write those data
+                        ssize_t n = write(fd, (void *)(data + pos), available);
+                        pos += n;
 
-                        memcpy(buf, buf + l, ss - l);
-                        reserve = ss - l;
-                        ss = 0;
+                        // not consume all data, we should rewind left data
+                        if (total_size - pos > 0) {
+                            // and rewind left data
+                            memcpy(data, data + pos, total_size - pos);
+                            rewind = total_size - pos;
+                            total_size = 0;
+                        }
                     } else {
+                        // available == 0, match \r\n at begin
+                        // we move \r\n to buffer begin, because it's sample to match and no need care buffer end
                         printf("found '\\r\\n', stopped ?\n");
-                        char *ptr = buf + l;
+                        char *ptr = data + pos;
                         // assert *ptr == '\r';
                         // assert *(ptr + 1) == '\n';
                         if (*(ptr + 2) == '-' && *(ptr + 3) == '-') {
                             if (memcmp(ptr + 4, boundary, strlen(boundary)) == 0) {
                                 printf("real stop .or next trunck..\n");
-                                l += 2;  // skip \r\n
+                                pos += 2;  // skip \r\n
                                 state = S_BOUNDARY;
                                 break;
                             }
                         } else {
-                            ssize_t s = write(fd, (void *)(buf + l), 2 + 2);
-                            l += s;
+                            ssize_t s = write(fd, (void *)(data + pos), 2 + 2);
+                            pos += s;
                         }
                     }
 
@@ -213,13 +209,13 @@ int main(int argc, char **argv) {
                     break;
             }
         }
-
-        l = 0;
     }
 
-    fflush(stdout);
-    usleep(1000);
+out:
+
     fclose(rfp);
     close(fd);
+
+    free(data);
     return 0;
 }
