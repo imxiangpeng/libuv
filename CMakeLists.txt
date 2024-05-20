@@ -18,6 +18,7 @@ include(GNUInstallDirs)
 include(CTest)
 
 add_subdirectory(hrmgt)
+add_subdirectory(clound189fs)
 
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_C_STANDARD_REQUIRED ON)
