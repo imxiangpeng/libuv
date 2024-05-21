@@ -10,7 +10,7 @@ find_package(LibXml2 REQUIRED)
 
 INCLUDE_DIRECTORIES(j2s)
 
-SET(SOURCES clound189fs.c j2s/j2sobject.c j2s/j2stable.c)
+SET(SOURCES clound189fs.c j2s/j2sobject.c j2s/j2stable.c j2sresponse.c)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
