@@ -21,5 +21,6 @@ TARGET_LINK_LIBRARIES(clound189fs ${cjson_library})
 
 TARGET_LINK_LIBRARIES(clound189fs ${curl_library})
 
+target_include_directories(clound189fs PRIVATE ${LIBXML2_INCLUDE_DIRS})
 target_link_libraries(clound189fs ${LIBXML2_LIBRARY})
 target_link_libraries(clound189fs -lssl -lcrypto)
