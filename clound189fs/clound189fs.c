@@ -1021,7 +1021,7 @@ int cloud_drive_get_file_lists(const char *secret, const char *session_key) {
 
     // generate query payload
 
-    int folder_id = -11;
+    long folder_id = -11;
     const int page_size = 100;
     int page_num = 1;
 
@@ -1029,14 +1029,15 @@ int cloud_drive_get_file_lists(const char *secret, const char *session_key) {
     // curl_url_set(url, CURLUPART_URL, "https://api.cloud.189.cn/newOpen/oauth2/accessToken.action");
     // snprintf(tmp, sizeof(tmp))
     // "https://api.cloud.189.cn/newOpen/oauth2/accessToken.action?folderId=%d"
+    // 
     asprintf(&url,
              "https://api.cloud.189.cn/listFiles.action"
              // "http://10.30.11.78/listFiles.action"
-             "?folderId=%d"
+             "?folderId=%ld"
              "&fileType=0"
              "&mediaType=0"
              "&mediaAttr=0"
-             "&iconOption=5"
+             "&iconOption=0"
              "&orderBy=filename"
              "&descending=true"
              "&pageNum=%d"

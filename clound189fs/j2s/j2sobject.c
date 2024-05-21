@@ -34,7 +34,6 @@
 #include "cjson/cJSON.h"
 #include "j2sobject.h"
 
-
 #define TMPFILE_TEMPLATE ".tmp_XXXXXX"
 
 // create not support none name element
@@ -376,11 +375,13 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
             continue;
         }
 
+        printf("%s(%d):  ele :%s vs %s\n", __FUNCTION__, __LINE__, ele->string, pt->name);
         switch (ele->type) {
             case cJSON_Number: {
                 if (pt->type == J2S_INT) {
                     int *ptr = (int *)((char *)self + pt->offset);
                     *ptr = (int)cJSON_GetNumberValue(ele);
+                    printf("this is int:%d\n", *ptr);
                 } else if (pt->type == J2S_DOUBLE) {
                     double *ptr = (double *)((char *)self + pt->offset);
                     *ptr = cJSON_GetNumberValue(ele);
@@ -393,6 +394,7 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                 if (pt->offset_len == 0) {  // char *
                     char **ptr = (char **)((char *)self + pt->offset);
                     *ptr = strdup(cJSON_GetStringValue(ele));
+                    printf("this is string:%s\n", *ptr);
                 } else {  // char[]
                     char *ptr = (char *)((char *)self + pt->offset);
                     // make sure no data loss
@@ -471,6 +473,7 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                     continue;
                 }
 
+                printf("this is array object :%s .....\n", ele->string);
                 // now it's no basic array
                 // array 's proto is array subobject's proto
                 struct j2sobject *child = NULL;
@@ -478,6 +481,7 @@ int j2sobject_deserialize_cjson(struct j2sobject *self, cJSON *jobj) {
                     struct j2sobject **ptr = (struct j2sobject **)((char *)self + pt->offset);
                     child = j2sobject_create_array(pt->proto);
                     *ptr = child;
+                printf("this is array object :%s we create array object:%p.....\n", ele->string, child);
                 } else {
                     child = (struct j2sobject *)((char *)self + pt->offset);
                     // must call init to setup prototype
@@ -537,6 +541,39 @@ int j2sobject_deserialize_file(struct j2sobject *self, const char *path) {
     }
 
     ret = j2sobject_deserialize_cjson(self, root);
+
+    cJSON_Delete(root);
+
+    free(data);
+    return ret;
+}
+
+int j2sobject_deserialize_target_file(struct j2sobject *self, const char *path, const char *target) {
+    int ret = -1;
+    size_t len = 0;
+    char *data = NULL;
+    if (!path || !self) {
+        return -1;
+    }
+
+    len = _read_file(path, &data);
+    if (!data) {
+        printf("can not read file:%s\n", path);
+        return -1;
+    }
+    cJSON *root = cJSON_ParseWithLength(data, len);
+    if (!root) {
+        printf("can not read file:%s, data:%s\n", path, data);
+
+        printf("error:%s\n", cJSON_GetErrorPtr());
+        free(data);
+        return -1;
+    }
+    cJSON *object = root;
+    if (target != NULL) {
+        object = cJSON_GetObjectItem(root, target);
+    }
+    ret = j2sobject_deserialize_cjson(self, object);
 
     cJSON_Delete(root);
 

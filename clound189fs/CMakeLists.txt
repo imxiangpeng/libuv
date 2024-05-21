@@ -26,3 +26,9 @@ target_include_directories(clound189fs PRIVATE ${LIBXML2_INCLUDE_DIRS})
 target_link_libraries(clound189fs ${LIBXML2_LIBRARY})
 target_link_libraries(clound189fs -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(clound189fs ${uuid_library})
+
+
+INCLUDE_DIRECTORIES(.)
+
+ADD_EXECUTABLE(cloud_j2sobject tests/cloud_j2sobject.c j2s/j2sobject.c j2sresponse.c)
+TARGET_LINK_LIBRARIES(cloud_j2sobject ${cjson_library})
