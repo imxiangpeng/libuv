@@ -11,7 +11,7 @@ find_package(LibXml2 REQUIRED)
 
 INCLUDE_DIRECTORIES(j2s)
 
-SET(SOURCES clound189fs.c j2s/j2sobject.c j2s/j2stable.c j2sresponse.c xxtea.c)
+SET(SOURCES clound189fs.c j2s/j2sobject.c j2s/j2stable.c j2sobject_response.c xxtea.c)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
@@ -30,5 +30,5 @@ TARGET_LINK_LIBRARIES(clound189fs ${uuid_library})
 
 INCLUDE_DIRECTORIES(.)
 
-ADD_EXECUTABLE(cloud_j2sobject tests/cloud_j2sobject.c j2s/j2sobject.c j2sresponse.c)
+ADD_EXECUTABLE(cloud_j2sobject tests/cloud_j2sobject.c j2s/j2sobject.c j2sobject_cloud.c)
 TARGET_LINK_LIBRARIES(cloud_j2sobject ${cjson_library})

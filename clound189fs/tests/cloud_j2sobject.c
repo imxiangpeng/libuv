@@ -1,23 +1,21 @@
 #include <stdio.h>
 
-#include "j2sobject.h"
-#include "j2sresponse.h"
+#include "j2sobject_cloud.h"
 
-extern struct j2sobject_prototype _j2sobject_could_folder_resp_prototype;
 
 int main(int argc, char **argv) {
-    struct j2sobject_cloud_folder_resp *object = (struct j2sobject_cloud_folder_resp *)j2sobject_create(&_j2sobject_could_folder_resp_prototype);
+    struct j2scloud_folder_resp *object = (struct j2scloud_folder_resp *)j2sobject_create(&j2scloud_folder_resp_prototype);
 
     int ret = j2sobject_deserialize_target_file(J2SOBJECT(object), "filelists.json", "fileListAO");
 
     printf("ret:%d\n", ret);
 
     printf("cound:%d\n", object->count);
-
-    j2sobject_cloud_folder_t *t = NULL;
+#if 1
+    j2scloud_folder_t *t = NULL;
 
     printf("folder list:%p\n", object->folderList);
-    for (t = (j2sobject_cloud_folder_t *)J2SOBJECT(object->folderList)->next; t != (j2sobject_cloud_folder_t *)J2SOBJECT(object->folderList); t = (j2sobject_cloud_folder_t *)J2SOBJECT(t)->next) {
+    for (t = (j2scloud_folder_t *)J2SOBJECT(object->folderList)->next; t != (j2scloud_folder_t *)J2SOBJECT(object->folderList); t = (j2scloud_folder_t *)J2SOBJECT(t)->next) {
         printf("folder id:%ld\n", (long)t->id);
         printf("folder name:%s\n", t->name);
         printf("folder create date:%s\n", t->createDate);
@@ -26,8 +24,8 @@ int main(int argc, char **argv) {
         printf("folder parent id:%ld\n", (long)t->parentId);
     }
 
-    j2sobject_cloud_file_t *f = NULL;
-    for (f = (j2sobject_cloud_file_t *)J2SOBJECT(object->fileList)->next; f != (j2sobject_cloud_file_t *)J2SOBJECT(object->fileList); f = (j2sobject_cloud_file_t *)J2SOBJECT(f)->next) {
+    j2scloud_file_t *f = NULL;
+    for (f = (j2scloud_file_t *)J2SOBJECT(object->fileList)->next; f != (j2scloud_file_t *)J2SOBJECT(object->fileList); f = (j2scloud_file_t *)J2SOBJECT(f)->next) {
         printf("file id:%ld\n", (long)f->id);
         printf("file name:%s\n", f->name);
         printf("file create date:%s\n", f->createDate);
@@ -39,11 +37,16 @@ int main(int argc, char **argv) {
         printf("file mediatype:%d\n", f->mediaType);
         printf("file orientation:%d\n", f->orientation);
 
-        printf("file small url:%s\n", f->icon.smallUrl);
-        if (f->icon.mediumUrl)
-            printf("file medium url:%s\n", f->icon.mediumUrl);
-        printf("file large url:%s\n", f->icon.largeUrl);
-    }
+        if (f->icon) {
 
+        printf("file small url:%s\n", f->icon->smallUrl);
+        if (f->icon->mediumUrl)
+            printf("file medium url:%s\n", f->icon->mediumUrl);
+        printf("file large url:%s\n", f->icon->largeUrl);
+        }
+    }
+#endif
+    printf("try release .......\n");
+    j2sobject_free(J2SOBJECT(object));
     return 0;
 }

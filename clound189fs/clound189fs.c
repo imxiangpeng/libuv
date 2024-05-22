@@ -23,8 +23,7 @@
 #include <unistd.h>
 #include <uuid/uuid.h>
 
-#include "j2sobject.h"
-#include "j2sresponse.h"
+#include "j2sobject_response.h"
 #include "xxtea.h"
 
 #define WEB_BASE_URL "https://cloud.189.cn"
