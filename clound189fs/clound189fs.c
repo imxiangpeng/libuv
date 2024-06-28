@@ -993,7 +993,8 @@ char *signatureOfHmac(const char *sessionSecret, const char *sessionKey, const c
 // Sessionkey: 2f66d7f1-af6a-4a7b-a3b9-e81640c0b44d
 // Signature: 3D40EFF921EB4110B73386D195DDE7B3905646E3
 // X-Request-Id: 7442917f-ffb1-472f-87ec-97e05ae1c7f9
-int cloud_drive_get_file_lists(const char *secret, const char *session_key) {
+// id: folder id
+int cloud_drive_get_file_lists(long id, const char *secret, const char *session_key) {
     uuid_t uuid;
     char request_id[UUID_STR_LEN + 20] = {0};
     char *url = NULL;
@@ -1020,7 +1021,7 @@ int cloud_drive_get_file_lists(const char *secret, const char *session_key) {
 
     // generate query payload
 
-    long folder_id = -11;
+    long folder_id = id;
     const int page_size = 100;
     int page_num = 1;
 
@@ -1076,6 +1077,8 @@ int cloud_drive_get_file_lists(const char *secret, const char *session_key) {
     free(url);
     return 0;
 }
+
+#if 1
 int main(int argc, char **argv) {
     // const char *access_token = "5861c56dd9c944108438cc48b0756a6e";
     // const char *secret = "6E56131239410017348D50FF3D00D425";
@@ -1158,7 +1161,7 @@ int main(int argc, char **argv) {
     printf("session:%s\n", session);
     request_session_token(to_url, secret, session);
 
-    cloud_drive_get_file_lists(secret, session);
+    cloud_drive_get_file_lists(-11, secret, session);
     free(captchaToken);
     free(lt);
     free(paramId);
@@ -1167,3 +1170,30 @@ int main(int argc, char **argv) {
     // const char *str = RsaEncrypt(publicKey, "18663792866");
     return 0;
 }
+
+#else
+int main(int argc, char** argv) {
+
+// login name:18663792866@189.cn
+// session key:7ea53fe8-4968-4ac7-a73e-9e5fba5f016b
+// session secret:ADD3F1B77291701D78A45B436ED6B57D
+// family_session_key:e4d4ff6e-d8db-4d68-a608-6c34f0ddc04f_family
+// family session secret:ADD3F1B77291701D78A45B436ED6B57D
+// access token:5861c56dd9c944108438cc48b0756a6e
+// refresh token:8b43bbae19064831a38ef6bc87f53cea
+    const char * secret = "FA75442F51DA58C650DAC77D9BB3DC5B";
+    const char* session_key = "cbc87566-6cf2-47b9-b2f3-f3d48525a16b";
+    
+    
+    cloud_drive_get_file_lists(0, secret, session_key);
+    usleep(1000 * 1100);
+    cloud_drive_get_file_lists(-16, secret, session_key);
+    usleep(1000 * 1100);
+
+    cloud_drive_get_file_lists(225281133668609798, secret, session_key);
+
+
+    return 0;
+}
+
+#endif
