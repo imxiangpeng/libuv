@@ -29,7 +29,7 @@ struct DataModelObject {
     enum type type;  // 0 leaf, 1 node
     // struct value val;
 
-    struct hr_list_head childens;
+    struct hr_list_head childrens;
     struct hr_list_head sibling;
 
     attributer getter;
@@ -46,7 +46,7 @@ struct root {
 struct DataModelObject _root = {
     .name = "/",
     .type = TYPE_OBJECT,
-    .childens = HR_LIST_HEAD_INIT(_root.childens),
+    .childrens = HR_LIST_HEAD_INIT(_root.childrens),
     .sibling = HR_LIST_HEAD_INIT(_root.sibling)};
 struct DataModelObject* allocate_node(const char* name, enum type type, attributer getter, attributer setter, struct DataModelObject* parent) {
     struct DataModelObject* n = NULL;
@@ -58,7 +58,7 @@ struct DataModelObject* allocate_node(const char* name, enum type type, attribut
 
     n->type = type;
 
-    HR_INIT_LIST_HEAD(&n->childens);
+    HR_INIT_LIST_HEAD(&n->childrens);
     HR_INIT_LIST_HEAD(&n->sibling);
 
     n->getter = getter;
@@ -67,7 +67,7 @@ struct DataModelObject* allocate_node(const char* name, enum type type, attribut
     memcpy(n->name, name, strlen(name));
 
     if (parent) {
-        hr_list_add_tail(&n->sibling, &parent->childens);
+        hr_list_add_tail(&n->sibling, &parent->childrens);
     }
     return n;
 }
@@ -95,46 +95,48 @@ static int SerialNumber_getter(struct DataModelObject* self, struct value* val) 
     return 0;
 }
 
-
 // query object using string from parent
 // parent will be redirect to _root when it's null
-static struct DataModelObject* DataModelObject_getter(const char* query, struct DataModelObject* parent) {
-    char *token = NULL, *rest = NULL, *copy = NULL;
+static struct DataModelObject* DataModelObject_lookup(const char* query, struct DataModelObject* parent) {
+    char *token = NULL, *saveptr = NULL;
     struct DataModelObject* object = NULL;
+
+    char name[256] = {0};
+
     if (!query) return NULL;
 
     if (!parent)
         parent = &_root;
 
-    // without . -> search directly
-    if (!strchr(query, '.')) {
-        int got = 0;
-        struct DataModelObject* p = NULL;
-        hr_list_for_each_entry(p, &parent->childens, sibling) {
-            HR_LOGD("%s(%d): loop query %s vs %s from parent:%p -> %s\n", __FUNCTION__, __LINE__, query, p->name, parent, parent->name);
-            if (!strcmp(p->name, query)) {
-                return p;
-            }
-        }
+    if (strlen(query) > sizeof(name) - 1) {
+        HR_LOGD("%s(%d): query too long:%d >= %d\n", strlen(query), sizeof(name) - 1);
         return NULL;
     }
 
-    copy = strdup(query);
+    memcpy(name, query, strlen(query));
 
-    rest = copy;
+    saveptr = name;
 
-    while ((token = strtok_r(rest, ".", &rest))) {
+    object = parent;
+    while ((token = strtok_r(saveptr, ".", &saveptr))) {
         HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, parent, parent->name);
-        object = DataModelObject_getter(token, parent);
-        if (!object) {
-            HR_LOGD("%s(%d): can not find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, parent, parent->name);
-            break;
+        struct DataModelObject* p = NULL;
+        int found = 0;
+        hr_list_for_each_entry(p, &object->childrens, sibling) {
+            if (!strcmp(p->name, token)) {
+                object = p;
+                found = 1;
+                break;
+            }
         }
-        parent = object;
+        if (!found) {
+            HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
+            return NULL;
+        }
         HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
     }
 
-    free(copy);
+    printf("token:%s rest:%s\n", token, saveptr);
 
     return object;
 }
@@ -146,7 +148,7 @@ int main(int argc, char** argv) {
     struct DataModelObject* DeviceInfo = allocate_node("DeviceInfo", TYPE_OBJECT, common_object_getter, NULL, Device);
     struct DataModelObject* SerialNumber = allocate_node("SerialNumber", TYPE_STRING, SerialNumber_getter, NULL, DeviceInfo);
 
-    struct DataModelObject* o = DataModelObject_getter("Device.X_CU_LockEnable", NULL);
+    struct DataModelObject* o = DataModelObject_lookup("Device.X_CU_LockEnable", NULL);
 
     printf("o:%p\n", o);
     if (o) {
@@ -155,22 +157,21 @@ int main(int argc, char** argv) {
         printf("lock enable:%d\n", val.val.num);
     }
 
-    o = DataModelObject_getter("Device.DeviceInfo.SerialNumber", NULL);
+    o = DataModelObject_lookup("Device.DeviceInfo.SerialNumber", NULL);
     printf("o:%p\n", o);
-     if (o) {
+    if (o) {
         struct value val;
         o->getter(o, &val);
         printf("serial:%s\n", val.val.string);
     }
 
-    o = DataModelObject_getter("DeviceInfo.SerialNumber", Device);
+    o = DataModelObject_lookup("DeviceInfo.SerialNumber", Device);
     printf("o:%p\n", o);
-     if (o) {
+    if (o) {
         struct value val;
         o->getter(o, &val);
         printf("serial:%s\n", val.val.string);
     }
 
-  
     return 0;
 }
