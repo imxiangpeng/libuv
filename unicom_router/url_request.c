@@ -258,6 +258,8 @@ static int _http_request(struct url_request *req, const char *url, struct hrbuff
     // clean memory, because we may use this socket to other request
 
     if (priv->headers) {
+        // must clear because the request maybe reused
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
         curl_slist_free_all(priv->headers);
         priv->headers = NULL;
     }

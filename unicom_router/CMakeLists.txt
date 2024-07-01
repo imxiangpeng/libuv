@@ -6,6 +6,7 @@ FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(cjson_library NAMES cjson)
 FIND_LIBRARY(curl_library NAMES curl)
 FIND_LIBRARY(uuid_library NAMES uuid)
+FIND_LIBRARY(jsonc_library NAMES json-c)
 FIND_LIBRARY(mosquitto_library NAMES mosquitto)
 
 
@@ -16,20 +17,12 @@ INCLUDE_DIRECTORIES(j2s)
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
 
-ADD_EXECUTABLE(uc_data_model uc_data_model.c hr_log.c)
-TARGET_LINK_LIBRARIES(uc_data_model ${libuv_library})
-TARGET_LINK_LIBRARIES(uc_data_model ${cjson_library})
-
-TARGET_LINK_LIBRARIES(uc_data_model ${curl_library})
-
-target_include_directories(uc_data_model PRIVATE ${LIBXML2_INCLUDE_DIRS})
-target_link_libraries(uc_data_model ${LIBXML2_LIBRARY})
-target_link_libraries(uc_data_model -lssl -lcrypto)
-TARGET_LINK_LIBRARIES(uc_data_model ${uuid_library})
-TARGET_LINK_LIBRARIES(uc_data_model ${mosquitto_library})
-
-
 INCLUDE_DIRECTORIES(.)
 
 ADD_EXECUTABLE(uc_auth uc_auth.c hr_log.c hr_buffer.c url_request.c)
 TARGET_LINK_LIBRARIES(uc_auth ${curl_library})
+TARGET_LINK_LIBRARIES(uc_auth ${jsonc_library})
+
+ADD_EXECUTABLE(dm_main dm_main.c hr_log.c hr_buffer.c dm_object.c dm_Device.c dm_Device_DeviceInfo.c dm_Device_X_CU_WAN.c)
+# TARGET_LINK_LIBRARIES(dm_main ${curl_library})
+TARGET_LINK_LIBRARIES(dm_main ${jsonc_library})
