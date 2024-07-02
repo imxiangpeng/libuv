@@ -50,6 +50,7 @@ struct dm_object {
 };
 
 struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribute getter, dm_attribute setter, struct dm_object* parent);
+struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attribute getter, dm_attribute setter);
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent);
 
 // serialize object as string

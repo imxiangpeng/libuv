@@ -55,6 +55,35 @@ struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribut
     return obj;
 }
 
+// create object using full path
+struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attribute getter, dm_attribute setter) {
+    struct dm_object* object = NULL;
+    char tmp[256] = {0};
+    char *token = NULL, *saveptr = NULL;
+    if (!name) return NULL;
+
+    memcpy(tmp, name, strlen(name));
+    saveptr = tmp;
+    while ((token = strtok_r(saveptr, ".", &saveptr))) {
+        int is_leaf = strlen(saveptr) == 0 ? 1 : 0;
+        HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
+
+        // this is last node/leaf
+        struct dm_object* dm = dm_object_lookup(token, object);
+        if (!dm) {
+            HR_LOGD("%s(%d): can not found %s create it\n", __FUNCTION__, __LINE__, tmp);
+            if (is_leaf) {
+                dm = dm_object_new(token, type, getter, setter, object);
+            } else {
+                dm = dm_object_new(token, DM_TYPE_OBJECT, dm_object_attribute, NULL, object);
+            }
+        }
+        object = dm;
+    }
+
+    return object;
+}
+
 // query object using string from parent
 // parent will be redirect to _root when it's null
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) {
