@@ -84,6 +84,23 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
     return object;
 }
 
+void dm_object_free(struct dm_object* object) {
+    if (!object)
+        object = &_root;
+    struct dm_object *p = NULL, *n = NULL;
+    int found = 0;
+    HR_LOGD("%s(%d): free %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
+    hr_list_for_each_entry_safe(p, n, &object->childrens, sibling) {
+        // take off p
+        hr_list_del(&p->sibling);
+        dm_object_free(p);
+    }
+    
+    if (object != &_root) {
+        // free it
+        free(object);
+    }
+}
 // query object using string from parent
 // parent will be redirect to _root when it's null
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) {
@@ -119,7 +136,7 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
             }
         }
         if (!found) {
-            HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
+            // HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
             return NULL;
         }
         // HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);

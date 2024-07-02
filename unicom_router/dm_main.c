@@ -64,20 +64,17 @@ static int _fill_parameters(const char* param[], struct json_object* parameter_v
 
         memcpy(tmp, param[i], strlen(param[i]));
 
-        HR_LOGD("%s(%d): now: %s\n", __FUNCTION__, __LINE__, tmp);
-
         struct dm_object* dm = dm_object_lookup(tmp, NULL);
         if (!dm) {
-            HR_LOGD("%s(%d): can not found %s\n", __FUNCTION__, __LINE__, tmp);
+            // HR_LOGD("%s(%d): can not found %s\n", __FUNCTION__, __LINE__, tmp);
             continue;
         }
 
         saveptr = tmp;
         while ((token = strtok_r(saveptr, ".", &saveptr))) {
-            HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
+            // HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
             struct json_object* object = NULL;
             if (!json_object_object_get_ex(parent, token, &object)) {
-                HR_LOGD("%s(%d): not found object %s, create it\n", __FUNCTION__, __LINE__, token);
                 // this is last node/leaf
                 if (strlen(saveptr) == 0) {
                     struct dm_value val;
@@ -120,52 +117,6 @@ int uc_platform_create_stage_1_devauth_message(struct uc_platform* plat, struct 
     json_object_object_add(root, "parameterValues", parameterValues);
 
     _fill_parameters(param, parameterValues);
-#if 0
-    for (int i = 0; param[i] != NULL; i++) {
-        char tmp[256] = {0};
-        const char* p = param[i];
-
-        char *token = NULL, *saveptr = NULL;
-
-        struct json_object* parent = parameterValues;
-
-        memcpy(tmp, param[i], strlen(param[i]));
-
-        HR_LOGD("%s(%d): now: %s\n", __FUNCTION__, __LINE__, tmp);
-
-        struct dm_object* dm = dm_object_lookup(tmp, NULL);
-        if (!dm) {
-            HR_LOGD("%s(%d): can not found %s\n", __FUNCTION__, __LINE__, tmp);
-            continue;
-        }
-
-        saveptr = tmp;
-        while ((token = strtok_r(saveptr, ".", &saveptr))) {
-            HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
-            struct json_object* object = NULL;
-            if (!json_object_object_get_ex(parent, token, &object)) {
-                HR_LOGD("%s(%d): not found object %s, create it\n", __FUNCTION__, __LINE__, token);
-                // this is last node/leaf
-                if (strlen(saveptr) == 0) {
-                    struct dm_value val;
-
-                    dm->getter(dm, &val);
-                    if (val.type == DM_TYPE_NUMBER) {
-                        json_object_object_add(parent, token, json_object_new_int(val.val.number));
-                    } else if (val.type == DM_TYPE_STRING) {
-                        json_object_object_add(parent, token, json_object_new_string(val.val.string ? val.val.string : ""));
-                    }
-                } else {
-                    object = json_object_new_object();
-                    json_object_object_add(parent, token, object);
-                }
-            }
-
-            parent = object;
-        }
-    }
-#endif
-
     HR_LOGD("%s(%d): message object %s\n", __FUNCTION__, __LINE__, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN));
 
     hrbuffer_append_string(buf, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN));
@@ -329,15 +280,12 @@ static int X_CU_CUEI_getter(struct dm_object* self, struct dm_value* val) {
 }
 
 int main(int argc, char** argv) {
-    struct hrbuffer b;
 
     struct url_request* req = NULL;
 
     memset((void*)&_platform, 0, sizeof(_platform));
 
     _platform.id = 1;
-
-    hrbuffer_alloc(&b, 512);
 
     dm_Device_init(NULL);
 
@@ -388,5 +336,9 @@ int main(int argc, char** argv) {
 
     uc_platform_stage_1_devauth(&_platform);
     uc_platform_stage_2_getmqttserver(&_platform);
+    
+    dm_object_free(NULL);
+
+
     return 0;
 }
