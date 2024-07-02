@@ -40,6 +40,7 @@ typedef int (*dm_attribute)(struct dm_object* self, struct dm_value* val);
 struct dm_object {
     enum dm_type type;
 
+    struct dm_object *parent;
     struct hr_list_head childrens;
     struct hr_list_head sibling;
 
@@ -53,6 +54,7 @@ struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribut
 struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attribute getter, dm_attribute setter);
 void dm_object_free(struct dm_object* object);
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent);
+struct dm_object* dm_object_parent(struct dm_object* object);
 
 // serialize object as string
 int dm_object_attribute(struct dm_object* self, struct dm_value* val);

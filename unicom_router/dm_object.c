@@ -13,6 +13,7 @@
 
 #include "dm_object.h"
 
+#include <json-c/json_object.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,6 +48,8 @@ struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribut
 
     memcpy(obj->name, name, strlen(name));
 
+    obj->parent = parent;
+
     if (parent) {
         hr_list_add_tail(&obj->sibling, &parent->childrens);
     } else {
@@ -66,12 +69,12 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
     saveptr = tmp;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
         int is_leaf = strlen(saveptr) == 0 ? 1 : 0;
-        HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
+        // HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
 
         // this is last node/leaf
         struct dm_object* dm = dm_object_lookup(token, object);
         if (!dm) {
-            HR_LOGD("%s(%d): can not found %s create it\n", __FUNCTION__, __LINE__, tmp);
+            // HR_LOGD("%s(%d): can not found %s create it\n", __FUNCTION__, __LINE__, tmp);
             if (is_leaf) {
                 dm = dm_object_new(token, type, getter, setter, object);
             } else {
@@ -95,7 +98,7 @@ void dm_object_free(struct dm_object* object) {
         hr_list_del(&p->sibling);
         dm_object_free(p);
     }
-    
+
     if (object != &_root) {
         // free it
         free(object);
@@ -125,7 +128,7 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
 
     object = parent;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
-        // HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, parent, parent->name);
+        HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, parent, parent->name);
         struct dm_object* p = NULL;
         int found = 0;
         hr_list_for_each_entry(p, &object->childrens, sibling) {
@@ -139,14 +142,69 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
             // HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
             return NULL;
         }
-        // HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
+        HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
     }
 
     return object;
 }
 
+struct json_object* _dm_object_object(struct dm_object* self) {
+    struct dm_object* p = NULL;
+    struct json_object* root = json_object_new_object();
+
+    hr_list_for_each_entry(p, &self->childrens, sibling) {
+        struct dm_value val;
+        struct json_object* obj = NULL;
+        memset((void*)&val, 0, sizeof(val));
+        switch (p->type) {
+            case DM_TYPE_STRING: {
+                p->getter(p, &val);
+                obj = json_object_new_string(val.val.string);
+                dm_value_reset(&val);
+                break;
+            }
+            case DM_TYPE_NUMBER: {
+                p->getter(p, &val);
+                obj = json_object_new_int(val.val.number);
+                dm_value_reset(&val);
+                break;
+            }
+
+            case DM_TYPE_OBJECT: {
+                obj = _dm_object_object(p);
+            }
+            default:
+                break;
+        }
+
+        if (obj) {
+            json_object_object_add(root, p->name, obj);
+        }
+    }
+
+    return root;
+}
 int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
     // loop all childrens contruct json object ...
+    struct json_object* root = NULL;
+    struct dm_object* p = NULL;
+
+    if (self->type == DM_TYPE_NUMBER || self->type == DM_TYPE_STRING) {
+        return self->getter(self, val);
+    }
+
+    // now we only support object
+    if (self->type != DM_TYPE_OBJECT) {
+        return -1;
+    }
+
+    root = _dm_object_object(self);
+
+    HR_LOGD("object:%s -> %s\n", self->name, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY));
+    dm_value_set_string_ext(val, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY), 0);
+
+    json_object_put(root);
+
     return 0;
 }
 

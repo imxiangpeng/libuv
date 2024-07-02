@@ -79,6 +79,7 @@ static int _fill_parameters(const char* param[], struct json_object* parameter_v
                 if (strlen(saveptr) == 0) {
                     struct dm_value val;
 
+                    memset((void*)&val, 0, sizeof(val));
                     dm->getter(dm, &val);
                     if (val.type == DM_TYPE_NUMBER) {
                         json_object_object_add(parent, token, json_object_new_int(val.val.number));
@@ -94,6 +95,8 @@ static int _fill_parameters(const char* param[], struct json_object* parameter_v
             parent = object;
         }
     }
+
+    return 0;
 }
 
 // E.3.2 devauth
@@ -266,7 +269,6 @@ int uc_platform_stage_2_getmqttserver(struct uc_platform* plat) {
 
     HR_LOGD("%s(%d): broker:%s, port:%d, alive time:%d,topic:%s, username:%s, password:%s, uuid:%s\n", __FUNCTION__, __LINE__, broker, port, alive_time, X_CU_Topic, username, password, uuid);
 
-    
     json_object_put(root);
 
     return 0;
@@ -280,7 +282,6 @@ static int X_CU_CUEI_getter(struct dm_object* self, struct dm_value* val) {
 }
 
 int main(int argc, char** argv) {
-
     struct url_request* req = NULL;
 
     memset((void*)&_platform, 0, sizeof(_platform));
@@ -336,9 +337,16 @@ int main(int argc, char** argv) {
 
     uc_platform_stage_1_devauth(&_platform);
     uc_platform_stage_2_getmqttserver(&_platform);
-    
-    dm_object_free(NULL);
 
+    object = dm_object_lookup("Device.DeviceInfo.", NULL);
+    if (object) {
+        struct dm_value val;
+        object->getter(object, &val);
+        HR_LOGD("Device.DeviceInfo:%s\n", val.val.string);
+        dm_value_reset(&val);
+    }
+
+    dm_object_free(NULL);
 
     return 0;
 }
