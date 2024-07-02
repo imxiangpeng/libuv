@@ -1,4 +1,5 @@
 #include <json-c/json_object.h>
+#include <mosquitto.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,6 +14,10 @@
 
 #define MNG_URL_AUTH MNG_URL "/api/auth"
 #define MNG_URL_DEVICE_GET_MQTT_SERVER MNG_URL "/api/deviceGetMqttServer"
+
+#ifndef UNUSED
+#define UNUSED(x) (void)(x)
+#endif
 
 struct uc_platform {
     char broker[256];
@@ -31,6 +36,12 @@ struct uc_platform {
 
     char device_id[128];
     char secret[128];
+    char client_id[128];
+    int qos;
+
+    char topic[256];
+
+    struct mosquitto* mosq;
 };
 
 static struct uc_platform _platform = {0};
@@ -269,6 +280,13 @@ int uc_platform_stage_2_getmqttserver(struct uc_platform* plat) {
 
     HR_LOGD("%s(%d): broker:%s, port:%d, alive time:%d,topic:%s, username:%s, password:%s, uuid:%s\n", __FUNCTION__, __LINE__, broker, port, alive_time, X_CU_Topic, username, password, uuid);
 
+    strcpy(plat->broker, broker);
+    plat->port = port;
+    plat->alive_time = alive_time;
+    strcpy(plat->topic, X_CU_Topic);
+    strcpy(plat->username, username);
+    strcpy(plat->password, password);
+
     json_object_put(root);
 
     return 0;
@@ -281,12 +299,92 @@ static int X_CU_CUEI_getter(struct dm_object* self, struct dm_value* val) {
     return 0;
 }
 
+static void _on_log(struct mosquitto* mosq, void* obj, int level, const char* str) {
+    HR_LOGD("%s\n", str);
+}
+
+static void _on_connect(struct mosquitto* mosq, void* obj, int result) {
+    int i;
+
+    UNUSED(obj);
+
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+
+    int connack_received = true;
+
+    int connack_result = result;
+    if (!result) {
+        // mosquitto_subscribe_multiple(mosq, NULL, 1, &_platform.topic, _platform.qos, NULL, NULL);
+        mosquitto_subscribe(mosq, NULL, _platform.topic, _platform.qos);
+    } else {
+        if (result) {
+            HR_LOGD("Connection error: %s\n", mosquitto_connack_string(result));
+        }
+        mosquitto_disconnect_v5(mosq, 0, NULL);
+    }
+}
+static void _on_connect_with_flags(struct mosquitto* mosq, void* obj, int result, int flags) {
+    int i;
+
+    UNUSED(obj);
+    UNUSED(flags);
+
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+
+    int connack_received = true;
+
+    int connack_result = result;
+    if (!result) {
+        mosquitto_subscribe(mosq, NULL, _platform.topic, _platform.qos);
+    } else {
+        if (result) {
+            HR_LOGD("Connection error: %s\n", mosquitto_connack_string(result));
+        }
+        mosquitto_disconnect_v5(mosq, 0, NULL);
+    }
+}
+
+
+static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+}
+
+static void _subscribe_callback(struct mosquitto* mosq, void* obj, int mid, int qos_count, const int* granted_qos) {
+    int i;
+    bool some_sub_allowed = (granted_qos[0] < 128);
+    bool should_print = 1;
+
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    if (should_print) printf("Subscribed (mid: %d): %d", mid, granted_qos[0]);
+    for (i = 1; i < qos_count; i++) {
+        if (should_print) printf(", %d", granted_qos[i]);
+        some_sub_allowed |= (granted_qos[i] < 128);
+    }
+    if (should_print) printf("\n");
+
+    if (some_sub_allowed == false) {
+        mosquitto_disconnect_v5(mosq, 0, NULL);
+        HR_LOGD("All subscription requests were denied.\n");
+    }
+}
+
+static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitto_message* message) {
+    int i;
+    bool res;
+
+    UNUSED(obj);
+
+    // if(process_messages == false) return;
+    HR_LOGD("%s(%d): receive topic:%s, payloadlen:%s\n", __FUNCTION__, __LINE__, message->topic, message->payloadlen);
+}
+
 int main(int argc, char** argv) {
     struct url_request* req = NULL;
 
     memset((void*)&_platform, 0, sizeof(_platform));
 
     _platform.id = 1;
+    _platform.qos = 0;
 
     dm_Device_init(NULL);
 
@@ -335,9 +433,6 @@ int main(int argc, char** argv) {
         dm_value_reset(&val);
     }
 
-    uc_platform_stage_1_devauth(&_platform);
-    uc_platform_stage_2_getmqttserver(&_platform);
-
     object = dm_object_lookup("Device.DeviceInfo.", NULL);
     if (object) {
         struct dm_value val;
@@ -346,6 +441,54 @@ int main(int argc, char** argv) {
         dm_value_reset(&val);
     }
 
+    uc_platform_stage_1_devauth(&_platform);
+    uc_platform_stage_2_getmqttserver(&_platform);
+
+    object = dm_object_lookup("Device.DeviceInfo.X_CU_CUEI", NULL);
+    if (object) {
+        struct dm_value val;
+        object->getter(object, &val);
+        // using cuei as mqtt's client id
+        strcpy(_platform.client_id, val.val.string);
+        dm_value_reset(&val);
+    }
+
+    HR_LOGD("%s(%d): try connect mqtt :%s:%d\n", __FUNCTION__, __LINE__, _platform.broker, _platform.port);
+    mosquitto_lib_init();
+
+    _platform.mosq = mosquitto_new(_platform.client_id, false, &_platform);
+    if (!_platform.mosq) {
+        HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__, __LINE__);
+        dm_object_free(NULL);
+        return -1;
+    }
+
+    mosquitto_log_callback_set(_platform.mosq, _on_log);
+
+    mosquitto_subscribe_callback_set(_platform.mosq, _subscribe_callback);
+    mosquitto_connect_callback_set(_platform.mosq, _on_connect);
+    mosquitto_connect_with_flags_callback_set(_platform.mosq, _on_connect_with_flags);
+	mosquitto_disconnect_callback_set(_platform.mosq, _on_disconnect);
+    mosquitto_message_v5_callback_set(_platform.mosq, _on_message);
+
+    mosquitto_tls_opts_set(_platform.mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
+
+    const char* cafile = "/home/alex/workspace/workspace/libuv/mqtt_cacert.pem";
+
+    mosquitto_tls_set(_platform.mosq, cafile, NULL, NULL, NULL, NULL);
+
+    mosquitto_tls_insecure_set(_platform.mosq, 0);
+
+    mosquitto_tls_opts_set(_platform.mosq, 0, NULL, NULL);
+    // mosquitto_connect_bind_v5(_platform.mosq, _platform.broker, _platform.port, _platform.alive_time, NULL, NULL);
+    mosquitto_connect_bind(_platform.mosq, _platform.broker, _platform.port, _platform.alive_time, NULL);
+
+    mosquitto_loop_forever(_platform.mosq, -1, 1);
+
+    mosquitto_destroy(_platform.mosq);
+    _platform.mosq = NULL;
+
+    mosquitto_lib_cleanup();
     dm_object_free(NULL);
 
     return 0;
