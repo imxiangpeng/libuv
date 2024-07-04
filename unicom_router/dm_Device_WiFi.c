@@ -140,11 +140,11 @@ int dm_Device_WiFi(struct dm_object* parent) {
     dm_object_new("MacFilterPolicy", DM_TYPE_NUMBER, MacFilterPolicy_getter, MacFilterPolicy_setter, wifi_2g);
     dm_object_new("MacFilterPolicy", DM_TYPE_NUMBER, MacFilterPolicy_getter, MacFilterPolicy_setter, wifi_5g);
 
-#if 0    
-    struct dm_object* wifi_2g_WMacFilters = dm_object_new("WMacFilters", DM_TYPE_OBJECT, dm_object_attribute, NULL, wifi_2g);
-    struct dm_object* wifi_5g_WMacFilters = dm_object_new("WMacFilters", DM_TYPE_OBJECT, dm_object_attribute, NULL, wifi_5g);
-    struct dm_object* wifi_2g_BMacFilters = dm_object_new("BMacFilters", DM_TYPE_OBJECT, dm_object_attribute, NULL, wifi_2g);
-    struct dm_object* wifi_5g_BMacFilters = dm_object_new("BMacFilters", DM_TYPE_OBJECT, dm_object_attribute, NULL, wifi_5g);
+#if 1    
+    struct dm_object* wifi_2g_WMacFilters = dm_object_new("WMacFilters", DM_TYPE_OBJECT, dm_object_attribute, WMacFilters_setter, wifi_2g);
+    struct dm_object* wifi_5g_WMacFilters = dm_object_new("WMacFilters", DM_TYPE_OBJECT, dm_object_attribute, WMacFilters_setter, wifi_5g);
+    struct dm_object* wifi_2g_BMacFilters = dm_object_new("BMacFilters", DM_TYPE_OBJECT, dm_object_attribute, BMacFilters_setter, wifi_2g);
+    struct dm_object* wifi_5g_BMacFilters = dm_object_new("BMacFilters", DM_TYPE_OBJECT, dm_object_attribute, BMacFilters_setter, wifi_5g);
     
 
 

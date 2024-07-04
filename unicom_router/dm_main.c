@@ -118,17 +118,17 @@ static struct uc_dm_action _uc_dm_action[] = {
 #if DM_DATA_FORMAT_UNION
 // convert normal json to format: E.10.3's second style
 static int _union_parameters(struct json_object *parent, const char *name,
-                             struct json_object *object) {
+                             struct json_object *object, char *union_name, int union_length) {
     int childs = 0;
-    const char *child_name = NULL;
+    char child_name[128] = {0};
 
     // HR_LOGD("%s(%d): parent:%p , name:%s\n", __FUNCTION__, __LINE__, parent,
     // name);
     json_object_object_foreach(object, key, val) {
         // HR_LOGD("%s(%d): key:%s\n", __FUNCTION__, __LINE__, key);
-        child_name = key;
+        snprintf(child_name, sizeof(child_name), "%s", key);
         if (json_object_is_type(val, json_type_object)) {
-            _union_parameters(object, key, val);
+            _union_parameters(object, key, val, child_name, sizeof(child_name));
         }
         childs++;
     }
@@ -137,6 +137,9 @@ static int _union_parameters(struct json_object *parent, const char *name,
         if (parent != NULL && name != NULL) {
             char tmp[128] = {0};
             snprintf(tmp, sizeof(tmp), "%s.%s", name, child_name);
+            if (union_name) {
+                snprintf(union_name, union_length, "%s.%s", name, child_name);
+            }
             HR_LOGD("%s(%d): union:%s -> %s\n", __FUNCTION__, __LINE__, name, tmp);
             struct json_object *o = json_object_object_get(object, child_name);
             // mxp, 20240704, must increment reference count, before del!
@@ -203,7 +206,7 @@ static int _fill_parameters(const char *param[],
     }
 
 #if DM_DATA_FORMAT_UNION
-    _union_parameters(NULL, NULL, parameter_values);
+    _union_parameters(NULL, NULL, parameter_values, NULL, 0);
 #endif
     return 0;
 }
@@ -519,7 +522,7 @@ static int _uc_dm_action_get_parameter_values(struct uc_platform *plat,
     json_object_object_add(response, "result", json_object_new_string(tmp));
 
 #if DM_DATA_FORMAT_UNION
-    _union_parameters(NULL, NULL, response_values);
+    _union_parameters(NULL, NULL, response_values, NULL, 0);
 #endif
 
     const char *str = json_object_to_json_string_ext(

@@ -198,8 +198,8 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
 
     root = _dm_object_object(self);
 
-    HR_LOGD("object:%s -> %s\n", self->name, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY));
-    dm_value_set_string_ext(val, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY), 0);
+    // HR_LOGD("object:%s -> %s\n", self->name, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY));
+    dm_value_set_string_ext(val, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE), 0);
 
     json_object_put(root);
 
