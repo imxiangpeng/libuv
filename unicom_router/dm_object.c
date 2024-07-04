@@ -91,7 +91,6 @@ void dm_object_free(struct dm_object* object) {
     if (!object)
         object = &_root;
     struct dm_object *p = NULL, *n = NULL;
-    int found = 0;
     HR_LOGD("%s(%d): free %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
     hr_list_for_each_entry_safe(p, n, &object->childrens, sibling) {
         // take off p
@@ -128,7 +127,7 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
 
     object = parent;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
-        HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, parent, parent->name);
+        // HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
         struct dm_object* p = NULL;
         int found = 0;
         hr_list_for_each_entry(p, &object->childrens, sibling) {
@@ -142,7 +141,7 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
             // HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
             return NULL;
         }
-        HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
+        // HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
     }
 
     return object;
@@ -187,7 +186,6 @@ struct json_object* _dm_object_object(struct dm_object* self) {
 int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
     // loop all childrens contruct json object ...
     struct json_object* root = NULL;
-    struct dm_object* p = NULL;
 
     if (self->type == DM_TYPE_NUMBER || self->type == DM_TYPE_STRING) {
         return self->getter(self, val);

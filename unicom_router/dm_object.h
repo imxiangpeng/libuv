@@ -56,8 +56,9 @@ void dm_object_free(struct dm_object* object);
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent);
 struct dm_object* dm_object_parent(struct dm_object* object);
 
-// serialize object as string
+// default object getter sequence function
 int dm_object_attribute(struct dm_object* self, struct dm_value* val);
+// maybe you should implement your self setter object function if you want object's all data be set togger
 
 int dm_value_reset(struct dm_value* val);
 int dm_value_set_number(struct dm_value*, int);

@@ -1,9 +1,10 @@
 
-#include <string.h>
 #include "dm_Device.h"
+
+#include <string.h>
+
 #include "dm_object.h"
 #include "hr_log.h"
-
 
 static int _X_CU_LockEnable = 0;
 static int X_CU_LockEnable_getter(struct dm_object* self, struct dm_value* val) {
@@ -18,11 +19,12 @@ static int X_CU_LockEnable_setter(struct dm_object* self, struct dm_value* val) 
     return 0;
 }
 
-int dm_Device_init(struct dm_object *parent) {
+int dm_Device_init(struct dm_object* parent) {
     struct dm_object* Device = dm_object_new("Device", DM_TYPE_OBJECT, dm_object_attribute, NULL, parent);
     struct dm_object* X_CU_LockEnable = dm_object_new("X_CU_LockEnable", DM_TYPE_NUMBER, X_CU_LockEnable_getter, X_CU_LockEnable_setter, Device);
     dm_Device_DeviceInfo_init(Device);
     dm_Device_X_CU_WAN_init(Device);
-    
+
+    dm_Device_WiFi(Device);
     return 0;
 }

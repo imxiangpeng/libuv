@@ -6,4 +6,6 @@
 int dm_Device_init(struct dm_object *parent);
 int dm_Device_DeviceInfo_init(struct dm_object *parent);
 int dm_Device_X_CU_WAN_init(struct dm_object *parent);
+
+int dm_Device_WiFi(struct dm_object* parent);
 #endif
