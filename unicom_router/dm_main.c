@@ -187,7 +187,8 @@ static int _fill_parameters(const char *param[],
                     struct dm_value val;
 
                     memset((void *)&val, 0, sizeof(val));
-                    dm->getter(dm, &val);
+                    if (dm->getter)
+                        dm->getter(dm, &val);
                     if (val.type == DM_TYPE_NUMBER) {
                         json_object_object_add(parent, token,
                                                json_object_new_int(val.val.number));
@@ -248,7 +249,10 @@ static int _fill_parameters_with_json_array(struct json_object *params,
                     struct dm_value val;
 
                     memset((void *)&val, 0, sizeof(val));
-                    dm->getter(dm, &val);
+
+                    if (dm->getter)
+                        dm->getter(dm, &val);
+
                     if (val.type == DM_TYPE_NUMBER) {
                         json_object_object_add(parent, token,
                                                json_object_new_int(val.val.number));
@@ -1126,6 +1130,7 @@ int main(int argc, char **argv) {
     struct json_object *r = json_tokener_parse(str);
 
     update_dm_object_using_json_object(NULL, r, NULL);
+    json_object_put(r);
 #endif
 
     HR_LOGD("%s(%d): try connect mqtt :%s:%d\n", __FUNCTION__, __LINE__,
