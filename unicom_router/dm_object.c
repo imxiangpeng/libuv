@@ -69,8 +69,6 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
     saveptr = tmp;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
         int is_leaf = strlen(saveptr) == 0 ? 1 : 0;
-        // HR_LOGD("%s(%d): token %s, saveptr:%s(%d)\n", __FUNCTION__, __LINE__, token, saveptr, strlen(saveptr));
-
         // this is last node/leaf
         struct dm_object* dm = dm_object_lookup(token, object);
         if (!dm) {
@@ -88,16 +86,19 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
 }
 
 void dm_object_free(struct dm_object* object) {
+    struct dm_object *p = NULL, *n = NULL;
+
     if (!object)
         object = &_root;
-    struct dm_object *p = NULL, *n = NULL;
-    HR_LOGD("%s(%d): free %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
+
     hr_list_for_each_entry_safe(p, n, &object->childrens, sibling) {
         // take off p
         hr_list_del(&p->sibling);
+        HR_INIT_LIST_HEAD(&p->sibling);
         dm_object_free(p);
     }
 
+    HR_INIT_LIST_HEAD(&object->childrens);
     if (object != &_root) {
         // free it
         free(object);
@@ -127,7 +128,6 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
 
     object = parent;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
-        // HR_LOGD("%s(%d): token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
         struct dm_object* p = NULL;
         int found = 0;
         hr_list_for_each_entry(p, &object->childrens, sibling) {
@@ -141,7 +141,6 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
             // HR_LOGD("%s(%d): cannot find token %s parent:%p -> %s\n", __FUNCTION__, __LINE__, token, object, object->name);
             return NULL;
         }
-        // HR_LOGD("%s(%d): found object %p -> %s\n", __FUNCTION__, __LINE__, object, object->name);
     }
 
     return object;
@@ -157,15 +156,23 @@ struct json_object* _dm_object_object(struct dm_object* self) {
         memset((void*)&val, 0, sizeof(val));
         switch (p->type) {
             case DM_TYPE_STRING: {
-                p->getter(p, &val);
-                obj = json_object_new_string(val.val.string);
-                dm_value_reset(&val);
+                if (p->getter) {
+                    p->getter(p, &val);
+                    obj = json_object_new_string(val.val.string);
+                    dm_value_reset(&val);
+                } else {
+                    obj = json_object_new_null();
+                }
                 break;
             }
             case DM_TYPE_NUMBER: {
-                p->getter(p, &val);
-                obj = json_object_new_int(val.val.number);
-                dm_value_reset(&val);
+                if (p->getter) {
+                    p->getter(p, &val);
+                    obj = json_object_new_int(val.val.number);
+                    dm_value_reset(&val);
+                } else {
+                    obj = json_object_new_null();
+                }
                 break;
             }
 
@@ -204,6 +211,24 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
     json_object_put(root);
 
     return 0;
+}
+
+// using recursion generate full id, seperated with .
+int dm_object_id(struct dm_object* self, char* id, int len) {
+    struct dm_object* o = NULL;
+    char tmp[128] = {0};
+    if (!self || !id) {
+        return -1;
+    }
+    if (self->parent != NULL /*&& self->parent != &_root*/) {
+        int rc = dm_object_id(self->parent, id, len);
+        // printf("rc:%d, %s  -> tmp:%s\n", rc, self->name, tmp);
+        snprintf(id + rc, len - rc, ".%s", self->name);
+    } else {
+        snprintf(id, len, "%s", self->name);
+    }
+
+    return strlen(id);
 }
 
 int dm_value_reset(struct dm_value* val) {

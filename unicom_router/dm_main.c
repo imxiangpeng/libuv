@@ -4,6 +4,7 @@
 #include <json-c/json_types.h>
 #include <mosquitto.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -252,14 +253,20 @@ static int _fill_parameters_with_json_array(struct json_object *params,
                         json_object_object_add(parent, token,
                                                json_object_new_int(val.val.number));
                     } else if (val.type == DM_TYPE_STRING) {
-                        json_object_object_add(
-                            parent, token,
-                            json_object_new_string(val.val.string ? val.val.string : ""));
-                    } else if (val.type == DM_TYPE_OBJECT) {
-                        json_object_object_add(
-                            parent, token,
-                            json_object_new_string(val.val.string ? val.val.string : ""));
+                        if (dm->type == DM_TYPE_STRING) {
+                            json_object_object_add(
+                                parent, token,
+                                json_object_new_string(val.val.string ? val.val.string : ""));
+                        } else if (dm->type == DM_TYPE_OBJECT) {
+                            // care that we should parse json first, should not add string object
+                            struct json_object *o = json_tokener_parse(val.val.string);
+                            json_object_object_add(parent, token, o);
+                        }
+                    } else {
+                        // not support
                     }
+
+                    dm_value_reset(&val);
                 } else {
                     object = json_object_new_object();
                     json_object_object_add(parent, token, object);
@@ -392,8 +399,8 @@ int uc_platform_stage_1_devauth(struct uc_platform *plat) {
 int uc_platform_stage_2_getmqttserver(struct uc_platform *plat) {
     struct hrbuffer b;
     struct url_request *req = plat->req;
-    struct json_object *root = NULL, *mqtt_client_1 = NULL;
-    const char *cookie = NULL;
+    struct json_object *root = NULL, *result = NULL, *cookie = NULL, *mqtt_client_1 = NULL;
+    const char *str = NULL;
 
     if (!plat)
         return -1;
@@ -415,19 +422,28 @@ int uc_platform_stage_2_getmqttserver(struct uc_platform *plat) {
     root = json_tokener_parse(b.data);
     hrbuffer_free(&b);
     if (!root) {
-        HR_LOGD(" can not parse json .....\n");
+        HR_LOGD("%s(%d): can not parse json .....\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
-    if (json_object_get_int(json_object_object_get(root, "result")) != 0) {
+    json_object_object_get_ex(root, "result", &result);
+    if (!result || json_object_get_int(result) != 0) {
         json_object_put(root);
-        HR_LOGD(" can not parse json .....\n");
+        HR_LOGD("%s(%d): can not parse json .....\n", __FUNCTION__, __LINE__);
         return -1;
     }
-    cookie = json_object_get_string(json_object_object_get(root, "cookie"));
-    if (strcmp(plat->cookie, cookie)) {
+
+    json_object_object_get_ex(root, "cookie", &cookie);
+    if (!cookie) {
+        json_object_put(root);
+        HR_LOGD("%s(%d): can not parse json .....\n", __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    str = json_object_get_string(cookie);
+    if (strcmp(plat->cookie, str)) {
         memset((void *)plat->cookie, 0, sizeof(plat->cookie));
-        memcpy(plat->cookie, cookie, strlen(cookie));
+        memcpy(plat->cookie, str, strlen(str));
     }
 
     const char *uuid =
@@ -649,14 +665,160 @@ static int _uc_dm_action_set_parameter_values(struct uc_platform *plat,
     return 0;
 }
 
+// it's only one item in parameterNames array
 static int _uc_dm_action_add_instance(struct uc_platform *plat,
-                                      struct json_object *root) {
+                                      struct json_object *data) {
+    int length = 0;
+    int rc = 0;
+    const char *str = NULL;
+    struct dm_value v;
+    char tmp[64] = {0};
+    struct json_object *response = NULL;
     HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
+    if (!plat || !data) return -1;
+
+    str = json_object_to_json_string_ext(
+        data, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE |
+                  JSON_C_TO_STRING_PRETTY);
+
+    HR_LOGD("%s(%d): data:%s...........\n", __FUNCTION__, __LINE__, str);
+
+    const char *id = json_object_get_string(json_object_object_get(data, "id"));
+    struct json_object *params = json_object_object_get(data, "parameterNames");
+
+    if (!params || !json_object_is_type(params, json_type_array)) {
+        HR_LOGE("%s(%d): can not find parameterNames or is not array!\n",
+                __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    const char *p =
+        json_object_get_string(json_object_array_get_idx(params, 0));
+    if (!p) {
+        rc = 9003;
+        goto end;
+    }
+
+    HR_LOGD("%s(%d): addInstance %s\n", __FUNCTION__, __LINE__, p);
+
+    struct dm_object *dm = dm_object_lookup(p, NULL);
+    if (!dm || !dm->adder) {
+        HR_LOGD("%s(%d): can not found %s\n", __FUNCTION__, __LINE__, p);
+        rc = 5004;
+        goto end;
+    }
+
+    memset((void *)&v, 0, sizeof(v));
+
+    dm->adder(dm, &v);
+
+    HR_LOGD("%s(%d): addInstance %s, result:%s\n", __FUNCTION__, __LINE__, p, v.val.string);
+
+end:
+    response = json_object_new_object();
+
+    json_object_object_add(response, "cwmpVersion",
+                           json_object_new_string("2.0"));
+
+    json_object_object_add(response, "id", json_object_new_string(id));
+
+    snprintf(tmp, sizeof(tmp), "%d", rc);
+    json_object_object_add(response, "result", json_object_new_string(tmp));
+
+    if (rc == 0) {
+        json_object_object_add(response, "resultString", json_object_new_string(v.val.string));
+    } else {
+        json_object_object_add(response, "resultString", json_object_new_string(""));
+    }
+    str = json_object_to_json_string_ext(
+        response, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE |
+                      JSON_C_TO_STRING_PRETTY);
+    HR_LOGD("%s(%d): response :%s\n", __FUNCTION__, __LINE__, str);
+
+    mosquitto_publish(plat->mosq, NULL, plat->uuid, strlen(str), str, 0, false);
+
+    dm_value_reset(&v);
+    json_object_put(response);
+
     return 0;
 }
+
+// it's only one item in parameterNames array
 static int _uc_dm_action_del_instance(struct uc_platform *plat,
-                                      struct json_object *root) {
+                                      struct json_object *data) {
+    int rc = 0;
+    int length = 0;
+    const char *str = NULL;
+    char tmp[64] = {0};
+    struct json_object *response = NULL;
     HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
+    if (!plat || !data) return -1;
+
+    str = json_object_to_json_string_ext(
+        data, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE |
+                  JSON_C_TO_STRING_PRETTY);
+    HR_LOGD("%s(%d): data:%s...........\n", __FUNCTION__, __LINE__, str);
+
+    const char *id = json_object_get_string(json_object_object_get(data, "id"));
+    struct json_object *params = json_object_object_get(data, "parameterNames");
+
+    if (!params || !json_object_is_type(params, json_type_array)) {
+        HR_LOGE("%s(%d): can not find parameterNames or is not array!\n",
+                __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    length = json_object_array_length(params);
+
+    for (int i = 0; i < length; i++) {
+        const char *p =
+            json_object_get_string(json_object_array_get_idx(params, i));
+
+        HR_LOGD("%s(%d): delInstance %s\n", __FUNCTION__, __LINE__, p);
+
+        struct dm_object *dm = dm_object_lookup(p, NULL);
+        if (!dm) {
+            HR_LOGD("%s(%d): can not found %s\n", __FUNCTION__, __LINE__, p);
+            rc = 5003;
+            goto end;
+        }
+
+        // we should redirect to it's parent
+        dm = dm->parent;
+        if (!dm->deleter) {
+            HR_LOGD("%s(%d): object %s not support delInstance\n", __FUNCTION__, __LINE__, dm->name);
+            rc = 5003;
+            goto end;
+        }
+
+        struct dm_value v;
+        memset((void *)&v, 0, sizeof(v));
+        dm_value_set_string_ext(&v, p, 1);
+        HR_LOGD("%s(%d): delInstance %s from %s\n", __FUNCTION__, __LINE__, p, dm->parent);
+        rc = dm->deleter(dm, &v);
+        dm_value_reset(&v);
+
+        HR_LOGD("%s(%d): delInstance %s from %s success\n", __FUNCTION__, __LINE__, p, dm->parent);
+    }
+end:
+    response = json_object_new_object();
+
+    json_object_object_add(response, "cwmpVersion",
+                           json_object_new_string("2.0"));
+
+    json_object_object_add(response, "id", json_object_new_string(id));
+
+    snprintf(tmp, sizeof(tmp), "%d", rc);
+    json_object_object_add(response, "result", json_object_new_string(tmp));
+    str = json_object_to_json_string_ext(
+        response, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE |
+                      JSON_C_TO_STRING_PRETTY);
+    HR_LOGD("%s(%d): response :%s\n", __FUNCTION__, __LINE__, str);
+
+    mosquitto_publish(plat->mosq, NULL, plat->uuid, strlen(str), str, 0, false);
+
+    json_object_put(response);
+
     return 0;
 }
 
@@ -839,9 +1001,25 @@ void *_mqtt_routin(void *args) {
     mqtt_device_info_sync((struct uc_platform *)args);
     return NULL;
 }
+static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
+    (void)sigcontext;
+
+    HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
+
+    // if (SIGUSR1 == signum) {
+    mosquitto_disconnect(_platform.mosq);
+    mosquitto_loop_stop(_platform.mosq, 1);
+    //}
+}
 
 int main(int argc, char **argv) {
     struct url_request *req = NULL;
+
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    sigemptyset(&action.sa_mask);
+    action.sa_sigaction = _signal_action;
+    sigaction(SIGUSR1, &action, NULL);
 
     memset((void *)&_platform, 0, sizeof(_platform));
 
@@ -857,23 +1035,28 @@ int main(int argc, char **argv) {
     struct dm_object *object = dm_object_lookup("Device.X_CU_LockEnable", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("lock:%d\n", val.val.number);
         val.val.number = !val.val.number;
         HR_LOGD("adjust lock:%d\n", val.val.number);
         object->setter(object, &val);
+        dm_value_reset(&val);
     }
 
     object = dm_object_lookup("X_CU_LockEnable", Device);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
+        dm_value_reset(&val);
         HR_LOGD("direct query from Device lock:%d\n", val.val.number);
     }
 
     object = dm_object_lookup("Device.DeviceInfo.SerialNumber", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("serial:%s\n", val.val.string);
         dm_value_reset(&val);
@@ -882,6 +1065,7 @@ int main(int argc, char **argv) {
     object = dm_object_lookup("Device.DeviceInfo.ModelName", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("model 1 :%s\n", val.val.string);
         dm_value_reset(&val);
@@ -893,6 +1077,7 @@ int main(int argc, char **argv) {
     object = dm_object_lookup("Device.DeviceInfo.ModelName2", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("model 2:%s\n", val.val.string);
         dm_value_reset(&val);
@@ -901,6 +1086,7 @@ int main(int argc, char **argv) {
     object = dm_object_lookup("Device.DeviceInfo.", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("Device.DeviceInfo:%s\n", val.val.string);
         dm_value_reset(&val);
@@ -909,6 +1095,7 @@ int main(int argc, char **argv) {
     object = dm_object_lookup("Device.", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("Device.:%s\n", val.val.string);
         dm_value_reset(&val);
@@ -924,13 +1111,14 @@ int main(int argc, char **argv) {
     object = dm_object_lookup("Device.DeviceInfo.X_CU_CUEI", NULL);
     if (object) {
         struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         // using cuei as mqtt's client id
         snprintf(_platform.client_id, sizeof(_platform.client_id), "%s",
                  val.val.string);
         dm_value_reset(&val);
     }
-
+#if 0
     // clang-format off
     const char* str = "{\"Device.WiFi.X_CU_ACL\":{\"2G\":{\"OperatingFrequencyBand\":\"2.4GHz\",\"MACAddressControlEnabled\":true,\"MacFilterPolicy\":0,\"WMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"},\"BMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"}},\"5G\":{\"OperatingFrequencyBand\":\"5GHz\",\"MACAddressControlEnabled\":true,\"MacFilterPolicy\":0,\"WMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"},\"BMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"}}}}";
     // clang-format off
@@ -938,6 +1126,7 @@ int main(int argc, char **argv) {
     struct json_object *r = json_tokener_parse(str);
 
     update_dm_object_using_json_object(NULL, r, NULL);
+#endif
 
     HR_LOGD("%s(%d): try connect mqtt :%s:%d\n", __FUNCTION__, __LINE__,
             _platform.host, _platform.port);
@@ -946,6 +1135,7 @@ int main(int argc, char **argv) {
     HR_LOGD("client id:%s\n", _platform.client_id);
     _platform.mosq = mosquitto_new(_platform.client_id, false, &_platform);
     if (!_platform.mosq) {
+
         HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__,
                 __LINE__);
         dm_object_free(NULL);
@@ -978,6 +1168,8 @@ int main(int argc, char **argv) {
         // return -1;
     }
 
+    sigaction(SIGUSR1, &action, NULL);
+    sigaction(SIGUSR2, &action, NULL);
     mosquitto_loop_forever(_platform.mosq, -1, 1);
 
     mosquitto_destroy(_platform.mosq);
@@ -985,6 +1177,9 @@ int main(int argc, char **argv) {
 
     mosquitto_lib_cleanup();
     dm_object_free(NULL);
+    
+    pthread_cancel(_platform.tid);
+    pthread_join(_platform.tid, NULL);
 
     return 0;
 }

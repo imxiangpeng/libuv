@@ -46,6 +46,10 @@ struct dm_object {
 
     dm_attribute getter;
     dm_attribute setter;
+    // addInstance
+    dm_attribute adder;
+    // delInstance
+    dm_attribute deleter;
 
     char name[];  // must at end
 };
@@ -59,7 +63,7 @@ struct dm_object* dm_object_parent(struct dm_object* object);
 // default object getter sequence function
 int dm_object_attribute(struct dm_object* self, struct dm_value* val);
 // maybe you should implement your self setter object function if you want object's all data be set togger
-
+int dm_object_id(struct dm_object *self, char *id, int len);
 int dm_value_reset(struct dm_value* val);
 int dm_value_set_number(struct dm_value*, int);
 int dm_value_set_string(struct dm_value*, const char*);
