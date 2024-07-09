@@ -1,15 +1,5 @@
-/*
- * Copyright (C) 2024 Inspur Group Co., Ltd. Unpublished
- *
- * Inspur Group Co., Ltd.
- * Proprietary & Confidential
- *
- * This source code and the algorithms implemented therein constitute
- * confidential information and may comprise trade secrets of Inspur
- * or its associates, and any use thereof is subject to the terms and
- * conditions of the Non-Disclosure Agreement pursuant to which this
- * source code was originally received.
- */
+// 20240701, mxp, data model for unicom platform
+// all object maybe have getter/setter/adder/deleter ...
 
 #include "dm_object.h"
 
@@ -68,7 +58,7 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
     memcpy(tmp, name, strlen(name));
     saveptr = tmp;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
-        int is_leaf = strlen(saveptr) == 0 ? 1 : 0;
+        int is_leaf = (saveptr == NULL || saveptr[0] == '\0') == 0 ? 1 : 0;
         // this is last node/leaf
         struct dm_object* dm = dm_object_lookup(token, object);
         if (!dm) {
@@ -215,14 +205,11 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
 
 // using recursion generate full id, seperated with .
 int dm_object_id(struct dm_object* self, char* id, int len) {
-    struct dm_object* o = NULL;
-    char tmp[128] = {0};
     if (!self || !id) {
         return -1;
     }
     if (self->parent != NULL /*&& self->parent != &_root*/) {
         int rc = dm_object_id(self->parent, id, len);
-        // printf("rc:%d, %s  -> tmp:%s\n", rc, self->name, tmp);
         snprintf(id + rc, len - rc, ".%s", self->name);
     } else {
         snprintf(id, len, "%s", self->name);
