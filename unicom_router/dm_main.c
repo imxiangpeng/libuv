@@ -1075,6 +1075,8 @@ static int mtqq_device_bind_active_on_response(struct uc_platform *plat, struct 
     HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
 
     HR_LOGD("%s(%d): come in ........ data:%s\n", __FUNCTION__, __LINE__, json_object_to_json_string(root));
+
+    // disconnect & auth again
     return 0;
 }
 // E.3.8
@@ -1314,8 +1316,6 @@ int main(int argc, char **argv) {
     _platform.id = 1;
     _platform.qos = 0;
 
-    _platform.req = url_request_new();
-
     dm_Device_init(NULL);
     dm_Reboot_init(NULL);
     dm_FactoryReset_init(NULL);
@@ -1392,9 +1392,47 @@ int main(int argc, char **argv) {
         dm_value_reset(&val);
     }
 
-    uc_platform_stage_1_devauth(&_platform);
-    uc_platform_stage_2_getmqttserver(&_platform);
+    int retries = 0;
+stage_1:
+    if (!_platform.req) {
+        _platform.req = url_request_new();
+        // defautl 15s
+        _platform.req->set_option(_platform.req, URL_OPT_TIMEOUT, 15000);
+    }
 
+    rc = uc_platform_stage_1_devauth(&_platform);
+    if (rc != 0) {
+        // random wait (1 - 60)
+        retries++;
+        srand(time(NULL));
+        int duration = rand() % 60 + 1;
+        HR_LOGD("1 failed, wait :%d\n", duration);
+        usleep(duration * 1000 * 1000);
+        goto stage_1;
+    }
+    retries = 0;
+
+stage_2:
+    rc = uc_platform_stage_2_getmqttserver(&_platform);
+    if (rc != 0) {
+        srand(time(NULL));
+
+        retries++;
+        HR_LOGD("retries :%d\n", retries);
+        if (retries > 3) {
+            url_request_free(_platform.req);
+            _platform.req = NULL;
+            // random wait (10 - 60)
+            int duration = rand() % 60 + 10;
+            HR_LOGD("stage 2 retry max times, goto stage 1 :%d\n", duration);
+            goto stage_1;
+        }
+        // random wait (1 - 60)
+        int duration = rand() % 60 + 1;
+        HR_LOGD("stage 2 wait :%d\n", duration);
+        usleep(duration * 1000 * 1000);
+        goto stage_2;
+    }
     // release socket
     url_request_free(_platform.req);
     _platform.req = NULL;

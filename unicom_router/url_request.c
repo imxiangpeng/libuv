@@ -47,6 +47,15 @@ struct url_request_pool_priv {
 #define TCLOUD_REQUEST_PRIV(self) container_of(self, struct url_request_priv, request)
 #define TCLOUD_REQUEST_POOL_PRIV(self) container_of(self, struct url_request_pool_priv, pool)
 
+struct {
+    int opt;
+    int curl_option;
+} _opts[] = {
+    [URL_OPT_VERBOSE] = {URL_OPT_VERBOSE, CURLOPT_VERBOSE},
+    [URL_OPT_TIMEOUT] = {URL_OPT_TIMEOUT, CURLOPT_TIMEOUT_MS},
+    [URL_OPT_CONNECT_TIMEOUT] = {URL_OPT_CONNECT_TIMEOUT, CURLOPT_CONNECTTIMEOUT_MS},
+};
+
 static struct url_request *url_request_pool_acquire(struct url_request_pool *self) {
     struct url_request_priv *req = NULL;
     struct url_request_pool_priv *priv = TCLOUD_REQUEST_POOL_PRIV(self);
@@ -168,6 +177,18 @@ static int _set_header(struct url_request *req, const char *name, const char *va
     priv->headers = curl_slist_append(priv->headers, str);
 
     free(str);
+
+    return 0;
+}
+
+static int _set_option(struct url_request *req, unsigned int opt, long value) {
+    struct url_request_priv *priv = TCLOUD_REQUEST_PRIV(req);
+
+    if (!priv) return -1;
+
+    if (opt >= URL_OPT_MAX) return -1;
+
+    curl_easy_setopt(priv->curl, _opts[opt].curl_option, value);
 
     return 0;
 }
@@ -401,6 +422,7 @@ struct url_request *url_request_new(void) {
     priv->request.set_query = _set_query;
     priv->request.set_form = _set_form;
     priv->request.set_header = _set_header;
+    priv->request.set_option = _set_option;
     priv->request.allow_redirect = _allow_redirect;
     priv->request.get = _http_do_get;
     priv->request.post = _http_do_post;

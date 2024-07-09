@@ -9,6 +9,13 @@ typedef enum {
     UR_METHOD_PUT,
 } url_request_method_e;
 
+enum {
+    URL_OPT_VERBOSE = 0,
+    URL_OPT_TIMEOUT,          // ms
+    URL_OPT_CONNECT_TIMEOUT,  // ms
+    URL_OPT_MAX,
+};
+
 struct url_request {
     // struct hrbuffer url;
     url_request_method_e method;
@@ -16,6 +23,7 @@ struct url_request {
     int (*set_query)(struct url_request *, const char *, const char *);
     int (*set_form)(struct url_request *, const char *, const char *);
     int (*set_header)(struct url_request *, const char *, const char *);
+    int (*set_option)(struct url_request *, unsigned int opt, long value);
     int (*allow_redirect)(struct url_request *, int);
     int (*get)(struct url_request *, const char *url, struct hrbuffer *b);
     int (*post)(struct url_request *, const char *url, struct hrbuffer *b);
