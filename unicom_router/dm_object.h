@@ -9,6 +9,7 @@ enum dm_type {
     DM_TYPE_OBJECT,  // object
     DM_TYPE_NUMBER,  // value
     DM_TYPE_STRING,  // value
+    DM_TYPE_BOOLEAN,  // value
     DM_TYPE_MAX,     // value
 };
 struct dm_value {
@@ -16,6 +17,7 @@ struct dm_value {
     union {
         // struct dm_object *object; // object is represent using json
         int number;
+        int boolean;
         const char* string;
     } val;
     int preallocated;  // union value is preallocated, you no need free it...
@@ -53,6 +55,7 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val);
 int dm_object_id(struct dm_object *self, char *id, int len);
 int dm_value_reset(struct dm_value* val);
 int dm_value_set_number(struct dm_value*, int);
+int dm_value_set_boolean(struct dm_value* val, int value);
 int dm_value_set_string(struct dm_value*, const char*);
 int dm_value_set_string_ext(struct dm_value*, const char*, int preallocated);
 #endif

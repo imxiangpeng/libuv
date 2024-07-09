@@ -1,4 +1,5 @@
 #include <json-c/json.h>
+#include <json-c/json_object.h>
 #include <limits.h>
 #include <mosquitto.h>
 #include <pthread.h>
@@ -10,6 +11,7 @@
 #include "dm_Device.h"
 #include "dm_FactoryReset.h"
 #include "dm_Reboot.h"
+#include "dm_object.h"
 #include "hr_buffer.h"
 #include "hr_list.h"
 #include "hr_log.h"
@@ -214,14 +216,24 @@ static int _fill_parameters(const char *param[],
                     memset((void *)&val, 0, sizeof(val));
                     if (dm->getter)
                         dm->getter(dm, &val);
-                    if (val.type == DM_TYPE_NUMBER) {
+
+                    if (dm->type == DM_TYPE_NUMBER) {
                         json_object_object_add(parent, token,
                                                json_object_new_int(val.val.number));
-                    } else if (val.type == DM_TYPE_STRING) {
+                    } else if (dm->type == DM_TYPE_BOOLEAN) {
+                        json_object_object_add(parent, token,
+                                               json_object_new_boolean(val.val.boolean));
+                    } else if (dm->type == DM_TYPE_STRING) {
                         json_object_object_add(
                             parent, token,
                             json_object_new_string(val.val.string ? val.val.string : ""));
+                    } else if (dm->type == DM_TYPE_OBJECT) {
+                        // care that we should parse json first, should not add string object
+                        struct json_object *o = json_tokener_parse(val.val.string);
+                        json_object_object_add(parent, token, o);
                     }
+
+                    dm_value_reset(&val);
                 } else {
                     object = json_object_new_object();
                     json_object_object_add(parent, token, object);
@@ -275,21 +287,20 @@ static int _fill_parameters_with_json_array(struct json_object *params,
                     if (dm->getter)
                         dm->getter(dm, &val);
 
-                    if (val.type == DM_TYPE_NUMBER) {
+                    if (dm->type == DM_TYPE_NUMBER) {
                         json_object_object_add(parent, token,
                                                json_object_new_int(val.val.number));
-                    } else if (val.type == DM_TYPE_STRING) {
-                        if (dm->type == DM_TYPE_STRING) {
-                            json_object_object_add(
-                                parent, token,
-                                json_object_new_string(val.val.string ? val.val.string : ""));
-                        } else if (dm->type == DM_TYPE_OBJECT) {
-                            // care that we should parse json first, should not add string object
-                            struct json_object *o = json_tokener_parse(val.val.string);
-                            json_object_object_add(parent, token, o);
-                        }
-                    } else {
-                        // not support
+                    } else if (dm->type == DM_TYPE_BOOLEAN) {
+                        json_object_object_add(parent, token,
+                                               json_object_new_boolean(val.val.boolean));
+                    } else if (dm->type == DM_TYPE_STRING) {
+                        json_object_object_add(
+                            parent, token,
+                            json_object_new_string(val.val.string ? val.val.string : ""));
+                    } else if (dm->type == DM_TYPE_OBJECT) {
+                        // care that we should parse json first, should not add string object
+                        struct json_object *o = json_tokener_parse(val.val.string);
+                        json_object_object_add(parent, token, o);
                     }
 
                     dm_value_reset(&val);
@@ -605,10 +616,10 @@ static int update_dm_object_using_json_object(struct dm_object *object,
 
         memset((void *)&v, 0, sizeof(v));
 
-        // HR_LOGD("%s(%d): type %d...............\n", __FUNCTION__, __LINE__,
-        // json_object_get_type(val));
         if (json_object_get_type(val) == json_type_int) {
             dm_value_set_number(&v, json_object_get_int(val));
+        } else if (json_object_get_type(val) == json_type_boolean) {
+            dm_value_set_boolean(&v, json_object_get_boolean(val));
         } else if (json_object_get_type(val) == json_type_string) {
             dm_value_set_string(&v, json_object_get_string(val));
         } else if (json_object_get_type(val) == json_type_object) {
@@ -1317,7 +1328,8 @@ int main(int argc, char **argv) {
         memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("lock:%d\n", val.val.number);
-        val.val.number = !val.val.number;
+        // val.val.number = !val.val.number;
+        // val.val.boolean= !val.val.boolean;
         HR_LOGD("adjust lock:%d\n", val.val.number);
         object->setter(object, &val);
         dm_value_reset(&val);

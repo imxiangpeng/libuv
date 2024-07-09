@@ -144,34 +144,35 @@ struct json_object* _dm_object_object(struct dm_object* self) {
         struct dm_value val;
         struct json_object* obj = NULL;
         memset((void*)&val, 0, sizeof(val));
+
+        if (!p->getter) {
+            obj = json_object_new_null();
+            continue;
+        }
+
+        p->getter(p, &val);
+
         switch (p->type) {
             case DM_TYPE_STRING: {
-                if (p->getter) {
-                    p->getter(p, &val);
-                    obj = json_object_new_string(val.val.string);
-                    dm_value_reset(&val);
-                } else {
-                    obj = json_object_new_null();
-                }
+                obj = json_object_new_string(val.val.string);
                 break;
             }
             case DM_TYPE_NUMBER: {
-                if (p->getter) {
-                    p->getter(p, &val);
-                    obj = json_object_new_int(val.val.number);
-                    dm_value_reset(&val);
-                } else {
-                    obj = json_object_new_null();
-                }
+                obj = json_object_new_int(val.val.number);
                 break;
             }
-
+            case DM_TYPE_BOOLEAN: {
+                obj = json_object_new_boolean(val.val.boolean);
+                break;
+            }
             case DM_TYPE_OBJECT: {
                 obj = _dm_object_object(p);
             }
             default:
                 break;
         }
+
+        dm_value_reset(&val);
 
         if (obj) {
             json_object_object_add(root, p->name, obj);
@@ -184,7 +185,7 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
     // loop all childrens contruct json object ...
     struct json_object* root = NULL;
 
-    if (self->type == DM_TYPE_NUMBER || self->type == DM_TYPE_STRING) {
+    if (self->type != DM_TYPE_OBJECT) {
         return self->getter(self, val);
     }
 
@@ -243,6 +244,15 @@ int dm_value_set_number(struct dm_value* val, int number) {
     dm_value_reset(val);
     val->type = DM_TYPE_NUMBER;
     val->val.number = number;
+    return 0;
+}
+
+int dm_value_set_boolean(struct dm_value* val, int value) {
+    if (!val) return -1;
+
+    dm_value_reset(val);
+    val->type = DM_TYPE_BOOLEAN;
+    val->val.boolean = !!value;
     return 0;
 }
 int dm_value_set_string(struct dm_value* val, const char* str) {
