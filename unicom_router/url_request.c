@@ -51,9 +51,9 @@ struct {
     int opt;
     int curl_option;
 } _opts[] = {
-    [URL_OPT_VERBOSE] = {URL_OPT_VERBOSE, CURLOPT_VERBOSE},
-    [URL_OPT_TIMEOUT] = {URL_OPT_TIMEOUT, CURLOPT_TIMEOUT_MS},
-    [URL_OPT_CONNECT_TIMEOUT] = {URL_OPT_CONNECT_TIMEOUT, CURLOPT_CONNECTTIMEOUT_MS},
+    [URLOPT_VERBOSE] = {URLOPT_VERBOSE, CURLOPT_VERBOSE},
+    [URLOPT_TIMEOUT] = {URLOPT_TIMEOUT, CURLOPT_TIMEOUT_MS},
+    [URLOPT_CONNECT_TIMEOUT] = {URLOPT_CONNECT_TIMEOUT, CURLOPT_CONNECTTIMEOUT_MS},
 };
 
 static struct url_request *url_request_pool_acquire(struct url_request_pool *self) {
@@ -186,7 +186,7 @@ static int _set_option(struct url_request *req, unsigned int opt, long value) {
 
     if (!priv) return -1;
 
-    if (opt >= URL_OPT_MAX) return -1;
+    if (opt >= URLOPT_MAX) return -1;
 
     curl_easy_setopt(priv->curl, _opts[opt].curl_option, value);
 

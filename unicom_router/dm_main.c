@@ -1,3 +1,5 @@
+#include <errno.h>
+#include <fcntl.h>
 #include <json-c/json.h>
 #include <json-c/json_object.h>
 #include <limits.h>
@@ -6,6 +8,9 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/epoll.h>
+#include <sys/inotify.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "dm_Device.h"
@@ -17,16 +22,32 @@
 #include "hr_log.h"
 #include "url_request.h"
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+#ifndef TEMP_FAILURE_RETRY
+#define TEMP_FAILURE_RETRY(exp)                \
+    ({                                         \
+        typeof(exp) _rc;                       \
+        do {                                   \
+            _rc = (exp);                       \
+        } while (_rc == -1 && errno == EINTR); \
+        _rc;                                   \
+    })
+#endif
+
+#define DM_DATA_FORMAT_UNION 1
+
 #define MNG_URL "https://123.6.50.69:8803"
 
 #define MNG_URL_AUTH MNG_URL "/api/auth"
 #define MNG_URL_DEVICE_GET_MQTT_SERVER MNG_URL "/api/deviceGetMqttServer"
 
-#ifndef UNUSED
-#define UNUSED(x) (void)(x)
-#endif
-
-#define DM_DATA_FORMAT_UNION 1
+#define UC_DM "uc_dm.ini"
+#define UC_BIND_ACTIVE_NAME "uc_bind_active.json"
+// #define UC_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/bind.ini"
+#define UC_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/"
 
 struct uc_platform {
     struct url_request *req;
@@ -56,6 +77,8 @@ struct uc_platform {
     struct mosquitto *mosq;
 
     pthread_t tid;
+
+    int login_after_exit;  // after bind active we should login again
 };
 
 struct uc_dm_action {
@@ -417,14 +440,14 @@ int uc_platform_stage_1_devauth(struct uc_platform *plat) {
 
     json_object_object_get_ex(root, "result", &result);
     if (!result || json_object_get_int(result) != 0) {
+        HR_LOGD("%s(%d): result error: %s.....\n", __FUNCTION__, __LINE__, json_object_to_json_string(root));
         json_object_put(root);
-        HR_LOGD(" can not parse json .....\n");
         return -1;
     }
     json_object_object_get_ex(root, "cookie", &cookie);
     if (!cookie) {
+        HR_LOGD("%s(%d): no cookie: %s.....\n", __FUNCTION__, __LINE__, json_object_to_json_string(root));
         json_object_put(root);
-        HR_LOGD(" can not parse json .....\n");
         return -1;
     }
 
@@ -1076,7 +1099,41 @@ static int mtqq_device_bind_active_on_response(struct uc_platform *plat, struct 
 
     HR_LOGD("%s(%d): come in ........ data:%s\n", __FUNCTION__, __LINE__, json_object_to_json_string(root));
 
+    // { "result": "0", "devId": "200037050001000", "cwmpVersion": "2.0", "secret": "7d1c67c3-22dc-40b2-837d-0df362a3894f", "id": "4" }
+
+    const char *devid = json_object_get_string(json_object_object_get(root, "devId"));
+    const char *secret = json_object_get_string(json_object_object_get(root, "secret"));
+    if (!devid || !secret) {
+        HR_LOGD("%s(%d): can not got valid dev id & secret...........\n", __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    snprintf(plat->device_id, sizeof(plat->device_id), "%s", devid);
+    snprintf(plat->secret, sizeof(plat->secret), "%s", secret);
+
+    // save device id & secret to storage
+    int fd = open(UC_BIND_ACTIVE_OBSERVE_PATH UC_DM, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    if (fd < 0) {
+        return -1;
+    }
+
+    struct hrbuffer b;
+    hrbuffer_alloc(&b, 128);
+    hrbuffer_append_string(&b, plat->device_id);
+    hrbuffer_append_string(&b, ",");
+    hrbuffer_append_string(&b, plat->secret);
+
+    TEMP_FAILURE_RETRY(write(fd, b.data, b.offset));
+
+    hrbuffer_free(&b);
+    fsync(fd);
+    close(fd);
+
     // disconnect & auth again
+    plat->login_after_exit = 1;
+
+    mosquitto_disconnect(_platform.mosq);
+    mosquitto_loop_stop(_platform.mosq, 1);
     return 0;
 }
 // E.3.8
@@ -1152,10 +1209,161 @@ static int message_response_process_when_needed(struct uc_platform *plat, int id
 
     return -1;
 }
-void *_mqtt_routin(void *args) {
+
+// you must free the pointer
+static size_t _read_file(const char *path, char **buf) {
+    int fd = -1;
+    struct stat sb;
+    char *data = NULL, *ptr = NULL;
+    if (lstat(path, &sb) != 0 || sb.st_size == 0 || !buf) {
+        return -1;
+    }
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return -1;
+    }
+
+    data = (char *)malloc(sb.st_size);
+    if (!data) {
+        close(fd);
+        return -1;
+    }
+    memset((void *)data, 0, sb.st_size);
+
+    ptr = data;
+
+    size_t remaining = sb.st_size;
+    while (remaining > 0) {
+        ssize_t n = TEMP_FAILURE_RETRY(read(fd, ptr, remaining));
+        if (n <= 0) {
+            free(ptr);
+            return -1;
+        }
+        ptr += n;
+        remaining -= n;
+    }
+    close(fd);
+
+    *buf = data;
+    return sb.st_size;
+}
+void parse_bind_active_message(struct uc_platform *plat) {
+    size_t len = 0;
+    char *data = NULL;
+    struct json_object *root = NULL;
+
+    if (!plat) return;
+
+    len = _read_file(UC_BIND_ACTIVE_OBSERVE_PATH UC_BIND_ACTIVE_NAME, &data);
+    if (!data) {
+        return;
+    }
+
+    //{"account":"01K0Nya5SYN97V5JzWURwvAg==","code":"Tkwqv8UdxKQQ481","devId":"200037050001000","psk":"router"}
+    json_tokener *tok = json_tokener_new();
+    root = json_tokener_parse_ex(tok, data, len);
+    json_tokener_free(tok);
+    if (!root) {
+        printf("error:%s\n", json_tokener_error_desc(json_tokener_get_error(tok)));
+        free(data);
+        return;
+    }
+
+    const char *account = json_object_get_string(json_object_object_get(root, "account"));
+    const char *code = json_object_get_string(json_object_object_get(root, "code"));
+    const char *dev_id = json_object_get_string(json_object_object_get(root, "devId"));
+    // const char *psk = json_object_get_string(json_object_object_get(root, "psk"));
+
+    mqtt_device_bind_active(plat, dev_id, code, account);
+    json_object_put(root);
+
+    free(data);
+}
+void *_uc_dm_bind_active_monitor_routin(void *args) {
     (void)args;
-    usleep(1000 * 1000 * 3);
-    mqtt_device_bind_active((struct uc_platform *)args, "", "123123", "18663792866");
+    struct uc_platform *plat = (struct uc_platform *)args;
+
+    struct epoll_event ev;
+
+    if (!args) {
+        return NULL;
+    }
+
+    int epoll_fd = epoll_create1(O_CLOEXEC);
+    if (epoll_fd < 0) {
+        return NULL;
+    }
+
+    int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd < 0) {
+        close(epoll_fd);
+        epoll_fd = -1;
+        return NULL;
+    }
+
+    // int events = IN_ATTRIB | IN_CREATE | IN_CLOSE_WRITE | IN_MODIFY | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO;
+    int events = IN_CLOSE_WRITE;  // IN_MODIFY;
+    int wd = inotify_add_watch(fd, UC_BIND_ACTIVE_OBSERVE_PATH, events);
+    if (wd < 0) {
+        close(fd);
+        close(epoll_fd);
+        return NULL;
+    }
+    memset((void *)&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.fd = fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
+
+    while (1) {
+        int epoll_loop_break = 0;
+        struct epoll_event evs[24];
+
+        for (;;) {
+            int timeout = -1;  // 12000;
+
+            int nr = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd, evs, ARRAY_SIZE(evs), timeout));
+            if (nr == 0 || nr == -1) {
+                // timeout
+                printf("maybe timeout ...\n");
+                epoll_loop_break = 1;
+                break;
+            }
+
+            if (epoll_loop_break) break;
+
+            for (int i = 0; i < nr; i++) {
+                const struct inotify_event *e = NULL;
+                char buf[4096] = {0};
+                const char *p = NULL;
+                ssize_t size;
+
+                size = TEMP_FAILURE_RETRY(read(evs[i].data.fd, buf, sizeof(buf)));
+                if (size == -1) {
+                    epoll_loop_break = 1;
+                }
+
+                /* Now we have one or more inotify_event structs. */
+                for (p = buf; p < buf + size; p += sizeof(*e) + e->len) {
+                    e = (const struct inotify_event *)p;
+
+                    printf("mask:0x%X, len:%d, name:%s\n", e->mask, e->len, e->name);
+                    // only care modify event
+                    if (e->mask & IN_CLOSE_WRITE) {
+                        // modified ...
+                        // mqtt_device_bind_active(plat, const char *dev_id, const char *reg_code, const char *app_id)
+                        if (strcmp(e->name, UC_BIND_ACTIVE_NAME) == 0) {
+                            parse_bind_active_message(plat);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    inotify_rm_watch(fd, wd);
+    fd = -1;
+    close(epoll_fd);
 
     return NULL;
 }
@@ -1206,8 +1414,6 @@ static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
 
     if (plat->topic_mid != -1 && mid == plat->topic_mid) {
         mqtt_device_info_sync(plat);
-        // mqtt_device_bind_active(plat, "", "123123", "18663792866");
-
         plat->topic_mid = -1;
     }
 
@@ -1248,18 +1454,11 @@ static void _on_message(struct mosquitto *mosq, void *obj,
         return;
 
     if (strcmp(plat->topic, message->topic) != 0) {
-        //
-        HR_LOGE("%s(%d): invalid topic, not our\n", __FUNCTION__, __LINE__);
+        HR_LOGE("%s(%d): invalid topic, not ours\n", __FUNCTION__, __LINE__);
         return;
     }
     root = json_tokener_parse(message->payload);
     if (!root) {
-        HR_LOGE("%s(%d): invalid payload\n", __FUNCTION__, __LINE__);
-        return;
-    }
-
-    method = json_object_get_string(json_object_object_get(root, "method"));
-    if (!method) {
         HR_LOGE("%s(%d): invalid payload\n", __FUNCTION__, __LINE__);
         return;
     }
@@ -1274,6 +1473,13 @@ static void _on_message(struct mosquitto *mosq, void *obj,
         return;
     }
 
+    method = json_object_get_string(json_object_object_get(root, "method"));
+    if (!method) {
+        json_object_put(root);
+        HR_LOGE("%s(%d): ignored id:%d...\n", __FUNCTION__, __LINE__, id);
+        return;
+    }
+
     for (act = &_uc_dm_action[0]; act != NULL; act++) {
         if (!strcmp(act->name, method)) {
             break;
@@ -1283,8 +1489,7 @@ static void _on_message(struct mosquitto *mosq, void *obj,
     if (act && act->action) {
         act->action(plat, root);
     } else {
-        HR_LOGE("%s(%d): current method :%s not support\n", __FUNCTION__, __LINE__,
-                method);
+        HR_LOGE("%s(%d): method :%s not support\n", __FUNCTION__, __LINE__, method);
     }
 
     json_object_put(root);
@@ -1300,11 +1505,34 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     //}
 }
 
+static int _load_dm_storage_data(struct uc_platform *plat) {
+    char buffer[512] = {0};
+    if (!plat) return -1;
+
+    int fd = open(UC_BIND_ACTIVE_OBSERVE_PATH UC_DM, O_RDONLY, 0644);
+    if (fd < 0) {
+        return -1;
+    }
+
+    TEMP_FAILURE_RETRY(read(fd, buffer, sizeof(buffer)));
+
+    close(fd);
+
+    memset((void *)plat->device_id, 0, sizeof(plat->device_id));
+    memset((void *)plat->secret, 0, sizeof(plat->secret));
+
+    sscanf(buffer, "%[^,],%s", plat->device_id, plat->secret);
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
     int rc = 0;
+    int retries = 0;
+
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -1315,6 +1543,7 @@ int main(int argc, char **argv) {
 
     _platform.id = 1;
     _platform.qos = 0;
+    _platform.tid = 0;
 
     dm_Device_init(NULL);
     dm_Reboot_init(NULL);
@@ -1392,12 +1621,13 @@ int main(int argc, char **argv) {
         dm_value_reset(&val);
     }
 
-    int retries = 0;
+    _load_dm_storage_data(&_platform);
+
 stage_1:
     if (!_platform.req) {
         _platform.req = url_request_new();
         // defautl 15s
-        _platform.req->set_option(_platform.req, URL_OPT_TIMEOUT, 15000);
+        _platform.req->set_option(_platform.req, URLOPT_TIMEOUT, 15000);
     }
 
     rc = uc_platform_stage_1_devauth(&_platform);
@@ -1454,7 +1684,7 @@ stage_2:
 #if 0
     // clang-format off
     const char* str = "{\"Device.WiFi.X_CU_ACL\":{\"2G\":{\"OperatingFrequencyBand\":\"2.4GHz\",\"MACAddressControlEnabled\":true,\"MacFilterPolicy\":0,\"WMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"},\"BMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"}},\"5G\":{\"OperatingFrequencyBand\":\"5GHz\",\"MACAddressControlEnabled\":true,\"MacFilterPolicy\":0,\"WMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"},\"BMacFilters\":{\"HostName\":\"M2006J10C\",\"MACAddress\":\"34:1C:F0:43:49:23\"}}}}";
-    // clang-format off
+    // clang-format on
 
     struct json_object *r = json_tokener_parse(str);
 
@@ -1469,7 +1699,6 @@ stage_2:
     HR_LOGD("client id:%s\n", _platform.client_id);
     _platform.mosq = mosquitto_new(_platform.client_id, false, &_platform);
     if (!_platform.mosq) {
-
         HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__,
                 __LINE__);
         dm_object_free(NULL);
@@ -1496,12 +1725,14 @@ stage_2:
     do {
         HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _platform.host, _platform.port);
         rc = mosquitto_connect_bind(_platform.mosq, _platform.host, _platform.port,
-                           _platform.alive_time, NULL);
+                                    _platform.alive_time, NULL);
     } while (rc != MOSQ_ERR_SUCCESS);
 
-    int result = pthread_create(&_platform.tid, NULL, _mqtt_routin, &_platform);
-    if (result != 0) {
-        // return -1;
+    if (_platform.tid == 0) {
+        int result = pthread_create(&_platform.tid, NULL, _uc_dm_bind_active_monitor_routin, &_platform);
+        if (result != 0) {
+            // return -1;
+        }
     }
 
     mosquitto_loop_forever(_platform.mosq, -1, 1);
@@ -1510,10 +1741,6 @@ stage_2:
     _platform.mosq = NULL;
 
     mosquitto_lib_cleanup();
-    dm_object_free(NULL);
-    
-    pthread_cancel(_platform.tid);
-    pthread_join(_platform.tid, NULL);
 
     {
         struct uc_message_response *n, *p;
@@ -1521,5 +1748,19 @@ stage_2:
             uc_message_response_free(p);
         }
     }
+
+    // login again
+    // goto stage_1;
+    if (_platform.login_after_exit != 0) {
+        HR_LOGD("do active, relogin again .........\n");
+        _platform.login_after_exit = 0;
+        goto stage_1;
+    }
+
+    dm_object_free(NULL);
+
+    pthread_cancel(_platform.tid);
+    pthread_join(_platform.tid, NULL);
+    //
     return 0;
 }

@@ -10,10 +10,10 @@ typedef enum {
 } url_request_method_e;
 
 enum {
-    URL_OPT_VERBOSE = 0,
-    URL_OPT_TIMEOUT,          // ms
-    URL_OPT_CONNECT_TIMEOUT,  // ms
-    URL_OPT_MAX,
+    URLOPT_VERBOSE = 0,
+    URLOPT_TIMEOUT,          // ms
+    URLOPT_CONNECT_TIMEOUT,  // ms
+    URLOPT_MAX,
 };
 
 struct url_request {
