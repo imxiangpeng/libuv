@@ -3,7 +3,10 @@
 
 #include "dm_Device.h"
 #include "dm_object.h"
+#include "hr_list.h"
 #include "hr_log.h"
+
+extern void uc_dm_notify(const char* params[], size_t size);
 
 static int OperatingFrequencyBand_getter(struct dm_object* self, struct dm_value* val) {
     HR_LOGD("%s(%d): this %p -> parent:%s, val:%p\n", __FUNCTION__, __LINE__, self, self->parent->name, val);
@@ -22,6 +25,20 @@ static int OperatingFrequencyBand_setter(struct dm_object* self, struct dm_value
     } else if (val->type == DM_TYPE_STRING) {
         HR_LOGD("%s(%d): this %p -> parent:%s, val:%s\n", __FUNCTION__, __LINE__, self, self->parent->name, val->val.string);
     }
+
+    const char* params[10] = {NULL};
+
+    params[0] = "Hosts.Host.8";
+    params[1] = "Hosts.Host.11";
+    params[2] = strdup("xxxxxxxxxxx");
+    if (!strcmp(self->parent->name, "2G")) {
+        params[3] = strdup("Device.WiFi.X_CU_ACL.2G");
+
+    } else {
+        params[3] = strdup("Device.WiFi.X_CU_ACL.5G");
+    }
+
+    uc_dm_notify(params, sizeof(params) / sizeof(params[0]));
 
     return 0;
 }
@@ -210,7 +227,7 @@ int dm_Device_WiFi(struct dm_object* parent) {
     dm_object_id(wifi_5g_WMacFilters, tmp, sizeof(tmp));
 
     HR_LOGD("%s(%d): objectid :%s\n", __FUNCTION__, __LINE__, tmp);
-    
+
     // int *ptr = 0;
     // *ptr = 0;
     return 0;
