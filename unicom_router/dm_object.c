@@ -3,7 +3,7 @@
 
 #include "dm_object.h"
 
-#include <json-c/json.h>
+#include <cjson/cJSON.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -136,40 +136,43 @@ struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent) 
     return object;
 }
 
-struct json_object* _dm_object_object(struct dm_object* self) {
+static cJSON* _dm_object_object(struct dm_object* self) {
     struct dm_object* p = NULL;
-    struct json_object* root = json_object_new_object();
+
+    cJSON* root = cJSON_CreateObject();
 
     hr_list_for_each_entry(p, &self->childrens, sibling) {
         struct dm_value val;
-        struct json_object* obj = NULL;
+        cJSON* obj = NULL;
         memset((void*)&val, 0, sizeof(val));
 
         if (!p->getter) {
-            obj = json_object_new_null();
+            obj = cJSON_CreateNull();
+
+            cJSON_AddItemToObject(root, p->name, obj);
             continue;
         }
 
         p->getter(p, &val);
 
         switch (p->type) {
-            case DM_TYPE_STRING: {
-                obj = json_object_new_string(val.val.string ? val.val.string : "");
-                break;
-            }
             case DM_TYPE_NUMBER: {
-                obj = json_object_new_int(val.val.number);
+                obj = cJSON_CreateNumber(val.val.number);
                 break;
             }
             case DM_TYPE_BOOLEAN: {
-                obj = json_object_new_boolean(val.val.boolean);
+                obj = cJSON_CreateBool(val.val.boolean != 0 ? cJSON_True : cJSON_False);
+                break;
+            }
+            case DM_TYPE_STRING: {
+                obj = cJSON_CreateString(val.val.string ? val.val.string : "");
                 break;
             }
             case DM_TYPE_OBJECT: {
                 // mxp, 20240716, we do not call _dm_object_object directly
                 // because getter has been called, the getter maybe dm_object_attribute, it will auto call us
                 // _dm_object_object maybe better performance, but user may use different implement
-                obj = json_tokener_parse(val.val.string ? val.val.string : "{}");
+                obj = cJSON_Parse(val.val.string ? val.val.string : "{}");
             }
             default:
                 break;
@@ -178,7 +181,7 @@ struct json_object* _dm_object_object(struct dm_object* self) {
         dm_value_reset(&val);
 
         if (obj) {
-            json_object_object_add(root, p->name, obj);
+            cJSON_AddItemToObject(root, p->name, obj);
         }
     }
 
@@ -186,11 +189,8 @@ struct json_object* _dm_object_object(struct dm_object* self) {
 }
 int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
     // loop all childrens contruct json object ...
-    struct json_object* root = NULL;
-
-    if (self->type != DM_TYPE_OBJECT) {
-        return self->getter(self, val);
-    }
+    cJSON* root = NULL;
+    char* data = NULL;
 
     // now we only support object
     if (self->type != DM_TYPE_OBJECT) {
@@ -199,10 +199,15 @@ int dm_object_attribute(struct dm_object* self, struct dm_value* val) {
 
     root = _dm_object_object(self);
 
-    // HR_LOGD("object:%s -> %s\n", self->name, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY));
-    dm_value_set_string_ext(val, json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE), 0);
+    if (!root) return -1;
 
-    json_object_put(root);
+    data = cJSON_PrintUnformatted(root);
+    if (data) {
+        dm_value_set_string_ext(val, data, 0);
+        free(data);
+    }
+
+    cJSON_Delete(root);
 
     return 0;
 }
