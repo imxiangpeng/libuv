@@ -45,14 +45,14 @@
 #define MNG_URL_AUTH MNG_URL "/api/auth"
 #define MNG_URL_DEVICE_GET_MQTT_SERVER MNG_URL "/api/deviceGetMqttServer"
 
-#define UC_BIND_DATA_NAME "uc_bind_data.ini"
-#define UC_BIND_DATA_DIR "/home/alex/workspace/workspace/libuv/libuv/build/uc/"
+#define CU_BIND_DATA_NAME "cu_bind_data.ini"
+#define CU_BIND_DATA_DIR "/home/alex/workspace/workspace/libuv/libuv/build/uc/"
 
-#define UC_BIND_ACTIVE_NAME "uc_bind_active.json"
-// #define UC_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/bind.ini"
-#define UC_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/"
+#define CU_BIND_ACTIVE_NAME "cu_bind_active.json"
+// #define CU_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/bind.ini"
+#define CU_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/"
 
-struct uc_platform {
+struct dm_platform {
     struct url_request *req;
     char host[256];
     int port;
@@ -84,23 +84,23 @@ struct uc_platform {
     int login_after_exit;  // after bind active we should login again
 };
 
-struct uc_dm_action {
+struct dm_action {
     const char *name;
     // json object or string ?
-    int (*action)(struct uc_platform *, struct json_object *);
+    int (*action)(struct dm_platform *, struct json_object *);
 };
 
-typedef int (*uc_on_response)(struct uc_platform *, struct json_object *);
+typedef int (*dm_response_cb)(struct dm_platform *, struct json_object *);
 
-struct uc_message_response {
+struct dm_response {
     int id;  // message id
 
-    uc_on_response response;
+    dm_response_cb cb;
 
     struct hr_list_head entry;
 };
 
-static struct uc_platform _platform = {0};
+static struct dm_platform _platform = {0};
 
 static HR_LIST_HEAD(_message_response_queue);
 
@@ -148,35 +148,35 @@ static const char *_device_active_parameters[] = {
 
 static const char **_device_notify_parameters = _device_active_parameters;
 
-static int _uc_dm_action_get_parameter_values(struct uc_platform *plat,
-                                              struct json_object *root);
-static int _uc_dm_action_set_parameter_values(struct uc_platform *plat,
-                                              struct json_object *root);
-static int _uc_dm_action_add_instance(struct uc_platform *plat,
-                                      struct json_object *root);
-static int _uc_dm_action_del_instance(struct uc_platform *plat,
-                                      struct json_object *root);
-
-static int _uc_dm_action_qos_class_host_op(struct uc_platform *plat,
+static int _dm_action_get_parameter_values(struct dm_platform *plat,
                                            struct json_object *root);
-static int _uc_dm_action_reboot(struct uc_platform *plat, struct json_object *root);
+static int _dm_action_set_parameter_values(struct dm_platform *plat,
+                                           struct json_object *root);
+static int _dm_action_add_instance(struct dm_platform *plat,
+                                   struct json_object *root);
+static int _dm_action_del_instance(struct dm_platform *plat,
+                                   struct json_object *root);
 
-static int _uc_dm_action_unbind(struct uc_platform *plat, struct json_object *root);
+static int _dm_action_qos_class_host_op(struct dm_platform *plat,
+                                        struct json_object *root);
+static int _dm_action_reboot(struct dm_platform *plat, struct json_object *root);
 
-static struct uc_dm_action _uc_dm_action[] = {
-    {"unBind", _uc_dm_action_unbind},
-    {"getParameterValues", _uc_dm_action_get_parameter_values},
-    {"setParameterValues", _uc_dm_action_set_parameter_values},
-    {"addInstance", _uc_dm_action_add_instance},
-    {"delInstance", _uc_dm_action_del_instance},
-    {"addQosClassHost", _uc_dm_action_qos_class_host_op},
-    {"setQosClassHost", _uc_dm_action_qos_class_host_op},
-    {"delQosClassHost", _uc_dm_action_qos_class_host_op},
-    {"reboot", _uc_dm_action_reboot},
-    {"restoreConfig", _uc_dm_action_reboot},
+static int _dm_action_unbind(struct dm_platform *plat, struct json_object *root);
+
+static struct dm_action _dm_action_tbl[] = {
+    {"unBind", _dm_action_unbind},
+    {"getParameterValues", _dm_action_get_parameter_values},
+    {"setParameterValues", _dm_action_set_parameter_values},
+    {"addInstance", _dm_action_add_instance},
+    {"delInstance", _dm_action_del_instance},
+    {"addQosClassHost", _dm_action_qos_class_host_op},
+    {"setQosClassHost", _dm_action_qos_class_host_op},
+    {"delQosClassHost", _dm_action_qos_class_host_op},
+    {"reboot", _dm_action_reboot},
+    {"restoreConfig", _dm_action_reboot},
 };
 
-static int _inc_id(int id) {
+static int inc_id(int id) {
     id++;
     if (id == INT_MAX - 1) {
         id = 1;
@@ -185,8 +185,8 @@ static int _inc_id(int id) {
     return id;
 }
 
-static struct uc_message_response *uc_message_response_new(int id, uc_on_response callback) {
-    struct uc_message_response *response = (struct uc_message_response *)calloc(1, sizeof(struct uc_message_response));
+static struct dm_response *dm_response_new(int id, dm_response_cb cb) {
+    struct dm_response *response = (struct dm_response *)calloc(1, sizeof(struct dm_response));
     if (!response) {
         return NULL;
     }
@@ -194,14 +194,14 @@ static struct uc_message_response *uc_message_response_new(int id, uc_on_respons
     HR_INIT_LIST_HEAD(&response->entry);
 
     response->id = id;
-    response->response = callback;
+    response->cb = cb;
 
     hr_list_add_tail(&response->entry, &_message_response_queue);
 
     return response;
 }
 
-static void uc_message_response_free(struct uc_message_response *msg_resp) {
+static void dm_response_free(struct dm_response *msg_resp) {
     if (!msg_resp) {
         return;
     }
@@ -420,7 +420,7 @@ static int _fill_parameters_with_json_array(struct json_object *params,
 }
 
 // E.3.2 devauth
-static int _create_stage_1_devauth_message(struct uc_platform *plat,
+static int _create_stage_1_devauth_message(struct dm_platform *plat,
                                            struct hrbuffer *buf,
                                            const char *param[]) {
     struct json_object *root = NULL, *parameterValues = NULL;
@@ -430,7 +430,7 @@ static int _create_stage_1_devauth_message(struct uc_platform *plat,
     json_object_object_add(root, "cwmpVersion", json_object_new_string("2.0"));
 
     snprintf(tmp, sizeof(tmp), "%d", plat->id);
-    plat->id = _inc_id(plat->id);
+    plat->id = inc_id(plat->id);
     json_object_object_add(root, "id", json_object_new_string(tmp));
     json_object_object_add(root, "method", json_object_new_string("devAuth"));
 
@@ -454,7 +454,7 @@ static int _create_stage_1_devauth_message(struct uc_platform *plat,
     return 0;
 }
 // E.3.2 /api/auth, devAuth
-static int _uc_dm_stage_1_devauth(struct uc_platform *plat) {
+static int _dm_stage_1_devauth(struct dm_platform *plat) {
     struct hrbuffer b;
     struct url_request *req = plat->req;
     struct json_object *root = NULL, *result = NULL, *cookie = NULL;
@@ -508,7 +508,7 @@ static int _uc_dm_stage_1_devauth(struct uc_platform *plat) {
 }
 
 // E.3.3 devGetMqttServer
-static int _create_stage_2_devgetmqttserver_message(struct uc_platform *plat,
+static int _create_stage_2_devgetmqttserver_message(struct dm_platform *plat,
                                                     struct hrbuffer *buf,
                                                     const char *param[]) {
     struct json_object *root = NULL, *parameterValues = NULL;
@@ -518,7 +518,7 @@ static int _create_stage_2_devgetmqttserver_message(struct uc_platform *plat,
     json_object_object_add(root, "cwmpVersion", json_object_new_string("2.0"));
 
     snprintf(tmp, sizeof(tmp), "%d", plat->id);
-    plat->id = _inc_id(plat->id);
+    plat->id = inc_id(plat->id);
     json_object_object_add(root, "id", json_object_new_string(tmp));
     json_object_object_add(root, "method", json_object_new_string("devGetMqttServer"));
 
@@ -539,7 +539,7 @@ static int _create_stage_2_devgetmqttserver_message(struct uc_platform *plat,
 }
 
 // E.3.3 /api/deviceGetMqttServer , devGetMqttServer
-static int _uc_dm_stage_2_getmqttserver(struct uc_platform *plat) {
+static int _dm_stage_2_getmqttserver(struct dm_platform *plat) {
     struct hrbuffer b;
     struct url_request *req = plat->req;
     struct json_object *root = NULL, *result = NULL, *cookie = NULL, *mqtt_client_1 = NULL;
@@ -636,7 +636,7 @@ static int _uc_dm_stage_2_getmqttserver(struct uc_platform *plat) {
 }
 
 // E.3.7
-static int _uc_dm_devinfosync(struct uc_platform *plat) {
+static int _dm_send_devinfosync(struct dm_platform *plat) {
     int mid = 0;
     char tmp[64] = {0};
     struct json_object *root = NULL, *parameterValues = NULL;
@@ -649,7 +649,7 @@ static int _uc_dm_devinfosync(struct uc_platform *plat) {
     json_object_object_add(root, "cwmpVersion", json_object_new_string("2.0"));
 
     snprintf(tmp, sizeof(tmp), "%d", plat->id);
-    plat->id = _inc_id(plat->id);
+    plat->id = inc_id(plat->id);
     json_object_object_add(root, "id", json_object_new_string(tmp));
     json_object_object_add(root, "method", json_object_new_string("devInfoSync"));
 
@@ -676,7 +676,7 @@ static int _uc_dm_devinfosync(struct uc_platform *plat) {
 }
 
 // E.3.8 response
-static int _uc_dm_on_bind_response(struct uc_platform *plat, struct json_object *root) {
+static int _dm_response_on_bind(struct dm_platform *plat, struct json_object *root) {
     (void)plat;
     (void)root;
 
@@ -688,10 +688,17 @@ static int _uc_dm_on_bind_response(struct uc_platform *plat, struct json_object 
 
     // { "result": "0", "devId": "200037050001000", "cwmpVersion": "2.0", "secret": "7d1c67c3-22dc-40b2-837d-0df362a3894f", "id": "4" }
 
+    // convert string to number
+    int result = json_object_get_int(json_object_object_get(root, "result"));
+    if (result != 0) {
+        HR_LOGD("%s(%d): bind response failed :%d\n", __FUNCTION__, __LINE__, result);
+        return -1;
+    }
+
     const char *devid = json_object_get_string(json_object_object_get(root, "devId"));
     const char *secret = json_object_get_string(json_object_object_get(root, "secret"));
     if (!devid || !secret) {
-        HR_LOGD("%s(%d): can not got valid dev id & secret...........\n", __FUNCTION__, __LINE__);
+        HR_LOGD("%s(%d): can not got valid dev id & secret!\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -704,12 +711,12 @@ static int _uc_dm_on_bind_response(struct uc_platform *plat, struct json_object 
     mosquitto_disconnect(_platform.mosq);
     mosquitto_loop_stop(_platform.mosq, 1);
 
-    if (stat(UC_BIND_DATA_DIR UC_BIND_DATA_NAME, &st) != 0) {
-        mkdir(UC_BIND_DATA_DIR, 0755);
+    if (stat(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, &st) != 0) {
+        mkdir(CU_BIND_DATA_DIR, 0755);
     }
 
     // save device id & secret to storage
-    fd = open(UC_BIND_DATA_DIR UC_BIND_DATA_NAME, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    fd = open(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, O_CREAT | O_TRUNC | O_RDWR, 0644);
     if (fd < 0) {
         return -1;
     }
@@ -729,13 +736,12 @@ static int _uc_dm_on_bind_response(struct uc_platform *plat, struct json_object 
 }
 
 // E.3.8, bind
-static int _uc_dm_bind(struct uc_platform *plat, const char *dev_id, const char *reg_code, const char *app_id) {
+static int _dm_send_bind(struct dm_platform *plat, const char *dev_id, const char *reg_code, const char *app_id) {
     uint32_t id = 1;
     int mid = 0;
     struct json_object *root = NULL, *parameterValues = NULL;
-    struct uc_message_response *on_msg_resp = NULL;
+    struct dm_response *on_msg_resp = NULL;
 
-    HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
     if (!plat || !dev_id || !reg_code || !app_id)
         return -1;
 
@@ -745,7 +751,7 @@ static int _uc_dm_bind(struct uc_platform *plat, const char *dev_id, const char 
     json_object_object_add(root, "cwmpVersion", json_object_new_string("2.0"));
 
     id = plat->id;
-    plat->id = _inc_id(plat->id);
+    plat->id = inc_id(plat->id);
     snprintf(tmp, sizeof(tmp), "%u", id);
     json_object_object_add(root, "id", json_object_new_string(tmp));
     json_object_object_add(root, "method", json_object_new_string("bind"));
@@ -769,7 +775,7 @@ static int _uc_dm_bind(struct uc_platform *plat, const char *dev_id, const char 
 
     HR_LOGD("%s(%d): message object %s\n", __FUNCTION__, __LINE__, str);
 
-    on_msg_resp = uc_message_response_new(id, _uc_dm_on_bind_response);
+    on_msg_resp = dm_response_new(id, _dm_response_on_bind);
     if (!on_msg_resp) {
         json_object_put(root);
         return -1;
@@ -781,7 +787,7 @@ static int _uc_dm_bind(struct uc_platform *plat, const char *dev_id, const char 
 }
 
 // E.3.10 unBind
-static int _uc_dm_action_unbind(struct uc_platform *plat, struct json_object *root) {
+static int _dm_action_unbind(struct dm_platform *plat, struct json_object *root) {
     (void)root;
     int rc = 0;
     const char *id = NULL;
@@ -842,7 +848,7 @@ static int _uc_dm_action_unbind(struct uc_platform *plat, struct json_object *ro
 
     memset((void *)plat->device_id, 0, sizeof(plat->device_id));
     memset((void *)plat->secret, 0, sizeof(plat->secret));
-    unlink(UC_BIND_DATA_DIR UC_BIND_DATA_NAME);
+    unlink(CU_BIND_DATA_DIR CU_BIND_DATA_NAME);
 end:
 
     dm_value_reset(&v);
@@ -879,8 +885,8 @@ end:
 }
 
 // E.4.1 getParameterValues
-static int _uc_dm_action_get_parameter_values(struct uc_platform *plat,
-                                              struct json_object *data) {
+static int _dm_action_get_parameter_values(struct dm_platform *plat,
+                                           struct json_object *data) {
     int rc = 0;
     char tmp[64] = {0};
     int mid = 0;
@@ -995,8 +1001,8 @@ static int _update_dm_object_using_json_object(struct dm_object *object,
 }
 
 // E.4.2 setParameterValues
-static int _uc_dm_action_set_parameter_values(struct uc_platform *plat,
-                                              struct json_object *data) {
+static int _dm_action_set_parameter_values(struct dm_platform *plat,
+                                           struct json_object *data) {
     int rc = 0;
     char tmp[64] = {0};
     int mid = 0;
@@ -1054,8 +1060,8 @@ static int _uc_dm_action_set_parameter_values(struct uc_platform *plat,
 
 // E.4.3 addInstance
 // it's only one item in parameterNames array
-static int _uc_dm_action_add_instance(struct uc_platform *plat,
-                                      struct json_object *data) {
+static int _dm_action_add_instance(struct dm_platform *plat,
+                                   struct json_object *data) {
     int rc = 0;
     const char *str = NULL;
     struct dm_value v;
@@ -1120,9 +1126,9 @@ end:
     str = json_object_to_json_string_ext(
         response, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE |
                       JSON_C_TO_STRING_PRETTY);
-     if (!str) {
+    if (!str) {
         str = "{}";
-    }   
+    }
 
     HR_LOGD("%s(%d): response :%s\n", __FUNCTION__, __LINE__, str);
 
@@ -1136,8 +1142,8 @@ end:
 
 // E.4.4 delInstance
 // it's only one item in parameterNames array
-static int _uc_dm_action_del_instance(struct uc_platform *plat,
-                                      struct json_object *data) {
+static int _dm_action_del_instance(struct dm_platform *plat,
+                                   struct json_object *data) {
     int rc = 0;
     int length = 0;
     const char *str = NULL;
@@ -1207,7 +1213,7 @@ end:
                       JSON_C_TO_STRING_PRETTY);
     if (!str) {
         str = "{}";
-    }   
+    }
     HR_LOGD("%s(%d): response :%s\n", __FUNCTION__, __LINE__, str);
 
     mosquitto_publish(plat->mosq, NULL, plat->uuid, strlen(str), str, 0, false);
@@ -1218,8 +1224,8 @@ end:
 }
 
 // E.6.1 addQosClassHost/setQosClassHost/delQosClassHost
-static int _uc_dm_action_qos_class_host_op(struct uc_platform *plat,
-                                           struct json_object *root) {
+static int _dm_action_qos_class_host_op(struct dm_platform *plat,
+                                        struct json_object *root) {
     HR_LOGD("%s(%d): come in need implement !...........\n", __FUNCTION__, __LINE__);
     int rc = 0;
     char tmp[64] = {0};
@@ -1284,8 +1290,8 @@ end:
                       JSON_C_TO_STRING_PRETTY);
     if (!str) {
         str = "{}";
-    }   
-    
+    }
+
     HR_LOGD("%s(%d): loss qosclassID & policerID response :%s\n", __FUNCTION__, __LINE__, str);
 
     mosquitto_publish(plat->mosq, NULL, plat->uuid, strlen(str), str, 0, false);
@@ -1295,7 +1301,7 @@ end:
 }
 
 // E.8 reboot/restoreConfig
-static int _uc_dm_action_reboot(struct uc_platform *plat, struct json_object *root) {
+static int _dm_action_reboot(struct dm_platform *plat, struct json_object *root) {
     HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
     int rc = 0;
     char tmp[64] = {0};
@@ -1348,7 +1354,7 @@ end:
                       JSON_C_TO_STRING_PRETTY);
     if (!str) {
         str = "{}";
-    }   
+    }
 
     HR_LOGD("%s(%d): response :%s\n", __FUNCTION__, __LINE__, str);
 
@@ -1360,19 +1366,19 @@ end:
 }
 
 // E.2.3 parse data from F.3 and
-static void _parse_bind_active_message(struct uc_platform *plat) {
+static void _parse_bind_active_message(struct dm_platform *plat) {
     size_t len = 0;
     char *data = NULL;
     struct json_object *root = NULL;
 
     if (!plat) return;
 
-    len = _read_file(UC_BIND_ACTIVE_OBSERVE_PATH UC_BIND_ACTIVE_NAME, &data);
+    len = _read_file(CU_BIND_ACTIVE_OBSERVE_PATH CU_BIND_ACTIVE_NAME, &data);
     if (!data) {
         return;
     }
 
-    unlink(UC_BIND_ACTIVE_OBSERVE_PATH UC_BIND_ACTIVE_NAME);
+    unlink(CU_BIND_ACTIVE_OBSERVE_PATH CU_BIND_ACTIVE_NAME);
 
     //{"account":"01K0Nya5SYN97V5JzWURwvAg==","code":"Tkwqv8UdxKQQ481","devId":"200037050001000","psk":"router"}
     json_tokener *tok = json_tokener_new();
@@ -1389,15 +1395,15 @@ static void _parse_bind_active_message(struct uc_platform *plat) {
     const char *dev_id = json_object_get_string(json_object_object_get(root, "devId"));
     // const char *psk = json_object_get_string(json_object_object_get(root, "psk"));
 
-    _uc_dm_bind(plat, dev_id, code, account);
+    _dm_send_bind(plat, dev_id, code, account);
     json_object_put(root);
 
     free(data);
 }
 
-static void *_uc_dm_bind_active_monitor_routin(void *args) {
+static void *_dm_bind_active_monitor_routin(void *args) {
     (void)args;
-    struct uc_platform *plat = (struct uc_platform *)args;
+    struct dm_platform *plat = (struct dm_platform *)args;
 
     struct epoll_event ev;
 
@@ -1419,7 +1425,7 @@ static void *_uc_dm_bind_active_monitor_routin(void *args) {
 
     // int events = IN_ATTRIB | IN_CREATE | IN_CLOSE_WRITE | IN_MODIFY | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO;
     int events = IN_CLOSE_WRITE;  // IN_MODIFY;
-    int wd = inotify_add_watch(fd, UC_BIND_ACTIVE_OBSERVE_PATH, events);
+    int wd = inotify_add_watch(fd, CU_BIND_ACTIVE_OBSERVE_PATH, events);
     if (wd < 0) {
         close(fd);
         close(epoll_fd);
@@ -1467,7 +1473,7 @@ static void *_uc_dm_bind_active_monitor_routin(void *args) {
                     if (e->mask & IN_CLOSE_WRITE) {
                         // modified ...
                         // mqtt_device_bind_active(plat, const char *dev_id, const char *reg_code, const char *app_id)
-                        if (strcmp(e->name, UC_BIND_ACTIVE_NAME) == 0) {
+                        if (strcmp(e->name, CU_BIND_ACTIVE_NAME) == 0) {
                             _parse_bind_active_message(plat);
                         }
                     }
@@ -1484,8 +1490,8 @@ static void *_uc_dm_bind_active_monitor_routin(void *args) {
 }
 
 // response message processor
-static int _uc_message_response_process_when_needed(struct uc_platform *plat, int id, struct json_object *root) {
-    struct uc_message_response *p = NULL, *msg = NULL;
+static int _dm_response_process_when_needed(struct dm_platform *plat, int id, struct json_object *root) {
+    struct dm_response *p = NULL, *msg = NULL;
 
     if (!root) return -1;
 
@@ -1498,11 +1504,11 @@ static int _uc_message_response_process_when_needed(struct uc_platform *plat, in
     }
 
     if (msg) {
-        if (msg->response) {
-            msg->response(plat, root);
+        if (msg->cb) {
+            msg->cb(plat, root);
         }
 
-        uc_message_response_free(msg);
+        dm_response_free(msg);
 
         return 0;
     }
@@ -1520,7 +1526,7 @@ static void _on_log(struct mosquitto *mosq, void *obj, int level,
 
 // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html#_Table_3.1_-
 static void _on_connect(struct mosquitto *mosq, void *obj, int result) {
-    struct uc_platform *plat = (struct uc_platform *)obj;
+    struct dm_platform *plat = (struct dm_platform *)obj;
 
     HR_LOGD("%s(%d): result:%d\n", __FUNCTION__, __LINE__, result);
 
@@ -1548,14 +1554,14 @@ static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
     bool some_sub_allowed = (granted_qos[0] < 128);
     bool should_print = 1;
 
-    struct uc_platform *plat = (struct uc_platform *)obj;
+    struct dm_platform *plat = (struct dm_platform *)obj;
 
     if (!plat) return;
 
     HR_LOGD("%s(%d): mid:%d vs %d\n", __FUNCTION__, __LINE__, mid, plat->topic_mid);
 
     if (plat->topic_mid != -1 && mid == plat->topic_mid) {
-        _uc_dm_devinfosync(plat);
+        _dm_send_devinfosync(plat);
         plat->topic_mid = -1;
     }
 
@@ -1581,8 +1587,8 @@ static void _on_message(struct mosquitto *mosq, void *obj,
     const char *method = NULL;
     uint32_t id = 1;
     struct json_object *root = NULL;
-    struct uc_platform *plat = (struct uc_platform *)obj;
-    struct uc_dm_action *act = NULL;
+    struct dm_platform *plat = (struct dm_platform *)obj;
+    struct dm_action *act = NULL;
 
     // if(process_messages == false) return;
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
@@ -1609,7 +1615,7 @@ static void _on_message(struct mosquitto *mosq, void *obj,
 
     HR_LOGE("%s(%d): id:%d\n", __FUNCTION__, __LINE__, id);
     // process message queue if possible
-    if (0 == _uc_message_response_process_when_needed(plat, id, root)) {
+    if (0 == _dm_response_process_when_needed(plat, id, root)) {
         printf("id:%d have been processed!\n", id);
         json_object_put(root);
         return;
@@ -1622,7 +1628,7 @@ static void _on_message(struct mosquitto *mosq, void *obj,
         return;
     }
 
-    for (act = &_uc_dm_action[0]; act != NULL; act++) {
+    for (act = &_dm_action_tbl[0]; act != NULL; act++) {
         if (!strcmp(act->name, method)) {
             break;
         }
@@ -1647,7 +1653,7 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     //}
 }
 
-static int _load_dm_storage_data(struct uc_platform *plat) {
+static int _load_dm_storage_data(struct dm_platform *plat) {
     int fd = -1;
     char buffer[512] = {0};
     if (!plat) return -1;
@@ -1655,7 +1661,7 @@ static int _load_dm_storage_data(struct uc_platform *plat) {
     memset((void *)plat->device_id, 0, sizeof(plat->device_id));
     memset((void *)plat->secret, 0, sizeof(plat->secret));
 
-    fd = open(UC_BIND_DATA_DIR UC_BIND_DATA_NAME, O_RDONLY, 0644);
+    fd = open(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, O_RDONLY, 0644);
     if (fd < 0) {
         return -1;
     }
@@ -1670,12 +1676,12 @@ static int _load_dm_storage_data(struct uc_platform *plat) {
 }
 
 // E.5.1 event notify
-void uc_dm_notify(const char *params[], size_t size) {
+void dm_send_notify(const char *params[], size_t size) {
     uint32_t id = 1;
     int mid = 0;
 
     char tmp[64] = {0};
-    struct uc_platform *plat = &_platform;
+    struct dm_platform *plat = &_platform;
     struct json_object *root = NULL, *parameterValues = NULL;
 
     HR_LOGD("%s(%d): come in ...........\n", __FUNCTION__, __LINE__);
@@ -1692,7 +1698,7 @@ void uc_dm_notify(const char *params[], size_t size) {
     json_object_object_add(root, "cwmpVersion", json_object_new_string("2.0"));
 
     id = plat->id;
-    plat->id = _inc_id(plat->id);
+    plat->id = inc_id(plat->id);
     snprintf(tmp, sizeof(tmp), "%u", id);
     json_object_object_add(root, "id", json_object_new_string(tmp));
     json_object_object_add(root, "method", json_object_new_string("Notify"));
@@ -1703,13 +1709,13 @@ void uc_dm_notify(const char *params[], size_t size) {
     parameterValues = json_object_new_object();
     json_object_object_add(root, "parameterValues", parameterValues);
 
-    _fill_parameters(_device_active_parameters, parameterValues);
+    _fill_parameters(_device_notify_parameters, parameterValues);
     _fill_parameters(params, parameterValues);
     // HR_LOGD("%s(%d): message object %s\n", __FUNCTION__, __LINE__,
     const char *str = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE | JSON_C_TO_STRING_PRETTY);
     if (!str) {
         str = "{}";
-    }   
+    }
 
     HR_LOGD("%s(%d): message object %s\n", __FUNCTION__, __LINE__, str);
 
@@ -1806,6 +1812,17 @@ int main(int argc, char **argv) {
         dm_value_reset(&val);
     }
 
+    printf("Device.WiFi: ...\n");
+    object = dm_object_lookup("Device.WiFi.", NULL);
+    if (object) {
+        struct dm_value val;
+        memset((void *)&val, 0, sizeof(val));
+        object->getter(object, &val);
+        HR_LOGD("Device.WiFi:%s\n", val.val.string);
+        printf("Device.WiFi:%s\n", val.val.string);
+        dm_value_reset(&val);
+    }
+
     object = dm_object_lookup("Device.", NULL);
     if (object) {
         struct dm_value val;
@@ -1824,7 +1841,7 @@ stage_1:
         _platform.req->set_option(_platform.req, URLOPT_TIMEOUT, 15000);
     }
 
-    rc = _uc_dm_stage_1_devauth(&_platform);
+    rc = _dm_stage_1_devauth(&_platform);
     if (rc != 0) {
         // random wait (1 - 60)
         retries++;
@@ -1840,7 +1857,7 @@ stage_1:
             memset((void *)_platform.device_id, 0, sizeof(_platform.device_id));
             memset((void *)_platform.secret, 0, sizeof(_platform.secret));
 
-            unlink(UC_BIND_ACTIVE_OBSERVE_PATH UC_BIND_DATA_NAME);
+            unlink(CU_BIND_ACTIVE_OBSERVE_PATH CU_BIND_DATA_NAME);
 
             retries = 0;
         }
@@ -1849,7 +1866,7 @@ stage_1:
     retries = 0;
 
 stage_2:
-    rc = _uc_dm_stage_2_getmqttserver(&_platform);
+    rc = _dm_stage_2_getmqttserver(&_platform);
     if (rc != 0) {
         srand(time(NULL));
 
@@ -1937,13 +1954,13 @@ stage_2:
     } while (rc != MOSQ_ERR_SUCCESS);
 
     if (_platform.tid == 0) {
-        int result = pthread_create(&_platform.tid, NULL, _uc_dm_bind_active_monitor_routin, &_platform);
+        int result = pthread_create(&_platform.tid, NULL, _dm_bind_active_monitor_routin, &_platform);
         if (result != 0) {
             // return -1;
         }
     }
 
-    mosquitto_loop_forever(_platform.mosq, -1, 1);
+//    mosquitto_loop_forever(_platform.mosq, -1, 1);
 
     mosquitto_destroy(_platform.mosq);
     _platform.mosq = NULL;
@@ -1951,9 +1968,9 @@ stage_2:
     mosquitto_lib_cleanup();
 
     {
-        struct uc_message_response *n, *p;
+        struct dm_response *n, *p;
         hr_list_for_each_entry_safe(p, n, &_message_response_queue, entry) {
-            uc_message_response_free(p);
+            dm_response_free(p);
         }
     }
 

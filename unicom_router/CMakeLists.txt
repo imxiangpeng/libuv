@@ -26,4 +26,9 @@ TARGET_LINK_LIBRARIES(uc_auth ${jsonc_library})
 ADD_EXECUTABLE(dm_main dm_main.c hr_log.c hr_buffer.c url_request.c dm_object.c dm_Reboot.c dm_FactoryReset.c dm_Device.c dm_Device_DeviceInfo.c dm_Device_X_CU_WAN.c dm_Device_WiFi.c)
 TARGET_LINK_LIBRARIES(dm_main ${curl_library})
 TARGET_LINK_LIBRARIES(dm_main ${jsonc_library})
+TARGET_LINK_LIBRARIES(dm_main ${cjson_library})
 TARGET_LINK_LIBRARIES(dm_main ${mosquitto_library})
+
+
+ADD_EXECUTABLE(dm_prop dm_prop.c hr_log.c hr_buffer.c dm_object.c)
+TARGET_LINK_LIBRARIES(dm_prop ${cjson_library})

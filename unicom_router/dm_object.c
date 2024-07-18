@@ -15,7 +15,7 @@
 
 // static do not release!
 struct dm_object _root = {
-    .name = "/",
+    .name[0] = '/',
     .type = DM_TYPE_OBJECT,
     .childrens = HR_LIST_HEAD_INIT(_root.childrens),
     .sibling = HR_LIST_HEAD_INIT(_root.sibling)};
@@ -25,7 +25,7 @@ struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribut
     if (!name) return NULL;
 
     // append name at end of struct, reduce allocate times
-    obj = (struct dm_object*)calloc(1, sizeof(struct dm_object) + strlen(name) + 1);
+    obj = (struct dm_object*)calloc(1, sizeof(struct dm_object));
     if (!obj) return NULL;
 
     obj->type = type;
@@ -36,7 +36,7 @@ struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribut
     obj->getter = getter;
     obj->setter = setter;
 
-    memcpy(obj->name, name, strlen(name));
+    snprintf(obj->name, sizeof(obj->name), "%s", name);
 
     obj->parent = parent;
 
@@ -58,11 +58,10 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
     memcpy(tmp, name, strlen(name));
     saveptr = tmp;
     while ((token = strtok_r(saveptr, ".", &saveptr))) {
-        int is_leaf = (saveptr == NULL || saveptr[0] == '\0') == 0 ? 1 : 0;
+        int is_leaf = (!saveptr || saveptr[0] == '\0') ? 1 : 0;
         // this is last node/leaf
         struct dm_object* dm = dm_object_lookup(token, object);
         if (!dm) {
-            // HR_LOGD("%s(%d): can not found %s create it\n", __FUNCTION__, __LINE__, tmp);
             if (is_leaf) {
                 dm = dm_object_new(token, type, getter, setter, object);
             } else {
@@ -225,6 +224,55 @@ int dm_object_id(struct dm_object* self, char* id, int len) {
     }
 
     return strlen(id);
+}
+static int dm_object_inner_getter(struct dm_object* self, struct dm_value* val) {
+    if (!self) {
+        return -1;
+    }
+
+    switch (self->inner_value.type) {
+        case DM_TYPE_BOOLEAN:
+            dm_value_set_boolean(val, self->inner_value.val.boolean);
+            break;
+        case DM_TYPE_NUMBER:
+            dm_value_set_number(val, self->inner_value.val.number);
+            break;
+        case DM_TYPE_STRING:
+            dm_value_set_string(val, self->inner_value.val.string);
+            break;
+        default:
+            return -1;
+    }
+    return 0;
+}
+
+static int dm_object_inner_setter(struct dm_object* self, struct dm_value* val) {
+    switch (val->type) {
+        case DM_TYPE_BOOLEAN:
+            dm_value_set_boolean(&self->inner_value, val->val.boolean);
+            break;
+        case DM_TYPE_NUMBER:
+            dm_value_set_number(&self->inner_value, val->val.number);
+            break;
+        case DM_TYPE_STRING:
+            dm_value_set_string(&self->inner_value, val->val.string);
+            break;
+        default:
+            return -1;
+    }
+    return 0;
+}
+
+struct dm_object* dm_boolean_new(const char* name) {
+    return dm_object_new_ext(name, DM_TYPE_BOOLEAN, dm_object_inner_getter, dm_object_inner_setter);
+}
+
+struct dm_object* dm_number_new(const char* name) {
+    return dm_object_new_ext(name, DM_TYPE_NUMBER, dm_object_inner_getter, dm_object_inner_setter);
+}
+
+struct dm_object* dm_string_new(const char* name) {
+    return dm_object_new_ext(name, DM_TYPE_STRING, dm_object_inner_getter, dm_object_inner_setter);
 }
 
 int dm_value_reset(struct dm_value* val) {

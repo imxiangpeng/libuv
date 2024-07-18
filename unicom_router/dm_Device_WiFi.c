@@ -6,10 +6,14 @@
 #include "hr_list.h"
 #include "hr_log.h"
 
-extern void uc_dm_notify(const char* params[], size_t size);
+extern void dm_send_notify(const char* params[], size_t size);
 
 static int OperatingFrequencyBand_getter(struct dm_object* self, struct dm_value* val) {
     HR_LOGD("%s(%d): this %p -> parent:%s, val:%p\n", __FUNCTION__, __LINE__, self, self->parent->name, val);
+    
+    char id[256] = {0};
+    dm_object_id(self, id, sizeof(id));
+    HR_LOGD("%s(%d): this %p ->%s -> %s\n", __FUNCTION__, __LINE__, self, self->name, id);
     if (!strcmp(self->parent->name, "2G")) {
         dm_value_set_string_ext(val, "2G", 1);
     } else {
@@ -38,7 +42,7 @@ static int OperatingFrequencyBand_setter(struct dm_object* self, struct dm_value
         params[3] = strdup("Device.WiFi.X_CU_ACL.5G");
     }
 
-    uc_dm_notify(params, sizeof(params) / sizeof(params[0]));
+    dm_send_notify(params, sizeof(params) / sizeof(params[0]));
 
     return 0;
 }
@@ -165,6 +169,9 @@ static int X_CU_SavePower_adder(struct dm_object* self, struct dm_value* val) {
 static int X_CU_SavePower_deleter(struct dm_object* self, struct dm_value* val) {
     HR_LOGD("%s(%d): this %p ->%s  parent:%s, val:%s\n", __FUNCTION__, __LINE__, self, self->name, self->parent->name, val->val.string);
 
+    char id[256] = {0};
+    dm_object_id(self, id, sizeof(id));
+    HR_LOGD("%s(%d): this %p ->%s -> %s\n", __FUNCTION__, __LINE__, self, self->name, id);
     struct dm_object* del = dm_object_lookup(val->val.string, NULL);
 
     // do system related work
@@ -175,6 +182,78 @@ static int X_CU_SavePower_deleter(struct dm_object* self, struct dm_value* val) 
     return 0;
 }
 
+static int LowerLayers_getter(struct dm_object* self, struct dm_value* val) {
+	int index = 0;
+	int ret = 0;
+	char *p = NULL;
+    HR_LOGD("%s(%d): this %p ->%s  parent:%s\n", __FUNCTION__, __LINE__, self, self->name, self->parent->name);
+
+    char id[256] = {0};
+    dm_object_id(self, id, sizeof(id));
+    HR_LOGD("%s(%d): this %p ->%s -> %s\n", __FUNCTION__, __LINE__, self, self->name, id);
+
+	if (index < 5) {
+		p = "Device.WiFi.Radio.1";
+		dm_value_set_string(val, p);
+	} else {
+		p = "Device.WiFi.Radio.2";
+		dm_value_set_string(val, p);
+	}
+    return 0;
+}
+
+static int LowerLayers_setter(struct dm_object* self, struct dm_value* val) {
+    HR_LOGD("%s(%d): this %p -> parent:%s, val:%d\n", __FUNCTION__, __LINE__, self, self->parent->name, val->val.number);
+    return 0;
+}
+
+
+
+static int Enable_getter(struct dm_object* self, struct dm_value* val) {
+    HR_LOGD("%s(%d): this %p -> parent:%s, val:%p\n", __FUNCTION__, __LINE__, self, self->parent->name, val);
+
+    char id[256] = {0};
+    dm_object_id(self, id, sizeof(id));
+    HR_LOGD("%s(%d): this %p ->%s -> %s\n", __FUNCTION__, __LINE__, self, self->name, id);
+    return 0;
+}
+
+static int Enable_setter(struct dm_object* self, struct dm_value* val) {
+    HR_LOGD("%s(%d): this %p -> parent:%s, val:%d\n", __FUNCTION__, __LINE__, self, self->parent->name, val->val.number);
+    return 0;
+}
+
+static int SSID_getter(struct dm_object* self, struct dm_value* val) {
+    HR_LOGD("%s(%d): this %p -> parent:%s, val:%p\n", __FUNCTION__, __LINE__, self, self->parent->name, val);
+    return 0;
+}
+
+static int SSID_setter(struct dm_object* self, struct dm_value* val) {
+    HR_LOGD("%s(%d): this %p -> parent:%s, val:%s\n", __FUNCTION__, __LINE__, self, self->parent->name, val->val.string);
+    return 0;
+}
+
+
+
+static int dm_Device_WiFi_SSID_i_init(struct dm_object *parent) {
+    int i = 0;
+	char cmd[64] = {0};
+
+	struct dm_object* SSID = dm_object_new("SSID", DM_TYPE_OBJECT, dm_object_attribute, NULL, parent);	
+
+    for (i = 1; i <= 8; i++) {
+        snprintf(cmd, sizeof(cmd), "%d", i);
+		struct dm_object* INDEX = dm_object_new(cmd, DM_TYPE_OBJECT, dm_object_attribute, NULL, SSID);
+		dm_object_new("LowerLayers", DM_TYPE_STRING, LowerLayers_getter, LowerLayers_setter, INDEX);
+		dm_object_new("Enable", DM_TYPE_BOOLEAN, Enable_getter, Enable_setter, INDEX);
+		dm_object_new("SSID", DM_TYPE_STRING, SSID_getter, SSID_setter, INDEX);
+		// dm_object_new("BSSID", DM_TYPE_STRING, BSSID_getter, NULL, INDEX);
+		// dm_object_new("MACAddress", DM_TYPE_STRING, MACAddress_getter, NULL, INDEX);
+		// dm_object_new("X_CU_WifiSsidFactory", DM_TYPE_STRING, X_CU_WifiSsidFactory_getter, NULL, INDEX);
+	}
+
+    return 0;
+}
 int dm_Device_WiFi(struct dm_object* parent) {
     struct dm_object* WiFi = dm_object_new("WiFi", DM_TYPE_OBJECT, dm_object_attribute, NULL, parent);
 
@@ -228,6 +307,7 @@ int dm_Device_WiFi(struct dm_object* parent) {
 
     HR_LOGD("%s(%d): objectid :%s\n", __FUNCTION__, __LINE__, tmp);
 
+    dm_Device_WiFi_SSID_i_init(WiFi);
     // int *ptr = 0;
     // *ptr = 0;
     return 0;

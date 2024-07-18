@@ -27,6 +27,7 @@ struct dm_object;
 typedef int (*dm_attribute)(struct dm_object* self, struct dm_value* val);
 
 struct dm_object {
+    char name[64];
     enum dm_type type;
 
     struct dm_object *parent;
@@ -40,7 +41,7 @@ struct dm_object {
     // delInstance
     dm_attribute deleter;
 
-    char name[];  // must at end
+    struct dm_value inner_value;
 };
 
 struct dm_object* dm_object_new(const char* name, enum dm_type type, dm_attribute getter, dm_attribute setter, struct dm_object* parent);
@@ -48,6 +49,12 @@ struct dm_object* dm_object_new_ext(const char* name, enum dm_type type, dm_attr
 void dm_object_free(struct dm_object* object);
 struct dm_object* dm_object_lookup(const char* query, struct dm_object* parent);
 struct dm_object* dm_object_parent(struct dm_object* object);
+
+// only store data (data model)
+// read and write will not trigger other action
+struct dm_object* dm_boolean_new(const char* name);
+struct dm_object* dm_number_new(const char* name);
+struct dm_object* dm_string_new(const char* name);
 
 // default object getter sequence function
 int dm_object_attribute(struct dm_object* self, struct dm_value* val);
