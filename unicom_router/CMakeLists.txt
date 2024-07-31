@@ -23,7 +23,7 @@ ADD_EXECUTABLE(uc_auth uc_auth.c hr_log.c hr_buffer.c url_request.c)
 TARGET_LINK_LIBRARIES(uc_auth ${curl_library})
 TARGET_LINK_LIBRARIES(uc_auth ${jsonc_library})
 
-ADD_EXECUTABLE(dm_main dm_main.c hr_log.c hr_buffer.c url_request.c dm_object.c dm_Reboot.c dm_FactoryReset.c dm_Device.c dm_Device_DeviceInfo.c dm_Device_X_CU_WAN.c dm_Device_WiFi.c)
+ADD_EXECUTABLE(dm_main dm_main.c hr_log.c hr_buffer.c url_request.c dm_object.c dm_Reboot.c dm_FactoryReset.c dm_Device.c dm_Device_DeviceInfo.c dm_Device_X_CU_WAN.c dm_Device_WiFi.c dm_Device_MQTT_Client.c)
 TARGET_LINK_LIBRARIES(dm_main ${curl_library})
 TARGET_LINK_LIBRARIES(dm_main ${jsonc_library})
 TARGET_LINK_LIBRARIES(dm_main ${cjson_library})

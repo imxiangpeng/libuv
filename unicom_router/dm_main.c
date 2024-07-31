@@ -39,14 +39,20 @@
 
 #define DM_DATA_FORMAT_UNION 1
 
-// #define MNG_URL "https://123.6.50.69:8803"
-#define MNG_URL "https://rtm.ossapp.chinaunicom.cn:8803"
+#define MNG_URL "https://123.6.50.69:8803"
+// #define MNG_URL "https://rtm.ossapp.chinaunicom.cn:8803"
 
 #define MNG_URL_AUTH MNG_URL "/api/auth"
 #define MNG_URL_DEVICE_GET_MQTT_SERVER MNG_URL "/api/deviceGetMqttServer"
 
+#define CU_MQTT_SERVER_CONF "cu_mqtt_server.json"
+
+#define CU_ETC_DIR "/etc/cu/"
+
+#define CU_DATA_DIR "/data/etc/cu/"
+
 #define CU_BIND_DATA_NAME "cu_bind_data.ini"
-#define CU_BIND_DATA_DIR "/home/alex/workspace/workspace/libuv/libuv/build/uc/"
+// #define CU_DATA_DIR "/home/alex/workspace/workspace/libuv/libuv/build/uc/"
 
 #define CU_BIND_ACTIVE_NAME "cu_bind_active.json"
 // #define CU_BIND_ACTIVE_OBSERVE_PATH "/home/alex/workspace/workspace/libuv/libuv/build/bind.ini"
@@ -251,6 +257,35 @@ static size_t _read_file(const char *path, char **buf) {
 
     *buf = data;
     return sb.st_size;
+}
+
+static ssize_t _write_file(const char *path, const char *data, size_t size) {
+    int fd = -1;
+    ssize_t left = size;
+    const char *ptr = data;
+
+    if (!data || !path || size <= 0) {
+        return -1;
+    }
+
+    fd = open(path, O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fd < 0) {
+        return -1;
+    }
+
+    while (left > 0) {
+        ssize_t n = TEMP_FAILURE_RETRY(write(fd, ptr, left));
+        if (n == -1) {
+            return size - left;
+        }
+        ptr += n;
+        left -= n;
+    }
+
+    fdatasync(fd);
+    close(fd);
+
+    return size;
 }
 
 #if DM_DATA_FORMAT_UNION
@@ -711,12 +746,12 @@ static int _dm_response_on_bind(struct dm_platform *plat, struct json_object *ro
     mosquitto_disconnect(_platform.mosq);
     mosquitto_loop_stop(_platform.mosq, 1);
 
-    if (stat(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, &st) != 0) {
-        mkdir(CU_BIND_DATA_DIR, 0755);
+    if (stat(CU_DATA_DIR CU_BIND_DATA_NAME, &st) != 0) {
+        mkdir(CU_DATA_DIR, 0755);
     }
 
     // save device id & secret to storage
-    fd = open(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, O_CREAT | O_TRUNC | O_RDWR, 0644);
+    fd = open(CU_DATA_DIR CU_BIND_DATA_NAME, O_CREAT | O_TRUNC | O_RDWR, 0644);
     if (fd < 0) {
         return -1;
     }
@@ -848,7 +883,7 @@ static int _dm_action_unbind(struct dm_platform *plat, struct json_object *root)
 
     memset((void *)plat->device_id, 0, sizeof(plat->device_id));
     memset((void *)plat->secret, 0, sizeof(plat->secret));
-    unlink(CU_BIND_DATA_DIR CU_BIND_DATA_NAME);
+    unlink(CU_DATA_DIR CU_BIND_DATA_NAME);
 end:
 
     dm_value_reset(&v);
@@ -1661,7 +1696,7 @@ static int _load_dm_storage_data(struct dm_platform *plat) {
     memset((void *)plat->device_id, 0, sizeof(plat->device_id));
     memset((void *)plat->secret, 0, sizeof(plat->secret));
 
-    fd = open(CU_BIND_DATA_DIR CU_BIND_DATA_NAME, O_RDONLY, 0644);
+    fd = open(CU_DATA_DIR CU_BIND_DATA_NAME, O_RDONLY, 0644);
     if (fd < 0) {
         return -1;
     }
@@ -1672,6 +1707,27 @@ static int _load_dm_storage_data(struct dm_platform *plat) {
 
     sscanf(buffer, "%[^,],%s", plat->device_id, plat->secret);
 
+    return 0;
+}
+
+static int _store_mqtt_server_conf(struct dm_platform *plat) {
+    struct json_object *root = NULL;
+    if (!plat) return -1;
+
+    root = json_object_new_object();
+    if (!root) return -1;
+
+    json_object_object_add(root, "BrokerAddress", json_object_new_string(plat->host));
+    json_object_object_add(root, "BrokerPort", json_object_new_int(plat->port));
+    json_object_object_add(root, "Username", json_object_new_string(plat->username));
+    json_object_object_add(root, "Password", json_object_new_string(plat->password));
+    json_object_object_add(root, "KeepAliveTime", json_object_new_int(plat->alive_time));
+
+    const char *data = json_object_to_json_string(root);
+
+    // maybe we should store only in memory
+    _write_file(CU_ETC_DIR CU_MQTT_SERVER_CONF, data, strlen(data));
+    json_object_put(root);
     return 0;
 }
 
@@ -1791,18 +1847,6 @@ int main(int argc, char **argv) {
         dm_value_reset(&val);
     }
 
-    dm_object_new_ext("Device.DeviceInfo.ModelName2", DM_TYPE_STRING,
-                      NULL, NULL);
-
-    object = dm_object_lookup("Device.DeviceInfo.ModelName2", NULL);
-    if (object) {
-        struct dm_value val;
-        memset((void *)&val, 0, sizeof(val));
-        object->getter(object, &val);
-        HR_LOGD("model 2:%s\n", val.val.string);
-        dm_value_reset(&val);
-    }
-
     object = dm_object_lookup("Device.DeviceInfo.", NULL);
     if (object) {
         struct dm_value val;
@@ -1829,6 +1873,7 @@ int main(int argc, char **argv) {
         memset((void *)&val, 0, sizeof(val));
         object->getter(object, &val);
         HR_LOGD("Device.:%s\n", val.val.string);
+        printf("Device.:%s\n", val.val.string);
         dm_value_reset(&val);
     }
 
@@ -1892,6 +1937,9 @@ stage_2:
     url_request_free(_platform.req);
     _platform.req = NULL;
 
+    // store mqtt platform information
+    _store_mqtt_server_conf(&_platform);
+
     object = dm_object_lookup("Device.DeviceInfo.X_CU_CUEI", NULL);
     if (object) {
         struct dm_value val;
@@ -1947,11 +1995,11 @@ stage_2:
     mosquitto_tls_insecure_set(_platform.mosq, 0);
     mosquitto_tls_opts_set(_platform.mosq, 0, NULL, NULL);
 
-    do {
+    /*do {
         HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _platform.host, _platform.port);
         rc = mosquitto_connect_bind(_platform.mosq, _platform.host, _platform.port,
                                     _platform.alive_time, NULL);
-    } while (rc != MOSQ_ERR_SUCCESS);
+    } while (rc != MOSQ_ERR_SUCCESS);*/
 
     if (_platform.tid == 0) {
         int result = pthread_create(&_platform.tid, NULL, _dm_bind_active_monitor_routin, &_platform);
@@ -1960,7 +2008,7 @@ stage_2:
         }
     }
 
-//    mosquitto_loop_forever(_platform.mosq, -1, 1);
+    //    mosquitto_loop_forever(_platform.mosq, -1, 1);
 
     mosquitto_destroy(_platform.mosq);
     _platform.mosq = NULL;

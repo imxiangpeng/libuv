@@ -416,6 +416,7 @@ struct url_request *url_request_new(void) {
     curl_easy_setopt(priv->curl, CURLOPT_CONNECTTIMEOUT_MS, 30000L);
     curl_easy_setopt(priv->curl, CURLOPT_SSL_VERIFYPEER, 0);
     curl_easy_setopt(priv->curl, CURLOPT_SSL_VERIFYHOST, 0);
+    curl_easy_setopt(priv->curl, CURLOPT_VERBOSE, 1);
 
     priv->request.method = UR_METHOD_GET;
 

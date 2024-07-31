@@ -25,5 +25,7 @@ int dm_Device_init(struct dm_object* parent) {
     dm_Device_X_CU_WAN_init(Device);
 
     dm_Device_WiFi(Device);
+	
+	dm_Device_MQTT_Client_init(Device);
     return 0;
 }
