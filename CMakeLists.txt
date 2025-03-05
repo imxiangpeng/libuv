@@ -20,6 +20,8 @@ include(CTest)
 add_subdirectory(hrmgt)
 add_subdirectory(clound189fs)
 add_subdirectory(unicom_router)
+add_subdirectory(mosquitto)
+
 
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_C_STANDARD_REQUIRED ON)
