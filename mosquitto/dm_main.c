@@ -47,7 +47,7 @@
 
 #define BROKER_DEFAULT_PORT 1883
 
-struct dm_private {
+struct dm_platform {
     char host[256];
     int port;
     int alive_time;  // 60s
@@ -69,7 +69,7 @@ struct dm_private {
     uv_timer_t timer;
 };
 
-static struct dm_private _private = {0};
+static struct dm_platform _data = {0};
 
 struct dm__topic {
     int mid;
@@ -79,7 +79,7 @@ struct dm__topic {
 
 static HR_LIST_HEAD(_topic_list);
 
-static void _uv_mosq_reconnect(void);
+static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle);
 
 static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
     struct dm__topic *t = NULL;
@@ -192,13 +192,11 @@ static void _on_log(struct mosquitto *mosq, void *obj, int level,
 
 // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html#_Table_3.1_-
 static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
-    struct dm_private *plat = (struct dm_private *)obj;
+    struct dm_platform *data = (struct dm_platform *)obj;
 
     HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
 
     if (CONNACK_ACCEPTED == reason) {
-        // uv_timer_start(&_private.timer, _mosquitto_poll_misc_timer_cb, 1000, 1000);
-
         HR_LOGD("%s(%d): connected, ...\n", __FUNCTION__, __LINE__);
         // auto subscribe all topics
         struct dm__topic *p = NULL, *msg = NULL;
@@ -231,12 +229,7 @@ static void _on_disconnect(struct mosquitto *mosq, void *userdata, int rc) {
     (void)rc;
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
-    struct dm_private *plat = (struct dm_private *)userdata;
-    HR_LOGD("%s(%d): mosquitto socket:%d\n", __FUNCTION__, __LINE__, mosquitto_socket(mosq));
-    // trigger reconnect
-    // _uv_mosq_reconnect();
-    plat->sock = -1;
-    // mosquitto_reconnect(mosq);
+    struct dm_platform *data = (struct dm_platform *)userdata;
 }
 
 static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
@@ -245,11 +238,11 @@ static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
     bool some_sub_allowed = (granted_qos[0] < 128);
     bool should_print = 1;
 
-    struct dm_private *plat = (struct dm_private *)obj;
+    struct dm_platform *data = (struct dm_platform *)obj;
 
-    if (!plat) return;
+    if (!data) return;
 
-    HR_LOGD("%s(%d): mid:%d vs %d\n", __FUNCTION__, __LINE__, mid, plat->topic_mid);
+    HR_LOGD("%s(%d): mid:%d vs %d\n", __FUNCTION__, __LINE__, mid, data->topic_mid);
 
     if (should_print)
         printf("Subscribed (mid: %d): %d", mid, granted_qos[0]);
@@ -272,7 +265,7 @@ static void _on_message(struct mosquitto *mosq, void *obj,
     (void)mosq;
     const char *method = NULL;
     uint32_t id = 1;
-    struct dm_private *plat = (struct dm_private *)obj;
+    struct dm_platform *data = (struct dm_platform *)obj;
 
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
             message->topic, message->payloadlen);
@@ -312,8 +305,8 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
     if (SIGUSR1 == signum) {
-        mosquitto_disconnect(_private.mosq);
-        // mosquitto_loop_stop(_private.mosq, 1);
+        mosquitto_disconnect(_data.mosq);
+        uv_stop(_data.loop);
     }
 }
 // {
@@ -323,7 +316,7 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
 // 	"server": "127.0.0.1",
 // 	"port": 1883
 // }
-static int _load_conf(struct dm_private *plat) {
+static int _load_conf(struct dm_platform *plat) {
     size_t len = 0;
     char *data = NULL;
     cJSON *root = NULL;
@@ -353,25 +346,25 @@ static int _load_conf(struct dm_private *plat) {
     if (isnan((double)port)) {
         port = BROKER_DEFAULT_PORT;
     } else {
-        _private.port = (int)port;
+        _data.port = (int)port;
     }
 
     HR_LOGD("broker:%s, client_id:%s, username:%s, password:%s\n", broker, client_id, username, password);
 
-    snprintf(_private.username, sizeof(_private.username), "%s", username);
-    snprintf(_private.password, sizeof(_private.password), "%s", password);
-    snprintf(_private.host, sizeof(_private.host), "%s", broker);
-    snprintf(_private.client_id, sizeof(_private.client_id), "%s", client_id);
+    snprintf(plat->username, sizeof(plat->username), "%s", username);
+    snprintf(plat->password, sizeof(plat->password), "%s", password);
+    snprintf(plat->host, sizeof(plat->host), "%s", broker);
+    snprintf(plat->client_id, sizeof(plat->client_id), "%s", client_id);
     cJSON_Delete(root);
 
     return 0;
 }
 
-static void _mosquitto_poll_cb(uv_poll_t *handle, int status, int events) {
+static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
     HR_LOGD("%s(%d): come in .....status:%d, event:0x%X..\n", __FUNCTION__, __LINE__, status, events);
 
     int new_events = UV_READABLE | UV_DISCONNECT;
-    struct dm_private *data = (struct dm_private *)handle->data;
+    struct dm_platform *data = (struct dm_platform *)handle->data;
     struct mosquitto *mosq = data->mosq;
 
     if (events & UV_READABLE) {
@@ -379,6 +372,8 @@ static void _mosquitto_poll_cb(uv_poll_t *handle, int status, int events) {
         mosquitto_loop_read(data->mosq, 1);
     }
 
+    // default no UV_WRITABLE, only care it when mosquitto_want_write
+    // so no need add condition : mosquitto_want_write
     if (events & UV_WRITABLE) {
         HR_LOGD("%s(%d): come in write.......\n", __FUNCTION__, __LINE__);
         mosquitto_loop_write(data->mosq, 1);
@@ -396,69 +391,49 @@ static void _mosquitto_poll_cb(uv_poll_t *handle, int status, int events) {
         }
     }
 
-    if (pevents != data->mosq_pevents) {
-        data->mosq_pevents = pevents;
-        uv_poll_start(&_private.mosq_poll, pevents, _mosquitto_poll_cb);
-    }
-    // mosquitto_loop_misc(data->mosq);
-    // uv_timer_again(&data->timer);
-}
+    if (events & UV_DISCONNECT) {
+        HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
+        // stop current poll, we should reconnect and using new socket
+        uv_poll_stop(handle);
 
-void _mosquitto_poll_misc_timer_cb(uv_timer_t *handle) {
-    HR_LOGD("%s(%d): come in .......\n", __FUNCTION__, __LINE__);
-    struct dm_private *data = (struct dm_private *)handle->data;
+        // stop & start reconnect timer callback
+        uv_timer_stop(&data->timer);
+        uv_timer_start(&data->timer, _mosquitto_reconnect_timer_cb, 1000, 1000);
 
-    if (data->sock == -1) {
-        HR_LOGD("%s(%d): come in reconnect.......\n", __FUNCTION__, __LINE__);
-        _uv_mosq_reconnect();
         return;
     }
+
+    if (pevents != data->mosq_pevents) {
+        data->mosq_pevents = pevents;
+        uv_poll_start(&_data.mosq_poll, pevents, _mosquitto_loop_poll_cb);
+    }
+}
+
+static void _mosquitto_loop_misc_timer_cb(uv_timer_t *handle) {
+    struct dm_platform *data = (struct dm_platform *)handle->data;
+
     mosquitto_loop_misc(data->mosq);
 }
 
-static void _uv_mosq_reconnect(void) {
-    int rc = 0;
-
-    if (_private.mosq_have_connected != 0) {
-        HR_LOGD("old sock:%d\n", _private.sock);
-        HR_LOGD("uv_is_closing((uv_handle_t *)&_private.mosq_poll):%d\n", uv_is_closing((uv_handle_t *)&_private.mosq_poll));
-        HR_LOGD("uv_is_closing((uv_handle_t *)&_private.timer):%d\n", uv_is_closing((uv_handle_t *)&_private.timer));
-        if (!uv_is_closing((uv_handle_t *)&_private.mosq_poll)) {
-        HR_LOGD("stop current poll ..........\n");
-        uv_poll_stop(&_private.mosq_poll);
-        // uv_close((uv_handle_t *)&_private.mosq_poll, NULL);
-        }
-        uv_timer_stop(&_private.timer);
-        // uv_close((uv_handle_t *)&_private.timer, NULL);
-        _private.sock = -1;
+static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle) {
+    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect(_data.mosq)) {
+        HR_LOGD("%s(%d): failed reconnect:%s:%d\n", __FUNCTION__, __LINE__, _data.host, _data.port);
+        return;
     }
 
-    do {
-        HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _private.host, _private.port);
-        if (_private.mosq_have_connected == 0) {
-            rc = mosquitto_connect_bind_async(_private.mosq, _private.host, _private.port,
-                                              _private.alive_time, NULL);
-        } else {
-            rc = mosquitto_reconnect_async(_private.mosq);
-        }
-        if (rc != MOSQ_ERR_SUCCESS)
-            usleep(1000 * 1000);
-    } while (rc != MOSQ_ERR_SUCCESS);
+    _data.sock = mosquitto_socket(_data.mosq);
+    HR_LOGD("new sock:%d\n", _data.sock);
+    // assert(_data.sock != 0);
 
-    _private.mosq_have_connected = 1;
+    // using uv_poll_init update socket
+    // any memory leak ?
+    uv_poll_init(_data.loop, &_data.mosq_poll, _data.sock);
+    _data.mosq_poll.data = &_data;
+    _data.mosq_pevents = UV_READABLE | UV_DISCONNECT /*| UV_WRITABLE*/;
+    uv_poll_start(&_data.mosq_poll, _data.mosq_pevents, _mosquitto_loop_poll_cb);
 
-    _private.sock = mosquitto_socket(_private.mosq);
-    HR_LOGD("new sock:%d\n", _private.sock);
-    // assert(_private.sock != 0);
-
-    uv_poll_init(_private.loop, &_private.mosq_poll, _private.sock);
-    _private.mosq_poll.data = &_private;
-    _private.mosq_pevents = UV_READABLE | UV_DISCONNECT /*| UV_WRITABLE*/;
-    uv_poll_start(&_private.mosq_poll, _private.mosq_pevents, _mosquitto_poll_cb);
-
-    uv_timer_init(_private.loop, &_private.timer);
-    _private.timer.data = &_private;
-    uv_timer_start(&_private.timer, _mosquitto_poll_misc_timer_cb, 1000, 1000);
+    uv_timer_stop(handle);
+    uv_timer_start(&_data.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
 }
 
 int main(int argc, char **argv) {
@@ -474,61 +449,86 @@ int main(int argc, char **argv) {
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
 
-    memset((void *)&_private, 0, sizeof(_private));
+    memset((void *)&_data, 0, sizeof(_data));
 
-    _private.qos = 0;
+    _data.qos = 0;
 
-    _private.alive_time = 60;
-    _private.port = BROKER_DEFAULT_PORT;
+    _data.alive_time = 60;
+    _data.port = BROKER_DEFAULT_PORT;
 
-    _private.sock = -1;
+    _data.sock = -1;
 
-    _load_conf(&_private);
+    _load_conf(&_data);
 
     HR_LOGD("%s(%d): try connect mqtt :%s:%d\n", __FUNCTION__, __LINE__,
-            _private.host, _private.port);
+            _data.host, _data.port);
 
     dm_topic_init();
 
-    _private.loop = uv_default_loop();
+    _data.loop = uv_default_loop();
 
     mosquitto_lib_init();
 
-    HR_LOGD("client id:%s\n", _private.client_id);
-    _private.mosq = mosquitto_new(_private.client_id, false, &_private);
-    if (!_private.mosq) {
+    HR_LOGD("client id:%s\n", _data.client_id);
+    _data.mosq = mosquitto_new(_data.client_id, false, &_data);
+    if (!_data.mosq) {
         HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__,
                 __LINE__);
         return -1;
     }
 
-    mosquitto_log_callback_set(_private.mosq, _on_log);
+    mosquitto_log_callback_set(_data.mosq, _on_log);
 
-    mosquitto_subscribe_callback_set(_private.mosq, _on_subscribe);
-    mosquitto_connect_callback_set(_private.mosq, _on_connect);
-    // mosquitto_connect_with_flags_callback_set(_platform.mosq,
+    mosquitto_subscribe_callback_set(_data.mosq, _on_subscribe);
+    mosquitto_connect_callback_set(_data.mosq, _on_connect);
+    // mosquitto_connect_with_flags_callback_set(_data.mosq,
     // _on_connect_with_flags);
-    mosquitto_disconnect_callback_set(_private.mosq, _on_disconnect);
-    mosquitto_message_callback_set(_private.mosq, _on_message);
-    mosquitto_publish_callback_set(_private.mosq, _on_publish);
-    mosquitto_tls_opts_set(_private.mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
+    mosquitto_disconnect_callback_set(_data.mosq, _on_disconnect);
+    mosquitto_message_callback_set(_data.mosq, _on_message);
+    mosquitto_publish_callback_set(_data.mosq, _on_publish);
+    mosquitto_tls_opts_set(_data.mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
 
     // const char *cafile = "/home/alex/workspace/workspace/libuv/mqtt_cacert.pem";
-    // mosquitto_tls_set(_platform.mosq, cafile, NULL, NULL, NULL, NULL);
-    mosquitto_tls_insecure_set(_private.mosq, 0);
-    mosquitto_tls_opts_set(_private.mosq, 0, NULL, NULL);
+    // mosquitto_tls_set(_data.mosq, cafile, NULL, NULL, NULL, NULL);
+    mosquitto_tls_insecure_set(_data.mosq, 0);
+    mosquitto_tls_opts_set(_data.mosq, 0, NULL, NULL);
 
-    mosquitto_username_pw_set(_private.mosq, _private.username, _private.password);
+    mosquitto_username_pw_set(_data.mosq, _data.username, _data.password);
 
-    _uv_mosq_reconnect();
+    do {
+        HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _data.host, _data.port);
+        rc = mosquitto_connect_bind_async(_data.mosq, _data.host, _data.port,
+                                          _data.alive_time, NULL);
+        if (rc != MOSQ_ERR_SUCCESS)
+            usleep(1000 * 1000);
+    } while (rc != MOSQ_ERR_SUCCESS);
 
-    uv_run(_private.loop, UV_RUN_DEFAULT);
+    _data.sock = mosquitto_socket(_data.mosq);
+    // assert(_data.sock != 0);
+    HR_LOGD("new sock:%d\n", _data.sock);
 
-    uv_poll_stop(&_private.mosq_poll);
-    uv_timer_stop(&_private.timer);
+    uv_poll_init(_data.loop, &_data.mosq_poll, _data.sock);
+    _data.mosq_poll.data = &_data;
+    _data.mosq_pevents = UV_READABLE | UV_DISCONNECT /*| UV_WRITABLE*/;
+    uv_poll_start(&_data.mosq_poll, _data.mosq_pevents, _mosquitto_loop_poll_cb);
 
-    mosquitto_destroy(_private.mosq);
-    _private.mosq = NULL;
+    uv_timer_init(_data.loop, &_data.timer);
+    _data.timer.data = &_data;
+    uv_timer_start(&_data.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
+
+    _data.mosq_have_connected = 1;
+
+    uv_run(_data.loop, UV_RUN_DEFAULT);
+
+    uv_poll_stop(&_data.mosq_poll);
+    uv_timer_stop(&_data.timer);
+
+    uv_close((uv_handle_t *)&_data.mosq_poll, NULL);
+    uv_close((uv_handle_t *)&_data.timer, NULL);
+
+    uv_loop_close(_data.loop);
+    mosquitto_destroy(_data.mosq);
+    _data.mosq = NULL;
     mosquitto_lib_cleanup();
 
     {
