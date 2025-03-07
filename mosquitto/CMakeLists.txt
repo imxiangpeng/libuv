@@ -24,3 +24,4 @@ ADD_EXECUTABLE(dm_lift dm_main.c hr_log.c dm_topic dm_topic_heartbeat
 
 TARGET_LINK_LIBRARIES(dm_lift ${cjson_library})
 TARGET_LINK_LIBRARIES(dm_lift ${mosquitto_library})
+TARGET_LINK_LIBRARIES(dm_lift ${libuv_library})
