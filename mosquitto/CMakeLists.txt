@@ -12,7 +12,7 @@ FIND_LIBRARY(mosquitto_library NAMES mosquitto)
 
 #find_package(LibXml2 REQUIRED)
 
-#INCLUDE_DIRECTORIES(j2s)
+INCLUDE_DIRECTORIES(j2s)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
@@ -20,7 +20,10 @@ ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 
 ADD_EXECUTABLE(dm_lift dm_main.c hr_log.c dm_topic dm_topic_heartbeat
-                dm_topic_command)
+                dm_topic_command
+                dm_topic_liftstate
+                dm_topic_liftfault
+                dm_topic_liftruninfo)
 
 TARGET_LINK_LIBRARIES(dm_lift ${cjson_library})
 TARGET_LINK_LIBRARIES(dm_lift ${mosquitto_library})

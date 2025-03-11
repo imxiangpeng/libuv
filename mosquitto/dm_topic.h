@@ -4,6 +4,7 @@
 struct dm_topic {
     const char *name;
     const char *topic;
+    int period;
     enum topic_type {
         TOPIC_TYPE_PUBLISH = 0,
         TOPIC_TYPE_SUBSCRIBE
@@ -17,8 +18,6 @@ struct dm_topic {
         int (*on_publish)(void **payload, int *len);
     } callback;
 };
-
-
 // pub
 int dm_topic_init(void);
 

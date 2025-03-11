@@ -1,3 +1,6 @@
+// mxp, 20250310 sample skeleton mqtt
+
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 // #include <json-c/json.h>
@@ -46,19 +49,15 @@
 #define DM_DEFAULT_CONFIG_NAME "dm.json"
 
 #define BROKER_DEFAULT_PORT 1883
-
+#define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
 struct dm_platform {
     char host[256];
     int port;
     int alive_time;  // 60s
     char username[256];
     char password[256];
-    ;
     char client_id[128];
     int qos;
-
-    char topic[256];
-    int topic_mid;
 
     struct mosquitto *mosq;
     int sock;  // mosquitto socket
@@ -69,18 +68,49 @@ struct dm_platform {
     uv_timer_t timer;
 };
 
-static struct dm_platform _data = {0};
+static struct dm_platform _plat = {0};
 
 struct dm__topic {
     int mid;
     const struct dm_topic *self;
     struct hr_list_head entry;
+    // period topic, auto publish
+    uv_timer_t *timer;
 };
 
 static HR_LIST_HEAD(_topic_list);
 
 static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle);
+static void _topic_period_timer_cb(uv_timer_t *handle) {
+    if (!handle || !handle->data) return;
+    struct dm__topic *t = (struct dm__topic *)handle->data;
 
+    HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
+
+    // public topics
+    void *payload = NULL;
+    int len = 0;
+    t->self->callback.on_publish(&payload, &len);
+    if (payload != NULL && len > 0) {
+        int ret = mosquitto_publish(_plat.mosq, &t->mid, t->self->topic,
+                                    len, (const void *)payload,
+                                    0, false);
+        free(payload);
+    }
+}
+
+static void dm__topic_timer_start(struct dm__topic *t) {
+    if (!t || !t->self) return;
+    if (t->timer != NULL) {
+        uv_timer_start(t->timer, _topic_period_timer_cb, t->self->period, t->self->period);
+    }
+}
+static void dm__topic_timer_stop(struct dm__topic *t) {
+    if (!t || !t->self) return;
+    if (t->timer != NULL) {
+        uv_timer_stop(t->timer);
+    }
+}
 static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
     struct dm__topic *t = NULL;
     if (!topic)
@@ -93,11 +123,21 @@ static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
 
     t->self = topic;
 
+    if (t->self->type == TOPIC_TYPE_PUBLISH && t->self->period > 0) {
+        t->timer = (uv_timer_t *)calloc(1, sizeof(uv_timer_t));
+        uv_timer_init(_plat.loop, t->timer);
+        t->timer->data = t;
+    }
     HR_INIT_LIST_HEAD(&t->entry);
 
     hr_list_add_tail(&t->entry, &_topic_list);
 
     return t;
+}
+
+void _close_uv_dynamic_handle(uv_handle_t *handle) {
+    HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, handle);
+    free(handle);
 }
 
 static void dm__topic_free(struct dm__topic *t) {
@@ -110,6 +150,10 @@ static void dm__topic_free(struct dm__topic *t) {
 
     HR_INIT_LIST_HEAD(&t->entry);
 
+    if (t->timer != NULL) {
+        HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, t->timer);
+        uv_close((uv_handle_t *)t->timer, _close_uv_dynamic_handle);
+    }
     memset((void *)t, 0, sizeof(struct dm__topic));
     free(t);
 }
@@ -192,7 +236,7 @@ static void _on_log(struct mosquitto *mosq, void *obj, int level,
 
 // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html#_Table_3.1_-
 static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
-    struct dm_platform *data = (struct dm_platform *)obj;
+    struct dm_platform *plat = (struct dm_platform *)obj;
 
     HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
 
@@ -209,14 +253,32 @@ static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
                 void *payload = NULL;
                 int len = 0;
                 p->self->callback.on_publish(&payload, &len);
-                int ret = mosquitto_publish(mosq, &p->mid, p->self->topic,
-                                            len, (const void *)payload,
-                                            0, false);
-                free(payload);
-                HR_LOGD("%s(%d): connected, auto publish:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
+                if (payload != NULL && len > 0) {
+                    int ret = mosquitto_publish(mosq, &p->mid, p->self->topic,
+                                                len, (const void *)payload,
+                                                0, false);
+                    HR_LOGD("%s(%d): connected, auto publish:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
+                    free(payload);
+                }
+
+                if (p->timer != NULL) {
+                    dm__topic_timer_start(p);
+                }
             }
         }
 
+        {
+            struct sockaddr_in addr;
+            socklen_t addr_len = sizeof(addr);
+            getsockname(mosquitto_socket(mosq), (struct sockaddr *)&addr, &addr_len);
+
+            // 转换IP和端口
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
+            uint16_t port = ntohs(addr.sin_port);
+
+            HR_LOGD("Local IP: %s, Port: %d\n", ip_str, port);
+        }
     } else {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
         mosquitto_disconnect(mosq);
@@ -229,7 +291,7 @@ static void _on_disconnect(struct mosquitto *mosq, void *userdata, int rc) {
     (void)rc;
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
-    struct dm_platform *data = (struct dm_platform *)userdata;
+    struct dm_platform *plat = (struct dm_platform *)userdata;
 }
 
 static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
@@ -238,11 +300,9 @@ static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
     bool some_sub_allowed = (granted_qos[0] < 128);
     bool should_print = 1;
 
-    struct dm_platform *data = (struct dm_platform *)obj;
+    struct dm_platform *plat = (struct dm_platform *)obj;
 
-    if (!data) return;
-
-    HR_LOGD("%s(%d): mid:%d vs %d\n", __FUNCTION__, __LINE__, mid, data->topic_mid);
+    if (!plat) return;
 
     if (should_print)
         printf("Subscribed (mid: %d): %d", mid, granted_qos[0]);
@@ -265,7 +325,7 @@ static void _on_message(struct mosquitto *mosq, void *obj,
     (void)mosq;
     const char *method = NULL;
     uint32_t id = 1;
-    struct dm_platform *data = (struct dm_platform *)obj;
+    struct dm_platform *plat = (struct dm_platform *)obj;
 
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
             message->topic, message->payloadlen);
@@ -305,8 +365,8 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
     if (SIGUSR1 == signum) {
-        mosquitto_disconnect(_data.mosq);
-        uv_stop(_data.loop);
+        mosquitto_disconnect(_plat.mosq);
+        uv_stop(_plat.loop);
     }
 }
 // {
@@ -346,7 +406,7 @@ static int _load_conf(struct dm_platform *plat) {
     if (isnan((double)port)) {
         port = BROKER_DEFAULT_PORT;
     } else {
-        _data.port = (int)port;
+        _plat.port = (int)port;
     }
 
     HR_LOGD("broker:%s, client_id:%s, username:%s, password:%s\n", broker, client_id, username, password);
@@ -363,28 +423,26 @@ static int _load_conf(struct dm_platform *plat) {
 static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
     HR_LOGD("%s(%d): come in .....status:%d, event:0x%X..\n", __FUNCTION__, __LINE__, status, events);
 
-    int new_events = UV_READABLE | UV_DISCONNECT;
-    struct dm_platform *data = (struct dm_platform *)handle->data;
-    struct mosquitto *mosq = data->mosq;
+    int new_events = DEFAULT_POLL_EVENTS;
+
+    struct dm_platform *plat = (struct dm_platform *)handle->data;
+    struct mosquitto *mosq = plat->mosq;
 
     if (events & UV_READABLE) {
-        HR_LOGD("%s(%d): come in read.......\n", __FUNCTION__, __LINE__);
-        mosquitto_loop_read(data->mosq, 1);
+        mosquitto_loop_read(plat->mosq, 1);
     }
 
     // default no UV_WRITABLE, only care it when mosquitto_want_write
     // so no need add condition : mosquitto_want_write
     if (events & UV_WRITABLE) {
-        HR_LOGD("%s(%d): come in write.......\n", __FUNCTION__, __LINE__);
-        mosquitto_loop_write(data->mosq, 1);
+        mosquitto_loop_write(plat->mosq, 1);
     }
 
-    int pevents = data->mosq_pevents;
+    int pevents = plat->mosq_pevents;
     if (mosquitto_want_write(mosq)) {
         if (!(pevents & UV_WRITABLE)) {
             pevents |= UV_WRITABLE;
         }
-
     } else {
         if (pevents & UV_WRITABLE) {
             pevents ^= UV_WRITABLE;
@@ -397,44 +455,60 @@ static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
         uv_poll_stop(handle);
 
         // stop & start reconnect timer callback
-        uv_timer_stop(&data->timer);
-        uv_timer_start(&data->timer, _mosquitto_reconnect_timer_cb, 1000, 1000);
+        uv_timer_stop(&plat->timer);
+        uv_timer_start(&plat->timer, _mosquitto_reconnect_timer_cb, 1000, 1000);
 
         return;
     }
 
-    if (pevents != data->mosq_pevents) {
-        data->mosq_pevents = pevents;
-        uv_poll_start(&_data.mosq_poll, pevents, _mosquitto_loop_poll_cb);
+    if (pevents != plat->mosq_pevents) {
+        plat->mosq_pevents = pevents;
+        uv_poll_start(&_plat.mosq_poll, pevents, _mosquitto_loop_poll_cb);
     }
 }
 
 static void _mosquitto_loop_misc_timer_cb(uv_timer_t *handle) {
-    struct dm_platform *data = (struct dm_platform *)handle->data;
+    struct dm_platform *plat = (struct dm_platform *)handle->data;
 
-    mosquitto_loop_misc(data->mosq);
+    // mosquitto_loop_misc(plat->mosq);
 }
 
 static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle) {
-    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect(_data.mosq)) {
-        HR_LOGD("%s(%d): failed reconnect:%s:%d\n", __FUNCTION__, __LINE__, _data.host, _data.port);
+    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect_async(_plat.mosq)) {
+        // HR_LOGD("%s(%d): failed reconnect:%s:%d\n", __FUNCTION__, __LINE__, _plat.host, _plat.port);
         return;
     }
 
-    _data.sock = mosquitto_socket(_data.mosq);
-    HR_LOGD("new sock:%d\n", _data.sock);
+    _plat.sock = mosquitto_socket(_plat.mosq);
     // assert(_data.sock != 0);
 
     // using uv_poll_init update socket
     // any memory leak ?
-    uv_poll_init(_data.loop, &_data.mosq_poll, _data.sock);
-    _data.mosq_poll.data = &_data;
-    _data.mosq_pevents = UV_READABLE | UV_DISCONNECT /*| UV_WRITABLE*/;
-    uv_poll_start(&_data.mosq_poll, _data.mosq_pevents, _mosquitto_loop_poll_cb);
+    uv_poll_init(_plat.loop, &_plat.mosq_poll, _plat.sock);
+    _plat.mosq_poll.data = &_plat;
+    _plat.mosq_pevents = DEFAULT_POLL_EVENTS;
+    uv_poll_start(&_plat.mosq_poll, _plat.mosq_pevents, _mosquitto_loop_poll_cb);
 
     uv_timer_stop(handle);
-    uv_timer_start(&_data.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
+    uv_timer_start(&_plat.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
 }
+
+/* Fully close a loop */
+static void close_walk_cb(uv_handle_t *handle, void *arg) {
+    if (!uv_is_closing(handle))
+        uv_close(handle, NULL);
+}
+
+static void close_loop(uv_loop_t *loop) {
+    uv_walk(loop, close_walk_cb, NULL);
+    uv_run(loop, UV_RUN_DEFAULT);
+}
+#define MAKE_VALGRIND_HAPPY(loop)         \
+    do {                                  \
+        close_loop(loop);                 \
+        assert(0 == uv_loop_close(loop)); \
+        uv_library_shutdown();            \
+    } while (0)
 
 int main(int argc, char **argv) {
     (void)argc;
@@ -449,86 +523,78 @@ int main(int argc, char **argv) {
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
 
-    memset((void *)&_data, 0, sizeof(_data));
+    memset((void *)&_plat, 0, sizeof(_plat));
 
-    _data.qos = 0;
+    _plat.qos = 0;
 
-    _data.alive_time = 60;
-    _data.port = BROKER_DEFAULT_PORT;
+    _plat.alive_time = 60;
+    _plat.port = BROKER_DEFAULT_PORT;
 
-    _data.sock = -1;
+    _plat.sock = -1;
 
-    _load_conf(&_data);
+    _load_conf(&_plat);
 
-    HR_LOGD("%s(%d): try connect mqtt :%s:%d\n", __FUNCTION__, __LINE__,
-            _data.host, _data.port);
+    _plat.loop = uv_default_loop();
 
     dm_topic_init();
 
-    _data.loop = uv_default_loop();
-
     mosquitto_lib_init();
 
-    HR_LOGD("client id:%s\n", _data.client_id);
-    _data.mosq = mosquitto_new(_data.client_id, false, &_data);
-    if (!_data.mosq) {
+    _plat.mosq = mosquitto_new(_plat.client_id, false, &_plat);
+    if (!_plat.mosq) {
         HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__,
                 __LINE__);
         return -1;
     }
 
-    mosquitto_log_callback_set(_data.mosq, _on_log);
+    mosquitto_log_callback_set(_plat.mosq, _on_log);
 
-    mosquitto_subscribe_callback_set(_data.mosq, _on_subscribe);
-    mosquitto_connect_callback_set(_data.mosq, _on_connect);
+    mosquitto_subscribe_callback_set(_plat.mosq, _on_subscribe);
+    mosquitto_connect_callback_set(_plat.mosq, _on_connect);
     // mosquitto_connect_with_flags_callback_set(_data.mosq,
     // _on_connect_with_flags);
-    mosquitto_disconnect_callback_set(_data.mosq, _on_disconnect);
-    mosquitto_message_callback_set(_data.mosq, _on_message);
-    mosquitto_publish_callback_set(_data.mosq, _on_publish);
-    mosquitto_tls_opts_set(_data.mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
+    mosquitto_disconnect_callback_set(_plat.mosq, _on_disconnect);
+    mosquitto_message_callback_set(_plat.mosq, _on_message);
+    mosquitto_publish_callback_set(_plat.mosq, _on_publish);
+    mosquitto_tls_opts_set(_plat.mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
 
     // const char *cafile = "/home/alex/workspace/workspace/libuv/mqtt_cacert.pem";
     // mosquitto_tls_set(_data.mosq, cafile, NULL, NULL, NULL, NULL);
-    mosquitto_tls_insecure_set(_data.mosq, 0);
-    mosquitto_tls_opts_set(_data.mosq, 0, NULL, NULL);
+    mosquitto_tls_insecure_set(_plat.mosq, 0);
+    mosquitto_tls_opts_set(_plat.mosq, 0, NULL, NULL);
 
-    mosquitto_username_pw_set(_data.mosq, _data.username, _data.password);
+    mosquitto_username_pw_set(_plat.mosq, _plat.username, _plat.password);
 
     do {
-        HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _data.host, _data.port);
-        rc = mosquitto_connect_bind_async(_data.mosq, _data.host, _data.port,
-                                          _data.alive_time, NULL);
+        HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _plat.host, _plat.port);
+        rc = mosquitto_connect_bind_async(_plat.mosq, _plat.host, _plat.port,
+                                          _plat.alive_time, NULL);
         if (rc != MOSQ_ERR_SUCCESS)
             usleep(1000 * 1000);
     } while (rc != MOSQ_ERR_SUCCESS);
 
-    _data.sock = mosquitto_socket(_data.mosq);
+    _plat.sock = mosquitto_socket(_plat.mosq);
     // assert(_data.sock != 0);
-    HR_LOGD("new sock:%d\n", _data.sock);
+    HR_LOGD("new sock:%d\n", _plat.sock);
 
-    uv_poll_init(_data.loop, &_data.mosq_poll, _data.sock);
-    _data.mosq_poll.data = &_data;
-    _data.mosq_pevents = UV_READABLE | UV_DISCONNECT /*| UV_WRITABLE*/;
-    uv_poll_start(&_data.mosq_poll, _data.mosq_pevents, _mosquitto_loop_poll_cb);
+    uv_poll_init(_plat.loop, &_plat.mosq_poll, _plat.sock);
+    _plat.mosq_poll.data = &_plat;
+    _plat.mosq_pevents = DEFAULT_POLL_EVENTS;
+    uv_poll_start(&_plat.mosq_poll, _plat.mosq_pevents, _mosquitto_loop_poll_cb);
 
-    uv_timer_init(_data.loop, &_data.timer);
-    _data.timer.data = &_data;
-    uv_timer_start(&_data.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
+    uv_timer_init(_plat.loop, &_plat.timer);
+    _plat.timer.data = &_plat;
+    uv_timer_start(&_plat.timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
 
-    _data.mosq_have_connected = 1;
+    _plat.mosq_have_connected = 1;
 
-    uv_run(_data.loop, UV_RUN_DEFAULT);
+    uv_run(_plat.loop, UV_RUN_DEFAULT);
 
-    uv_poll_stop(&_data.mosq_poll);
-    uv_timer_stop(&_data.timer);
+    uv_poll_stop(&_plat.mosq_poll);
+    uv_timer_stop(&_plat.timer);
 
-    uv_close((uv_handle_t *)&_data.mosq_poll, NULL);
-    uv_close((uv_handle_t *)&_data.timer, NULL);
-
-    uv_loop_close(_data.loop);
-    mosquitto_destroy(_data.mosq);
-    _data.mosq = NULL;
+    mosquitto_destroy(_plat.mosq);
+    _plat.mosq = NULL;
     mosquitto_lib_cleanup();
 
     {
@@ -538,6 +604,11 @@ int main(int argc, char **argv) {
         }
     }
 
+    uv_close((uv_handle_t *)&_plat.mosq_poll, NULL);
+    uv_close((uv_handle_t *)&_plat.timer, NULL);
+
+    uv_loop_close(_plat.loop);
+    MAKE_VALGRIND_HAPPY(_plat.loop);
     return 0;
 }
 

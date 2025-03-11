@@ -1,13 +1,15 @@
 #include "dm_topic.h"
 
-
-
-extern struct dm_topic dm_topic_heartbeat;
-extern struct dm_topic dm_topic_command;
+extern int dm_topic_heartbeat_init(void);
+extern int dm_topic_command_init(void);
+extern int dm_topic_liftstate_init(void);
+extern int dm_topic_liftfault_init(void);
 int dm_topic_init(void) {
+    dm_topic_heartbeat_init();
+    dm_topic_command_init();
 
-    dm_topic_register(&dm_topic_heartbeat);
-    dm_topic_register(&dm_topic_command);
-    
+    dm_topic_liftstate_init();
+
+    dm_topic_liftfault_init();
     return 0;
 }
