@@ -6,10 +6,12 @@
 // #include <json-c/json.h>
 // #include <json-c/json_object.h>
 #include <cjson/cJSON.h>
+#include <ifaddrs.h>
 #include <limits.h>
 #include <math.h>
 #include <mosquitto.h>
 #include <mqtt_protocol.h>
+#include <net/if.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -17,6 +19,7 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/inotify.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <uv.h>
@@ -49,6 +52,7 @@
 #define DM_DEFAULT_CONFIG_NAME "dm.json"
 
 #define BROKER_DEFAULT_PORT 1883
+#define BROKER_DEFAULT_ALIVETIME 60                       // 60s
 #define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
 struct dm_platform {
     char host[256];
@@ -66,6 +70,11 @@ struct dm_platform {
     uv_poll_t mosq_poll;
     int mosq_pevents;
     uv_timer_t timer;
+
+    struct {
+        char ipv4[INET_ADDRSTRLEN];
+        char mac[18];
+    } status;
 };
 
 static struct dm_platform _plat = {0};
@@ -226,12 +235,53 @@ static ssize_t _write_file(const char *path, const char *data, size_t size) {
     return size;
 }
 
+static void _update_connection_status(struct dm_platform *plat) {
+    struct ifreq ifr;
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+
+    if (!plat || plat->sock <= 0) return;
+
+    int sock = plat->sock;
+    if (sock < 0) return;
+
+    if (0 != getsockname(sock, (struct sockaddr *)&addr, &addr_len)) {
+        return;
+    }
+
+    inet_ntop(AF_INET, &addr.sin_addr, plat->status.ipv4, sizeof(plat->status.ipv4));
+    uint16_t port = ntohs(addr.sin_port);
+
+    HR_LOGD("Local IP: %s, Port: %d\n", plat->status.ipv4, port);
+
+    memset(&ifr, 0, sizeof(ifr));
+    ifr.ifr_addr.sa_family = AF_INET;
+    if (ioctl(sock, SIOCGIFNAME, &ifr) == -1) {
+        perror("ioctl SIOCGIFNAME");
+        return;
+    }
+
+    printf("interface name: %s\n", ifr.ifr_name);
+
+    if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
+        perror("ioctl SIOCGIFHWADDR");
+        return;
+    }
+
+    unsigned char *mac = (unsigned char *)ifr.ifr_hwaddr.sa_data;
+
+    snprintf(plat->status.mac, sizeof(plat->status.mac), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    printf("now %s -> %s\n", plat->status.mac, plat->status.ipv4);
+}
+
 static void _on_log(struct mosquitto *mosq, void *obj, int level,
                     const char *str) {
     (void)mosq;
     (void)obj;
     (void)level;
-    HR_LOGD("mqtt %s\n", str);
+    HR_LOGD("MQTT %s\n", str);
 }
 
 // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html#_Table_3.1_-
@@ -266,19 +316,7 @@ static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
                 }
             }
         }
-
-        {
-            struct sockaddr_in addr;
-            socklen_t addr_len = sizeof(addr);
-            getsockname(mosquitto_socket(mosq), (struct sockaddr *)&addr, &addr_len);
-
-            // 转换IP和端口
-            char ip_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
-            uint16_t port = ntohs(addr.sin_port);
-
-            HR_LOGD("Local IP: %s, Port: %d\n", ip_str, port);
-        }
+        _update_connection_status(plat);
     } else {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
         mosquitto_disconnect(mosq);
@@ -527,7 +565,7 @@ int main(int argc, char **argv) {
 
     _plat.qos = 0;
 
-    _plat.alive_time = 60;
+    _plat.alive_time = BROKER_DEFAULT_ALIVETIME;
     _plat.port = BROKER_DEFAULT_PORT;
 
     _plat.sock = -1;

@@ -2,7 +2,7 @@
 	"username": "who",
 	"password": "me",
 	"id": "1234567890",
-	"server": "127.0.0.1",
+	"server": "192.168.58.100",
 	"port": 1883
 
 }
