@@ -4,9 +4,9 @@ project(unicom_router LANGUAGES C)
 
 FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(cjson_library NAMES cjson)
-FIND_LIBRARY(curl_library NAMES curl)
-FIND_LIBRARY(uuid_library NAMES uuid)
-FIND_LIBRARY(jsonc_library NAMES json-c)
+#FIND_LIBRARY(curl_library NAMES curl)
+#FIND_LIBRARY(uuid_library NAMES uuid)
+#FIND_LIBRARY(jsonc_library NAMES json-c)
 FIND_LIBRARY(mosquitto_library NAMES mosquitto)
 
 
@@ -19,7 +19,9 @@ ADD_DEFINITIONS(-g )
 
 INCLUDE_DIRECTORIES(.)
 
-ADD_EXECUTABLE(dm_lift dm_main.c hr_log.c dm_topic dm_topic_heartbeat
+ADD_EXECUTABLE(dm_lift dm_main.c hr_log.c 
+                board_platform
+                dm_topic dm_topic_heartbeat
                 dm_topic_command
                 dm_topic_liftstate
                 dm_topic_liftfault

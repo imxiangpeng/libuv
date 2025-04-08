@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <uv.h>
 
+#include "board_platform.h"
 #include "dm_topic.h"
 #include "hr_list.h"
 #include "hr_log.h"
@@ -62,6 +63,11 @@ struct dm_platform {
     char password[256];
     char client_id[128];
     int qos;
+
+    // board system information
+    char serialno[256];
+    char mac[18]; // board burn mac address
+    char STBID[256];
 
     struct mosquitto *mosq;
     int sock;  // mosquitto socket
@@ -261,8 +267,6 @@ static void _update_connection_status(struct dm_platform *plat) {
         return;
     }
 
-    printf("interface name: %s\n", ifr.ifr_name);
-
     if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
         perror("ioctl SIOCGIFHWADDR");
         return;
@@ -273,7 +277,7 @@ static void _update_connection_status(struct dm_platform *plat) {
     snprintf(plat->status.mac, sizeof(plat->status.mac), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
-    printf("now %s -> %s\n", plat->status.mac, plat->status.ipv4);
+    HR_LOGD("now %s -> %s\n", plat->status.mac, plat->status.ipv4);
 }
 
 static void _on_log(struct mosquitto *mosq, void *obj, int level,
@@ -564,7 +568,6 @@ int main(int argc, char **argv) {
     memset((void *)&_plat, 0, sizeof(_plat));
 
     _plat.qos = 0;
-
     _plat.alive_time = BROKER_DEFAULT_ALIVETIME;
     _plat.port = BROKER_DEFAULT_PORT;
 
@@ -572,6 +575,10 @@ int main(int argc, char **argv) {
 
     _load_conf(&_plat);
 
+    board_system_unifykey_read("usid", _plat.serialno, sizeof(_plat.serialno));
+    board_system_unifykey_read("mac", _plat.mac, sizeof(_plat.mac));
+    board_system_unifykey_read("deviceid", _plat.mac, sizeof(_plat.mac));
+    
     _plat.loop = uv_default_loop();
 
     dm_topic_init();
