@@ -28,3 +28,6 @@ ADD_EXECUTABLE(elevator_sensor main.c
 TARGET_LINK_LIBRARIES(elevator_sensor ${cjson_library})
 TARGET_LINK_LIBRARIES(elevator_sensor ${mosquitto_library})
 TARGET_LINK_LIBRARIES(elevator_sensor ${libuv_library})
+
+TARGET_LINK_LIBRARIES(elevator_sensor m)
+TARGET_LINK_LIBRARIES(elevator_sensor pthread)

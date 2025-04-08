@@ -1,71 +1,262 @@
 
 #include <errno.h>
+#include <math.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
+
 #include "hr_log.h"
 
-static int _accel_sample_rate_hz = 50;
+static int ACCEL_SAMPLE_RATE_HZ = 50;
 static pthread_t _thread_id = 0;
 
+#define MAX_LINE_LENGTH 1000
+
+#define DUMP_DATA_TO_FILE 1
+
+// simulate using local csv files
+#define USE_LOCAL_SIMULATE_DATA 1
+
+#if DUMP_DATA_TO_FILE
+static FILE *_dump_fp = NULL;
+#endif
+
+#if USE_LOCAL_SIMULATE_DATA
+const char *SIMULATE_DATA_FILE = "simulate.csv";
+static FILE *_simulate_data_fp = NULL;
+struct simulate_data {
+    double now;
+    double accel_x;
+    double accel_y;
+    double accel_z;
+    double gyro_x;
+    double gyro_y;
+    double gyro_z;
+    double pressure;
+    double temp;
+};
+
+#endif
+// -1: not enough data, fill again
+// 0: not stable
+// 1: stable
+enum {
+    JITTER_UNKNOWN = 0,
+    JITTER_STABLE,
+    JITTER_UNSTABLE
+};
+
+#define ACCEL_JITTER_STD_THRESHOLD 0.05
+
+struct moving_avg_window {
+    int capability;
+    double *data;
+    int index;
+    int size;
+    double sum;
+};
+
+struct moving_avg_window *moving_average_window_init(int size) {
+    int ss = sizeof(struct moving_avg_window);
+    // data is append at end of struct moving_avg_window
+    struct moving_avg_window *w = (struct moving_avg_window *)calloc(1, ss + size * sizeof(double));
+    if (!w) return NULL;
+    w->capability = size;
+    w->data = (double *)((char *)w + ss);
+    return w;
+}
+
+static int moving_window_stddev(struct moving_avg_window *w, double val, double *stddev) {
+    double mean = 0;
+    double var_sum = 0.0;
+
+    if (!w || !stddev)
+        return -1;
+
+    // window full
+    // remove old value from sum
+    if (w->size == w->capability) {
+        w->sum -= w->data[w->index];
+    }
+    w->data[w->index] = val;
+    w->sum += val;
+    w->index = (w->index + 1) % w->capability;  // circle buffer
+    if (w->size != w->capability) {
+        w->size++;
+        return -1;
+    }
+
+    mean = w->sum / w->size;
+
+    for (int i = 0; i < w->size; i++) {
+        var_sum += (w->data[i] - mean) * (w->data[i] - mean);
+    }
+
+    *stddev = sqrt(var_sum / w->size);
+    return 0;
+}
+
+int moving_window_is_stable(struct moving_avg_window *w, double val) {
+    double stddev = 0;
+    if (moving_window_stddev(w, val, &stddev) != 0) {
+        return JITTER_UNKNOWN;
+    }
+
+    printf("stddev:%f\n", stddev);
+    if (stddev < ACCEL_JITTER_STD_THRESHOLD) {
+        return JITTER_STABLE;
+    }
+
+    return JITTER_UNSTABLE;
+}
 
 static inline int64_t seconds_to_nanoseconds(int64_t secs) {
-    return secs*1000000000;
+    return secs * 1000000000;
 }
 
 static int64_t system_mono_time_nanoseconds(void) {
     struct timespec t;
     t.tv_sec = t.tv_nsec = 0;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec *1000000000LL + t.tv_nsec;
+    return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
+
+#if USE_LOCAL_SIMULATE_DATA
+static int simulate_data_init(void) {
+    FILE *fp = fopen(SIMULATE_DATA_FILE, "r");
+    if (!fp) return -1;
+
+    char line[MAX_LINE_LENGTH] = {0};
+    fgets(line, MAX_LINE_LENGTH, fp);  // skip csv file head
+    _simulate_data_fp = fp;
+
+    return 0;
+}
+
+static int simulate_data_read(struct simulate_data *data) {
+    double now, dt, accel, pressure, temp, ag;
+    char line[MAX_LINE_LENGTH];
+    if (!data || !_simulate_data_fp)
+        return -1;
+
+    char *p = fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);
+    if (!p) return -1;
+
+    if (sscanf(p, "%lf,%lf,%*lf,%*lf,%*lf,%lf,%*lf,%*lf,%*lf,%lf,%lf,%lf", &now, &dt, &accel, &pressure, &temp, &ag) != 6) {
+        printf("CSV 解析错误:%s\n", line);
+    }
+
+    data->accel_x = 0;
+    data->accel_y = 0;
+    data->accel_z = accel;
+    data->now = now;
+    data->pressure = pressure;
+    data->temp = temp;
+    return 0;
+}
+#endif
+
 static void *_realtime_routin(void *args) {
+    char buf[MAX_LINE_LENGTH] = {0};
+    struct simulate_data data;
+    int64_t delta_time_ns = 0;//seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    struct moving_avg_window *w = moving_average_window_init(ACCEL_SAMPLE_RATE_HZ);
+    if (!w) {
+        printf("error: can not init moving avg window\n");
+        return NULL;
+    }
 
-    struct sched_param param;
-    int thread_policy, rr_max_priority;
-pthread_getschedparam(pthread_self(), &thread_policy, &param);
-    HR_LOGD("thread policy is %s, priority is %d\n",
-        ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" :
-        (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);   
+#if DUMP_DATA_TO_FILE
+    snprintf(buf, sizeof(buf), "now,accel,pressure,temp,stddev\n");
+    fwrite(buf, 1, strlen(buf), _dump_fp);
+#endif
 
-
-    int64_t delta_time_ns = seconds_to_nanoseconds(1) / 50;
     for (;;) {
-
         struct timespec spec;
         int64_t now = system_mono_time_nanoseconds();
 
-        HR_LOGD("now:%ld\n", now);
-        spec.tv_sec  = (now + delta_time_ns) / 1000000000;
+        if (simulate_data_read(&data) != 0) {
+            break;
+        }
+
+        double stddev = 0;
+        moving_window_stddev(w, data.accel_z, &stddev);
+#if DUMP_DATA_TO_FILE
+        if (_dump_fp) {
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, stddev);
+
+            fwrite(buf, 1, strlen(buf), _dump_fp);
+        }
+#endif
+        HR_LOGD("now:%ld, a:%f, stddev:%f\n", now, data.accel_z, stddev);
+        spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
         int err;
         do {
             err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
-        } while (err<0 && errno == EINTR);       
+        } while (err < 0 && errno == EINTR);
     }
+
+#if USE_LOCAL_SIMULATE_DATA
+    fclose(_simulate_data_fp);
+    _simulate_data_fp = NULL;
+#endif
+
+#if DUMP_DATA_TO_FILE
+    if (_dump_fp) {
+        fclose(_dump_fp);
+        _dump_fp = NULL;
+    }
+#endif
+    printf("finished ...\n");
     return NULL;
 }
 
+#if DUMP_DATA_TO_FILE
+int dump_data_init() {
+    FILE *fp = fopen("result.csv", "w+");
+    if (!fp) {
+        perror("open error:");
+        fclose(fp);
+        return -1;
+    }
+
+    _dump_fp = fp;
+
+    return 0;
+}
+#endif
 
 int acceleration_initialize(void) {
-    int ret = 0;  
+    int ret = 0;
     pthread_attr_t attr;
     struct sched_param param;
     int thread_policy, rr_max_priority;
-    const int algorithm = SCHED_RR;//FIFO; //SCHED_RR
+    const int algorithm = SCHED_RR;  // FIFO; //SCHED_RR
 
-    if (_thread_id != 0) 
+    if (_thread_id != 0)
         return -1;
+
+#if USE_LOCAL_SIMULATE_DATA
+    if (0 != simulate_data_init()) {
+        return -1;
+    }
+#endif
+
+#if DUMP_DATA_TO_FILE
+    dump_data_init();
+#endif
+
     pthread_attr_init(&attr);
 
     // pthread_attr_getschedpolicy(&attr, &thread_policy);
     // pthread_attr_getschedparam(&attr, &param);
-    ret = pthread_attr_setschedpolicy(&attr, algorithm);   
-    if ( 0 != ret ) {
+    ret = pthread_attr_setschedpolicy(&attr, algorithm);
+    if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_attr_setschedpolicy\n", __FUNCTION__, __LINE__);
         return -1;
     }
@@ -79,13 +270,13 @@ int acceleration_initialize(void) {
 
     printf("max level:%d\n", param.sched_priority);
     ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if ( 0 != ret ) {
+    if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_attr_setdetachstate\n", __FUNCTION__, __LINE__);
         return -1;
     }
-    
+
     ret = pthread_create(&_thread_id, &attr, _realtime_routin, NULL);
-    if ( 0 != ret ) {
+    if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
         return -1;
     }
@@ -96,11 +287,10 @@ int acceleration_initialize(void) {
         printf("failed ...\n");
     }
     HR_LOGD("thread policy is %s, priority is %d\n",
-        ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" :
-        (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);   
+            ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
 
-    pthread_attr_destroy(&attr);   
-    
+    pthread_attr_destroy(&attr);
+
     return 0;
 }
 
@@ -239,7 +429,6 @@ static void dm_ekf_run_model (struct dm_ekf *self, double dt, double measured_ac
 
 }
 
-#define MAX_LINE_LENGTH 1000
 
 // time,dt,accel_x,accel_y,accel_z,union_g,gyro_x,gyro_y,gyro_z,pressure,temp,ag
 // 0.088057,0.068285,-0.21546,-0.234612,-9.820188,-9.825353,0,-0.005325,0.00426,97488.03,31.83,-0.000731482
