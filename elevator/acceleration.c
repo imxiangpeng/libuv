@@ -58,6 +58,8 @@ struct moving_avg_window {
     int index;
     int size;
     double sum;
+    double mean;
+    double stddev;
 };
 
 struct moving_avg_window *moving_average_window_init(int size) {
@@ -90,13 +92,14 @@ static int moving_window_stddev(struct moving_avg_window *w, double val, double 
         return -1;
     }
 
-    mean = w->sum / w->size;
+    w->mean = w->sum / w->size;
 
     for (int i = 0; i < w->size; i++) {
-        var_sum += (w->data[i] - mean) * (w->data[i] - mean);
+        var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
     }
 
     *stddev = sqrt(var_sum / w->size);
+    w->stddev = *stddev;
     return 0;
 }
 
@@ -146,7 +149,7 @@ static int simulate_data_read(struct simulate_data *data) {
     char *p = fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);
     if (!p) return -1;
 
-    if (sscanf(p, "%lf,%lf,%*lf,%*lf,%*lf,%lf,%*lf,%*lf,%*lf,%lf,%lf,%lf", &now, &dt, &accel, &pressure, &temp, &ag) != 6) {
+    if (sscanf(p, "%lf,%lf,%*f,%*f,%*f,%lf,%*f,%*f,%*f,%lf,%lf,%lf", &now, &dt, &accel, &pressure, &temp, &ag) != 6) {
         printf("CSV 解析错误:%s\n", line);
     }
 
@@ -171,7 +174,7 @@ static void *_realtime_routin(void *args) {
     }
 
 #if DUMP_DATA_TO_FILE
-    snprintf(buf, sizeof(buf), "now,accel,pressure,temp,stddev\n");
+    snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev\n");
     fwrite(buf, 1, strlen(buf), _dump_fp);
 #endif
 
@@ -187,12 +190,12 @@ static void *_realtime_routin(void *args) {
         moving_window_stddev(w, data.accel_z, &stddev);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, stddev);
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, w->mean,stddev);
 
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
-        HR_LOGD("now:%ld, a:%f, stddev:%f\n", now, data.accel_z, stddev);
+        HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
         int err;
