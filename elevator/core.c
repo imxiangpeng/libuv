@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "acceleration.h"
 #include "barometer.h"
@@ -33,9 +34,9 @@ enum {
     JITTER_UNSTABLE
 };
 
-#define ACCEL_JITTER_STD_THRESHOLD 0.05
+#define ACCEL_JITTER_STD_THRESHOLD 0.03
 
-struct moving_avg_window {
+struct moving_window {
     int capability;
     double *data;
     int index;
@@ -45,18 +46,20 @@ struct moving_avg_window {
     double stddev;
 };
 
-struct moving_avg_window *moving_average_window_init(int size) {
+static struct moving_window * _accel_moving_w = NULL;
+
+struct moving_window *moving_window_init(int size) {
     // data is append at end of struct moving_avg_window
     // make sure it's align on 4 bytes
-    int ss = ((sizeof(struct moving_avg_window) + 3) / 4) * 4;
-    struct moving_avg_window *w = (struct moving_avg_window *)calloc(1, ss + size * sizeof(double));
+    int ss = ((sizeof(struct moving_window) + 3) / 4) * 4;
+    struct moving_window *w = (struct moving_window *)calloc(1, ss + size * sizeof(double));
     if (!w) return NULL;
     w->capability = size;
     w->data = (double *)((char *)w + ss);
     return w;
 }
 
-static int moving_window_stddev(struct moving_avg_window *w, double val, double *stddev) {
+static int moving_window_stddev(struct moving_window *w, double val, double *stddev) {
     double var_sum = 0.0;
 
     if (!w || !stddev)
@@ -75,7 +78,7 @@ static int moving_window_stddev(struct moving_avg_window *w, double val, double 
     }
 
     if (w->size != w->capability) {
-        return -1; // not full window
+        //return -1; // not full window
     }
     w->mean = w->sum / w->size;
     printf("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
@@ -93,7 +96,7 @@ static int moving_window_stddev(struct moving_avg_window *w, double val, double 
     return 0;
 }
 
-int moving_window_is_stable(struct moving_avg_window *w, double val) {
+int moving_window_is_stable(struct moving_window *w, double val) {
     double stddev = 0;
     if (moving_window_stddev(w, val, &stddev) != 0) {
         return JITTER_UNKNOWN;
@@ -121,9 +124,9 @@ static int64_t system_mono_time_nanoseconds(void) {
 static void *_realtime_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     struct simulate_data data;
-    int64_t delta_time_ns = 0;  // seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
-    struct moving_avg_window *w = moving_average_window_init(ACCEL_SAMPLE_RATE_HZ/2);
-    if (!w) {
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+                                //
+    if (!_accel_moving_w) {
         printf("error: can not init moving avg window\n");
         return NULL;
     }
@@ -144,10 +147,10 @@ static void *_realtime_routin(void *args) {
         }
 
         double stddev = 0;
-        moving_window_stddev(w, data.accel_z, &stddev);
+        moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, w->mean, stddev);
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, stddev);
 
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
@@ -201,6 +204,10 @@ int core_initalize(void) {
     dump_data_init();
 #endif
 
+    _accel_moving_w = moving_window_init(ACCEL_SAMPLE_RATE_HZ/2);
+    if (!_accel_moving_w) {
+        return -1;
+    }
     acceleration_initialize();
     barometer_initialize();
     return 0;
@@ -215,6 +222,7 @@ int core_run(void) {
 
     if (_accel_tid != 0)
         return -1;
+
 
     pthread_attr_init(&attr);
 
@@ -255,4 +263,21 @@ int core_run(void) {
             ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
 
     pthread_attr_destroy(&attr);
+    
+
+    // wait device still
+    double stddev = NAN;
+    while (1) {
+        usleep(1000 * 1000);
+        if (stddev != NAN) {
+            if (fabs(stddev - _accel_moving_w->stddev) <  ACCEL_JITTER_STD_THRESHOLD) {
+                printf("it's still\n");
+                break;
+            } else {
+                printf("not still \n");
+            }
+        }
+        stddev = _accel_moving_w->stddev;
+    }
+
 }
