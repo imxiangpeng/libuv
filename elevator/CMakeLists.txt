@@ -12,18 +12,27 @@ FIND_LIBRARY(cjson_library NAMES cjson)
 
 #find_package(LibXml2 REQUIRED)
 
+
+option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" ON)
+
 #INCLUDE_DIRECTORIES(j2s)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
-
 INCLUDE_DIRECTORIES(.)
 
-ADD_EXECUTABLE(elevator_sensor main.c 
-                core.c
-                acceleration.c
-                barometer.c
-                hr_log.c)
+set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c)
+
+if(USE_LOCAL_SIMULATE_DATA)
+list(APPEND SOURCES simulate.c)
+endif()
+
+ADD_EXECUTABLE(elevator_sensor ${SOURCES})
+
+if(USE_LOCAL_SIMULATE_DATA)
+TARGET_COMPILE_DEFINITIONS(elevator_sensor PRIVATE USE_LOCAL_SIMULATE_DATA=1)
+endif()
+
 
 TARGET_LINK_LIBRARIES(elevator_sensor ${cjson_library})
 TARGET_LINK_LIBRARIES(elevator_sensor ${mosquitto_library})

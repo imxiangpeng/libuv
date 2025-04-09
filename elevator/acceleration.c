@@ -11,19 +11,9 @@
 
 #include "hr_log.h"
 
-static int ACCEL_SAMPLE_RATE_HZ = 50;
-static pthread_t _thread_id = 0;
-
 #define MAX_LINE_LENGTH 1000
-
-#define DUMP_DATA_TO_FILE 1
-
 // simulate using local csv files
 #define USE_LOCAL_SIMULATE_DATA 1
-
-#if DUMP_DATA_TO_FILE
-static FILE *_dump_fp = NULL;
-#endif
 
 #if USE_LOCAL_SIMULATE_DATA
 const char *SIMULATE_DATA_FILE = "simulate.csv";
@@ -41,93 +31,6 @@ struct simulate_data {
 };
 
 #endif
-// -1: not enough data, fill again
-// 0: not stable
-// 1: stable
-enum {
-    JITTER_UNKNOWN = 0,
-    JITTER_STABLE,
-    JITTER_UNSTABLE
-};
-
-#define ACCEL_JITTER_STD_THRESHOLD 0.05
-
-struct moving_avg_window {
-    int capability;
-    double *data;
-    int index;
-    int size;
-    double sum;
-    double mean;
-    double stddev;
-};
-
-struct moving_avg_window *moving_average_window_init(int size) {
-    int ss = sizeof(struct moving_avg_window);
-    // data is append at end of struct moving_avg_window
-    struct moving_avg_window *w = (struct moving_avg_window *)calloc(1, ss + size * sizeof(double));
-    if (!w) return NULL;
-    w->capability = size;
-    w->data = (double *)((char *)w + ss);
-    return w;
-}
-
-static int moving_window_stddev(struct moving_avg_window *w, double val, double *stddev) {
-    double mean = 0;
-    double var_sum = 0.0;
-
-    if (!w || !stddev)
-        return -1;
-
-    // window full
-    // remove old value from sum
-    if (w->size == w->capability) {
-        w->sum -= w->data[w->index];
-    }
-    w->data[w->index] = val;
-    w->sum += val;
-    w->index = (w->index + 1) % w->capability;  // circle buffer
-    if (w->size != w->capability) {
-        w->size++;
-        return -1;
-    }
-
-    w->mean = w->sum / w->size;
-
-    for (int i = 0; i < w->size; i++) {
-        var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
-    }
-
-    *stddev = sqrt(var_sum / w->size);
-    w->stddev = *stddev;
-    return 0;
-}
-
-int moving_window_is_stable(struct moving_avg_window *w, double val) {
-    double stddev = 0;
-    if (moving_window_stddev(w, val, &stddev) != 0) {
-        return JITTER_UNKNOWN;
-    }
-
-    printf("stddev:%f\n", stddev);
-    if (stddev < ACCEL_JITTER_STD_THRESHOLD) {
-        return JITTER_STABLE;
-    }
-
-    return JITTER_UNSTABLE;
-}
-
-static inline int64_t seconds_to_nanoseconds(int64_t secs) {
-    return secs * 1000000000;
-}
-
-static int64_t system_mono_time_nanoseconds(void) {
-    struct timespec t;
-    t.tv_sec = t.tv_nsec = 0;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
-}
-
 #if USE_LOCAL_SIMULATE_DATA
 static int simulate_data_init(void) {
     FILE *fp = fopen(SIMULATE_DATA_FILE, "r");
@@ -163,6 +66,7 @@ static int simulate_data_read(struct simulate_data *data) {
 }
 #endif
 
+#if 0
 static void *_realtime_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     struct simulate_data data;
@@ -218,6 +122,7 @@ static void *_realtime_routin(void *args) {
     printf("finished ...\n");
     return NULL;
 }
+#endif
 
 #if DUMP_DATA_TO_FILE
 int dump_data_init() {
@@ -234,16 +139,7 @@ int dump_data_init() {
 }
 #endif
 
-int acceleration_initialize(void) {
-    int ret = 0;
-    pthread_attr_t attr;
-    struct sched_param param;
-    int thread_policy, rr_max_priority;
-    const int algorithm = SCHED_RR;  // FIFO; //SCHED_RR
-
-    if (_thread_id != 0)
-        return -1;
-
+int acceleration_initialize(int hz) {
 #if USE_LOCAL_SIMULATE_DATA
     if (0 != simulate_data_init()) {
         return -1;
@@ -253,46 +149,6 @@ int acceleration_initialize(void) {
 #if DUMP_DATA_TO_FILE
     dump_data_init();
 #endif
-
-    pthread_attr_init(&attr);
-
-    // pthread_attr_getschedpolicy(&attr, &thread_policy);
-    // pthread_attr_getschedparam(&attr, &param);
-    ret = pthread_attr_setschedpolicy(&attr, algorithm);
-    if (0 != ret) {
-        HR_LOGE("%s(%d): failed to pthread_attr_setschedpolicy\n", __FUNCTION__, __LINE__);
-        return -1;
-    }
-
-    param.sched_priority = sched_get_priority_max(algorithm);
-    ret = pthread_attr_setschedparam(&attr, &param);
-    if (ret != 0) {
-        perror("pri:");
-        printf("failed:%d ...\n", ret);
-    }
-
-    printf("max level:%d\n", param.sched_priority);
-    ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (0 != ret) {
-        HR_LOGE("%s(%d): failed to pthread_attr_setdetachstate\n", __FUNCTION__, __LINE__);
-        return -1;
-    }
-
-    ret = pthread_create(&_thread_id, &attr, _realtime_routin, NULL);
-    if (0 != ret) {
-        HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
-        return -1;
-    }
-
-    ret = pthread_getschedparam(_thread_id, &thread_policy, &param);
-    if (ret != 0) {
-        perror("pri:");
-        printf("failed ...\n");
-    }
-    HR_LOGD("thread policy is %s, priority is %d\n",
-            ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
-
-    pthread_attr_destroy(&attr);
 
     return 0;
 }

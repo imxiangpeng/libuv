@@ -1,6 +1,20 @@
+#ifndef ACCELERATION_H
+#define ACCELERATION_H
+struct sensor_accel {
+    double now;
+    double accel_x;
+    double accel_y;
+    double accel_z;
+    double gyro_x;
+    double gyro_y;
+    double gyro_z;
+    double pressure;
+    double temp;
+};
 
 
 void acceleration_initialize(void);
+#endif
 #if 0
 /*
  * This file is part of Cleanflight.
