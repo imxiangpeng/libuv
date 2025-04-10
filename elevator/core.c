@@ -15,8 +15,12 @@
 #endif
 
 static int ACCEL_SAMPLE_RATE_HZ = 50;
+
+static double MOVEMENT_THRESHOLD = 0.1f;
+
 static pthread_t _accel_tid = 0;
 
+static double _G = 9.81;
 #define MAX_LINE_LENGTH 1000
 
 #define DUMP_DATA_TO_FILE 1
@@ -34,7 +38,7 @@ enum {
     JITTER_UNSTABLE
 };
 
-#define ACCEL_JITTER_STD_THRESHOLD 0.03
+#define ACCEL_JITTER_STD_THRESHOLD 0.01
 
 struct moving_window {
     int capability;
@@ -44,9 +48,11 @@ struct moving_window {
     double sum;
     double mean;
     double stddev;
+    double mean_prev;
+    double stddev_prev;
 };
 
-static struct moving_window * _accel_moving_w = NULL;
+static struct moving_window *_accel_moving_w = NULL;
 
 struct moving_window *moving_window_init(int size) {
     // data is append at end of struct moving_avg_window
@@ -56,6 +62,9 @@ struct moving_window *moving_window_init(int size) {
     if (!w) return NULL;
     w->capability = size;
     w->data = (double *)((char *)w + ss);
+
+    w->stddev = NAN;
+    w->stddev_prev = NAN;
     return w;
 }
 
@@ -78,18 +87,22 @@ static int moving_window_stddev(struct moving_window *w, double val, double *std
     }
 
     if (w->size != w->capability) {
-        //return -1; // not full window
+        return -1;  // not full window
     }
+
+    w->mean_prev = w->mean;
+    w->stddev_prev = w->stddev;
+
     w->mean = w->sum / w->size;
-    printf("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
+    // printf("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
     for (int i = 0; i < w->size; i++) {
-        printf("%f", w->data[i]);
-        if (i != w->size - 1) {
-            printf(" ");
-        }
+        // printf("%f", w->data[i]);
+        // if (i != w->size - 1) {
+        //     printf(" ");
+        // }
         var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
     }
-    printf("\n");
+    // printf("\n");
 
     *stddev = sqrt(var_sum / w->size);
     w->stddev = *stddev;
@@ -121,11 +134,18 @@ static int64_t system_mono_time_nanoseconds(void) {
     return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 
-static void *_realtime_routin(void *args) {
+typedef enum {
+    STATE_STATIC,
+    STATE_MOVING
+} motion_state_e;
+static int MOVEMENT_FRAME_COUNT = 10;
+static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
-    struct simulate_data data;
+    int over_threshold_count = 0;
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
-                                //
+    MOVEMENT_FRAME_COUNT = ACCEL_SAMPLE_RATE_HZ / 10;
+    motion_state_e current_state = 0;
+    //
     if (!_accel_moving_w) {
         printf("error: can not init moving avg window\n");
         return NULL;
@@ -138,24 +158,43 @@ static void *_realtime_routin(void *args) {
     }
 #endif
 
+    int l = 0;
     for (;;) {
         struct timespec spec;
         int64_t now = system_mono_time_nanoseconds();
 
+#if USE_LOCAL_SIMULATE_DATA
+        struct simulate_data data;
         if (simulate_data_read(&data) != 0) {
             break;
         }
 
+        l++;
         double stddev = 0;
-        moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
+        int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
+        if (ret != 0 || _accel_moving_w->mean_prev == 0)
+            continue;
+        if (fabs(_accel_moving_w->mean_prev - _accel_moving_w->mean) > 0.003) {
+            printf("moving :%d .......:%f vs %f\n", l, _accel_moving_w->mean_prev, _accel_moving_w->mean);
+        }
+
+        if (fabs(data.accel_z - _G) > MOVEMENT_THRESHOLD) {
+            over_threshold_count++;
+            if (over_threshold_count >= MOVEMENT_FRAME_COUNT) {
+                current_state = STATE_MOVING;
+                printf("moving: %d -> %lf\n", l, data.accel_z);
+            }
+        } else {
+            over_threshold_count = 0;
+        }
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
             snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, stddev);
-
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
-        //HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
+#endif
+        // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
         int err;
@@ -193,9 +232,13 @@ int dump_data_init() {
 }
 #endif
 
-int core_initalize(void) {
+int core_initalize(int argc, char **argv) {
 #if USE_LOCAL_SIMULATE_DATA
-    if (simulate_data_init() != 0) {
+    const char *path = NULL;
+    if (argc > 1) {
+        path = argv[1];
+    }
+    if (simulate_data_init(path) != 0) {
         printf("simulate data init failed\n");
         return -1;
     }
@@ -204,7 +247,7 @@ int core_initalize(void) {
     dump_data_init();
 #endif
 
-    _accel_moving_w = moving_window_init(ACCEL_SAMPLE_RATE_HZ/2);
+    _accel_moving_w = moving_window_init(ACCEL_SAMPLE_RATE_HZ / 2);
     if (!_accel_moving_w) {
         return -1;
     }
@@ -213,6 +256,58 @@ int core_initalize(void) {
     return 0;
 }
 
+static int core_calibration(void) {
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    double stddev = NAN;
+
+    int calibration_retries = ACCEL_SAMPLE_RATE_HZ;
+    double mean_begin = NAN;
+    for (;;) {
+        struct timespec spec;
+        int64_t now = system_mono_time_nanoseconds();
+
+#if USE_LOCAL_SIMULATE_DATA
+        struct simulate_data data;
+        if (simulate_data_read(&data) != 0) {
+            break;
+        }
+
+        int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
+        if (ret == 0 && !isnan(_accel_moving_w->stddev) && !isnan(_accel_moving_w->stddev_prev)) {
+            if (fabs(_accel_moving_w->stddev_prev - _accel_moving_w->stddev) < ACCEL_JITTER_STD_THRESHOLD) {
+                calibration_retries--;
+                if (isnan(mean_begin)) {
+                    mean_begin = _accel_moving_w->mean;
+                }
+                if (calibration_retries == 0) {
+                    printf("G: mean_begin: %f vs %f vs %f (%f - %f)\n", mean_begin, _accel_moving_w->mean_prev, _accel_moving_w->mean, mean_begin - _accel_moving_w->mean_prev, mean_begin - _accel_moving_w->mean);
+                    if (fabs(_accel_moving_w->mean - mean_begin) < 0.001) {
+                        _G = round(_accel_moving_w->mean * 1000) / 1000;
+                        printf("it's still: %lf\n", _G);
+                        break;
+                    } else {
+                        printf("not ...again.........%f vs %f\n", mean_begin, _accel_moving_w->mean);
+                        calibration_retries = ACCEL_SAMPLE_RATE_HZ;
+                        mean_begin = NAN;
+                    }
+                }
+                printf("G: mean_begin: %f vs %f vs %f (%f - %f)\n", mean_begin, _accel_moving_w->mean_prev, _accel_moving_w->mean, mean_begin - _accel_moving_w->mean_prev, mean_begin - _accel_moving_w->mean);
+            } else {
+                printf("not still \n");
+                calibration_retries = ACCEL_SAMPLE_RATE_HZ;
+                mean_begin = NAN;
+            }
+        }
+#endif
+        // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
+        spec.tv_sec = (now + delta_time_ns) / 1000000000;
+        spec.tv_nsec = (now + delta_time_ns) % 1000000000;
+        int err;
+        do {
+            err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
+        } while (err < 0 && errno == EINTR);
+    }
+}
 int core_run(void) {
     int ret = 0;
     pthread_attr_t attr;
@@ -223,6 +318,10 @@ int core_run(void) {
     if (_accel_tid != 0)
         return -1;
 
+    // wait device still
+    core_calibration();
+
+    printf("now device is ready ...\n");
 
     pthread_attr_init(&attr);
 
@@ -248,7 +347,7 @@ int core_run(void) {
         return -1;
     }
 
-    ret = pthread_create(&_accel_tid, &attr, _realtime_routin, NULL);
+    ret = pthread_create(&_accel_tid, &attr, _accel_thread_routin, NULL);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
         return -1;
@@ -263,21 +362,4 @@ int core_run(void) {
             ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
 
     pthread_attr_destroy(&attr);
-    
-
-    // wait device still
-    double stddev = NAN;
-    while (1) {
-        usleep(1000 * 1000);
-        if (stddev != NAN) {
-            if (fabs(stddev - _accel_moving_w->stddev) <  ACCEL_JITTER_STD_THRESHOLD) {
-                printf("it's still\n");
-                break;
-            } else {
-                printf("not still \n");
-            }
-        }
-        stddev = _accel_moving_w->stddev;
-    }
-
 }

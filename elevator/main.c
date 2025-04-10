@@ -9,13 +9,13 @@ int main(int argc, char** argv) {
     }
     // process_csv(argv[1]);
 
-    if (0 != core_initalize()) {
+    if (0 != core_initalize(argc, argv)) {
         printf("error, can not initalize core ...\n");
         return -1;
     }
 
     core_run();
-    
+
     while (1) {
         sleep(2);
     }

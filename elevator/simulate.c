@@ -10,8 +10,11 @@
 static const char *SIMULATE_DATA_FILE = "simulate.csv";
 static FILE *_simulate_data_fp = NULL;
 
-int simulate_data_init(void) {
-    FILE *fp = fopen(SIMULATE_DATA_FILE, "r");
+int simulate_data_init(const char* path) {
+    if (!path) {
+        path = SIMULATE_DATA_FILE;
+    }
+    FILE *fp = fopen(path, "r");
     if (!fp) return -1;
 
     char line[MAX_LINE_LENGTH] = {0};

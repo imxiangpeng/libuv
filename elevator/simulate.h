@@ -12,7 +12,7 @@ struct simulate_data {
     double pressure;
     double temp;
 };
-int simulate_data_init(void);
+int simulate_data_init(const char* path);
 int simulate_data_read(struct simulate_data *data);
 int simulate_data_deinit(void);
 #endif
