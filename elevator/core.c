@@ -73,10 +73,10 @@ struct moving_window *moving_window_init(int size) {
     return w;
 }
 
-static int moving_window_stddev(struct moving_window *w, double val, double *stddev) {
+static int moving_window_update(struct moving_window *w, double val) {
     double var_sum = 0.0;
 
-    if (!w || !stddev)
+    if (!w)
         return -1;
 
     // window full
@@ -109,19 +109,17 @@ static int moving_window_stddev(struct moving_window *w, double val, double *std
     }
     // printf("\n");
 
-    *stddev = sqrt(var_sum / w->size);
-    w->stddev = *stddev;
+    w->stddev = sqrt(var_sum / w->size);
     return 0;
 }
 
 int moving_window_is_stable(struct moving_window *w, double val) {
-    double stddev = 0;
-    if (moving_window_stddev(w, val, &stddev) != 0) {
+    if (moving_window_update(w, val) != 0) {
         return JITTER_UNKNOWN;
     }
 
-    printf("stddev:%f\n", stddev);
-    if (stddev < ACCEL_JITTER_STD_THRESHOLD) {
+    printf("stddev:%f\n", w->stddev);
+    if (w->stddev < ACCEL_JITTER_STD_THRESHOLD) {
         return JITTER_STABLE;
     }
 
@@ -173,7 +171,7 @@ const char *state_to_str(int state) {
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
-    int64_t delta_time_ns = 0;//seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = 0;  // seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
     MOVEMENT_FRAME_COUNT = ACCEL_SAMPLE_RATE_HZ / 10;
     //
     ElevatorState state = ELEVATOR_STOPPED;
@@ -191,6 +189,7 @@ static void *_accel_thread_routin(void *args) {
     }
 #endif
 
+    // _G = -9.823;
     int l = 0;
     for (;;) {
         struct timespec spec;
@@ -204,99 +203,37 @@ static void *_accel_thread_routin(void *args) {
 
         l++;
 
-        double stddev = 0;
-        int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
+        int ret = moving_window_update(_accel_moving_w, data.accel_z);
         if (ret != 0 || _accel_moving_w->mean_prev == 0)
             continue;
-        
+
         // 静止或者匀速,开始运动或者结束了
         if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
             if (fabs(velocity) > 0.1) {
                 printf("velocity ....:%f\n", velocity);
                 distance += velocity * data.dt;
             } else {
-               // printf("not running ...\n");
+                // printf("not running ...\n");
                 velocity = 0;
-                //printf("ZUPT\n");
+                // printf("ZUPT\n");
             }
         } else {
-
             printf("running ....\n");
             distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
             velocity += (_accel_moving_w->data[_accel_moving_w->index] - _G) * data.dt;
-        
-        printf("current v:%f, d:%f, a:%f, stddev:%f\n", velocity, distance, accel, stddev);
-        }
-
-        accel = _accel_moving_w->data[_accel_moving_w->index] - _G ;
-#if 0
-        if (fabs(_accel_moving_w->mean_prev - _accel_moving_w->mean) > 0.01) {
-            printf("moving :%d .......:%f vs %f\n", l, _accel_moving_w->mean_prev, _accel_moving_w->mean);
-        }
-
-        if (fabs(fabs(_accel_moving_w->mean) - _G) > 0.01) {
-            printf("moving :%d .......:%f vs %f\n", l, _accel_moving_w->mean_prev, _accel_moving_w->mean);
-            // core_update_state();
-        }
-
-        if (fabs(_accel_moving_w->mean - _G) > MOVEMENT_THRESHOLD) {
-            over_threshold_count++;
-            if (over_threshold_count >= MOVEMENT_FRAME_COUNT) {
-                printf("state:%s -> pending:%s\n", state_to_str(state), state_to_str(state_pending));
-                switch (state) {
-                    case ELEVATOR_STOPPED: {
-                        if (state_pending == ELEVATOR_STARTING) {
-                            state = ELEVATOR_STARTING;
-                            state_pending = ELEVATOR_UNKNOWN;
-                        } else {
-                            state_pending = ELEVATOR_STARTING;
-                        }
-                        break;
-                    }
-                    case ELEVATOR_STARTING: {
-                        if (state_pending == ELEVATOR_CONSTANT) {
-                            state = ELEVATOR_CONSTANT;
-                            state_pending = ELEVATOR_UNKNOWN;
-                        } else {
-                            state_pending = ELEVATOR_CONSTANT;
-                        }
-                        break;
-                    }
-                    case ELEVATOR_CONSTANT: {
-                        if (state_pending == ELEVATOR_SLOWING) {
-                            state = ELEVATOR_SLOWING;
-                            state_pending = ELEVATOR_UNKNOWN;
-                        } else {
-                            state_pending = ELEVATOR_SLOWING;
-                        }
-                        break;
-                    }
-                    case ELEVATOR_SLOWING: {
-                        if (state_pending == ELEVATOR_STOPPED) {
-                            state = ELEVATOR_STOPPED;
-                            state_pending = ELEVATOR_UNKNOWN;
-                        } else {
-                            state_pending = ELEVATOR_STOPPED;
-                        }
-                        break;
-                    }
-                    default:
-                        break;
-                }
-                printf("new state:%s -> pending:%s\n", state_to_str(state), state_to_str(state_pending));
+            printf("current v:%f, d:%f, a:%f, stddev:%f\n", velocity, distance, accel, _accel_moving_w->stddev);
+            if (velocity * accel > 0) {
+                printf("speeding ..........\n");
+            } else {
+                printf("slowing ......\n");
             }
-            // over_threshold_count++;
-            // if (over_threshold_count >= MOVEMENT_FRAME_COUNT) {
-            // current_state = STATE_MOVING;
-            // printf("moving: %d -> %lf\n", l, data.accel_z);
-            // /}
-        } else {
-            over_threshold_count = 0;
         }
-#endif
+
+        accel = _accel_moving_w->data[_accel_moving_w->index] - _G;
+
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, stddev, velocity, distance);
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, _accel_moving_w->stddev, velocity, distance);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -364,10 +301,9 @@ int core_initalize(int argc, char **argv) {
 }
 
 // mainly detect local G
-static int core_calibration(void) {
+static int core_acceleration_calibration(void) {
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
-    double stddev = NAN;
-    int calibration_retries_max = ACCEL_SAMPLE_RATE_HZ;
+    int calibration_retries_max = ACCEL_SAMPLE_RATE_HZ * 2;
     int calibration_retries = 0;
     double *calibration_data = (double *)calloc(sizeof(double), calibration_retries_max);
     if (!calibration_data)
@@ -382,7 +318,7 @@ static int core_calibration(void) {
             break;
         }
 
-        int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
+        int ret = moving_window_update(_accel_moving_w, data.accel_z);
         if (ret == 0 && !isnan(_accel_moving_w->stddev) /* && !isnan(_accel_moving_w->stddev_prev)*/) {
             // printf("stddev:%f\n", stddev);
             if (_accel_moving_w->stddev < ACCEL_JITTER_STD_THRESHOLD) {
@@ -398,11 +334,11 @@ static int core_calibration(void) {
                         int i = 0;
                         double sum = 0;
                         for (i = 0; i < calibration_retries_max; i++) {
-                            //printf("%f\n", calibration_data[i]);
+                            // printf("%f\n", calibration_data[i]);
                             sum += calibration_data[i];
                         }
                         printf("avg: -> %f\n", sum / calibration_retries_max);
-                        _G = round(sum * 1000 / calibration_retries_max) / 1000;
+                        _G = round(sum * 10000 / calibration_retries_max) / 10000;
                         printf("it's still: %lf\n", _G);
                         break;
                     } else {
@@ -427,8 +363,11 @@ static int core_calibration(void) {
 
     free(calibration_data);
     calibration_data = NULL;
+    
+    return 0;
 }
-int core_run(void) {
+
+static int core_acceleration_start(void) {
     int ret = 0;
     pthread_attr_t attr;
     struct sched_param param;
@@ -437,11 +376,6 @@ int core_run(void) {
 
     if (_accel_tid != 0)
         return -1;
-
-    // wait device still
-    core_calibration();
-
-    printf("now device is ready ...\n");
 
     pthread_attr_init(&attr);
 
@@ -482,4 +416,17 @@ int core_run(void) {
             ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
 
     pthread_attr_destroy(&attr);
+    
+    return 0;
+}
+int core_run(void) {
+    // wait device still
+    core_acceleration_calibration();
+
+    printf("now device is ready ...\n");
+
+    core_acceleration_start();
+    
+
+    return 0;
 }

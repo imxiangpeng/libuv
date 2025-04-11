@@ -49,7 +49,7 @@ int simulate_data_read(struct simulate_data *data) {
     data->accel_x = 0;
     data->accel_y = 0;
     data->accel_z = butterworth_filter_process(_filter, accel);
-    data->accel_z = round(data->accel_z* 1000) / 1000;
+    data->accel_z = round(data->accel_z* 10000) / 10000;
     data->now = now;
     data->dt = dt;
     data->pressure = pressure;
