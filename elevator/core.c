@@ -21,6 +21,7 @@ static double MOVEMENT_THRESHOLD = 0.1f;
 static pthread_t _accel_tid = 0;
 
 static double _G = 9.81;
+
 #define MAX_LINE_LENGTH 1000
 
 #define DUMP_DATA_TO_FILE 1
@@ -38,7 +39,7 @@ enum {
     JITTER_UNSTABLE
 };
 
-#define ACCEL_JITTER_STD_THRESHOLD 0.01
+#define ACCEL_JITTER_STD_THRESHOLD 0.03
 
 struct moving_window {
     int capability;
@@ -51,6 +52,10 @@ struct moving_window {
     double mean_prev;
     double stddev_prev;
 };
+
+static double velocity = 0;
+static double distance = 0;
+static double accel = 0;
 
 static struct moving_window *_accel_moving_w = NULL;
 
@@ -135,17 +140,45 @@ static int64_t system_mono_time_nanoseconds(void) {
 }
 
 typedef enum {
-    STATE_STATIC,
-    STATE_MOVING
+    STATE_STILL,
+    STATE_MOVING_UP,
+    STATE_MOVING_DOWN,
+
 } motion_state_e;
-static int MOVEMENT_FRAME_COUNT = 10;
+
+typedef enum {
+    ELEVATOR_UNKNOWN = 0,
+    ELEVATOR_STOPPED,
+    ELEVATOR_STARTING,
+    ELEVATOR_CONSTANT,
+    ELEVATOR_SLOWING
+} ElevatorState;
+
+static int MOVEMENT_FRAME_COUNT = 30;
+
+const char *state_to_str(int state) {
+    switch (state) {
+        case ELEVATOR_UNKNOWN:
+            return "unknown";
+        case ELEVATOR_STOPPED:
+            return "stopped";
+        case ELEVATOR_STARTING:
+            return "starting";
+        case ELEVATOR_SLOWING:
+            return "slowing";
+    }
+    return "";
+}
+
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
-    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = 0;//seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
     MOVEMENT_FRAME_COUNT = ACCEL_SAMPLE_RATE_HZ / 10;
-    motion_state_e current_state = 0;
     //
+    ElevatorState state = ELEVATOR_STOPPED;
+    ElevatorState state_pending = ELEVATOR_UNKNOWN;
+
     if (!_accel_moving_w) {
         printf("error: can not init moving avg window\n");
         return NULL;
@@ -153,7 +186,7 @@ static void *_accel_thread_routin(void *args) {
 
 #if DUMP_DATA_TO_FILE
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev\n");
+        snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev,v,d\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
@@ -170,26 +203,100 @@ static void *_accel_thread_routin(void *args) {
         }
 
         l++;
+
         double stddev = 0;
         int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
         if (ret != 0 || _accel_moving_w->mean_prev == 0)
             continue;
-        if (fabs(_accel_moving_w->mean_prev - _accel_moving_w->mean) > 0.003) {
+        
+        // 静止或者匀速,开始运动或者结束了
+        if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
+            if (fabs(velocity) > 0.1) {
+                printf("velocity ....:%f\n", velocity);
+                distance += velocity * data.dt;
+            } else {
+               // printf("not running ...\n");
+                velocity = 0;
+                //printf("ZUPT\n");
+            }
+        } else {
+
+            printf("running ....\n");
+            distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
+            velocity += (_accel_moving_w->data[_accel_moving_w->index] - _G) * data.dt;
+        
+        printf("current v:%f, d:%f, a:%f, stddev:%f\n", velocity, distance, accel, stddev);
+        }
+
+        accel = _accel_moving_w->data[_accel_moving_w->index] - _G ;
+#if 0
+        if (fabs(_accel_moving_w->mean_prev - _accel_moving_w->mean) > 0.01) {
             printf("moving :%d .......:%f vs %f\n", l, _accel_moving_w->mean_prev, _accel_moving_w->mean);
         }
 
-        if (fabs(data.accel_z - _G) > MOVEMENT_THRESHOLD) {
+        if (fabs(fabs(_accel_moving_w->mean) - _G) > 0.01) {
+            printf("moving :%d .......:%f vs %f\n", l, _accel_moving_w->mean_prev, _accel_moving_w->mean);
+            // core_update_state();
+        }
+
+        if (fabs(_accel_moving_w->mean - _G) > MOVEMENT_THRESHOLD) {
             over_threshold_count++;
             if (over_threshold_count >= MOVEMENT_FRAME_COUNT) {
-                current_state = STATE_MOVING;
-                printf("moving: %d -> %lf\n", l, data.accel_z);
+                printf("state:%s -> pending:%s\n", state_to_str(state), state_to_str(state_pending));
+                switch (state) {
+                    case ELEVATOR_STOPPED: {
+                        if (state_pending == ELEVATOR_STARTING) {
+                            state = ELEVATOR_STARTING;
+                            state_pending = ELEVATOR_UNKNOWN;
+                        } else {
+                            state_pending = ELEVATOR_STARTING;
+                        }
+                        break;
+                    }
+                    case ELEVATOR_STARTING: {
+                        if (state_pending == ELEVATOR_CONSTANT) {
+                            state = ELEVATOR_CONSTANT;
+                            state_pending = ELEVATOR_UNKNOWN;
+                        } else {
+                            state_pending = ELEVATOR_CONSTANT;
+                        }
+                        break;
+                    }
+                    case ELEVATOR_CONSTANT: {
+                        if (state_pending == ELEVATOR_SLOWING) {
+                            state = ELEVATOR_SLOWING;
+                            state_pending = ELEVATOR_UNKNOWN;
+                        } else {
+                            state_pending = ELEVATOR_SLOWING;
+                        }
+                        break;
+                    }
+                    case ELEVATOR_SLOWING: {
+                        if (state_pending == ELEVATOR_STOPPED) {
+                            state = ELEVATOR_STOPPED;
+                            state_pending = ELEVATOR_UNKNOWN;
+                        } else {
+                            state_pending = ELEVATOR_STOPPED;
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                printf("new state:%s -> pending:%s\n", state_to_str(state), state_to_str(state_pending));
             }
+            // over_threshold_count++;
+            // if (over_threshold_count >= MOVEMENT_FRAME_COUNT) {
+            // current_state = STATE_MOVING;
+            // printf("moving: %d -> %lf\n", l, data.accel_z);
+            // /}
         } else {
             over_threshold_count = 0;
         }
+#endif
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, stddev);
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, stddev, velocity, distance);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -256,12 +363,15 @@ int core_initalize(int argc, char **argv) {
     return 0;
 }
 
+// mainly detect local G
 static int core_calibration(void) {
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
     double stddev = NAN;
-
-    int calibration_retries = ACCEL_SAMPLE_RATE_HZ;
-    double mean_begin = NAN;
+    int calibration_retries_max = ACCEL_SAMPLE_RATE_HZ;
+    int calibration_retries = 0;
+    double *calibration_data = (double *)calloc(sizeof(double), calibration_retries_max);
+    if (!calibration_data)
+        return -1;
     for (;;) {
         struct timespec spec;
         int64_t now = system_mono_time_nanoseconds();
@@ -273,33 +383,40 @@ static int core_calibration(void) {
         }
 
         int ret = moving_window_stddev(_accel_moving_w, data.accel_z, &stddev);
-        if (ret == 0 && !isnan(_accel_moving_w->stddev) && !isnan(_accel_moving_w->stddev_prev)) {
-            if (fabs(_accel_moving_w->stddev_prev - _accel_moving_w->stddev) < ACCEL_JITTER_STD_THRESHOLD) {
-                calibration_retries--;
-                if (isnan(mean_begin)) {
-                    mean_begin = _accel_moving_w->mean;
-                }
-                if (calibration_retries == 0) {
-                    printf("G: mean_begin: %f vs %f vs %f (%f - %f)\n", mean_begin, _accel_moving_w->mean_prev, _accel_moving_w->mean, mean_begin - _accel_moving_w->mean_prev, mean_begin - _accel_moving_w->mean);
-                    if (fabs(_accel_moving_w->mean - mean_begin) < 0.001) {
-                        _G = round(_accel_moving_w->mean * 1000) / 1000;
+        if (ret == 0 && !isnan(_accel_moving_w->stddev) /* && !isnan(_accel_moving_w->stddev_prev)*/) {
+            // printf("stddev:%f\n", stddev);
+            if (_accel_moving_w->stddev < ACCEL_JITTER_STD_THRESHOLD) {
+                // fill from end to head
+                calibration_data[calibration_retries] = _accel_moving_w->mean;
+                // printf("%d -> %f\n", calibration_retries, calibration_data[calibration_retries]);
+
+                calibration_retries++;
+                //                printf("xx:%d\n", calibration_retries);
+                if (calibration_retries == calibration_retries_max) {
+                    calibration_retries = 0;
+                    if (fabs(_accel_moving_w->mean - calibration_data[0]) < ACCEL_JITTER_STD_THRESHOLD) {
+                        int i = 0;
+                        double sum = 0;
+                        for (i = 0; i < calibration_retries_max; i++) {
+                            //printf("%f\n", calibration_data[i]);
+                            sum += calibration_data[i];
+                        }
+                        printf("avg: -> %f\n", sum / calibration_retries_max);
+                        _G = round(sum * 1000 / calibration_retries_max) / 1000;
                         printf("it's still: %lf\n", _G);
                         break;
                     } else {
-                        printf("not ...again.........%f vs %f\n", mean_begin, _accel_moving_w->mean);
-                        calibration_retries = ACCEL_SAMPLE_RATE_HZ;
-                        mean_begin = NAN;
+                        calibration_retries = 0;
                     }
                 }
-                printf("G: mean_begin: %f vs %f vs %f (%f - %f)\n", mean_begin, _accel_moving_w->mean_prev, _accel_moving_w->mean, mean_begin - _accel_moving_w->mean_prev, mean_begin - _accel_moving_w->mean);
             } else {
                 printf("not still \n");
-                calibration_retries = ACCEL_SAMPLE_RATE_HZ;
-                mean_begin = NAN;
+                calibration_retries = 0;
             }
         }
 #endif
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
+    next_iteration:
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
         int err;
@@ -307,6 +424,9 @@ static int core_calibration(void) {
             err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
         } while (err < 0 && errno == EINTR);
     }
+
+    free(calibration_data);
+    calibration_data = NULL;
 }
 int core_run(void) {
     int ret = 0;

@@ -3,6 +3,7 @@
 struct simulate_data {
 
     double now;
+    double dt;
     double accel_x;
     double accel_y;
     double accel_z;
