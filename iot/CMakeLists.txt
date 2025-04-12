@@ -19,7 +19,7 @@ ADD_DEFINITIONS(-g )
 
 INCLUDE_DIRECTORIES(.)
 
-ADD_EXECUTABLE(iot dm_main.c hr_log.c 
+ADD_EXECUTABLE(iot_mosquitto iot_mosquitto.c hr_log.c 
                 board_platform
                 dm_topic dm_topic_heartbeat
                 dm_topic_command
@@ -27,7 +27,7 @@ ADD_EXECUTABLE(iot dm_main.c hr_log.c
                 dm_topic_liftfault
                 dm_topic_liftruninfo)
 
-TARGET_LINK_LIBRARIES(iot ${cjson_library})
-TARGET_LINK_LIBRARIES(iot ${mosquitto_library})
-TARGET_LINK_LIBRARIES(iot ${libuv_library})
-TARGET_LINK_LIBRARIES(iot -lssl -lcrypto)
+TARGET_LINK_LIBRARIES(iot_mosquitto ${cjson_library})
+TARGET_LINK_LIBRARIES(iot_mosquitto ${mosquitto_library})
+TARGET_LINK_LIBRARIES(iot_mosquitto ${libuv_library})
+TARGET_LINK_LIBRARIES(iot_mosquitto -lssl -lcrypto)
