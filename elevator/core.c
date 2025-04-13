@@ -14,7 +14,7 @@
 #include "simulate.h"
 #endif
 
-static int ACCEL_SAMPLE_RATE_HZ = 50;
+static int ACCEL_SAMPLE_RATE_HZ = 100;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
 
@@ -171,7 +171,7 @@ const char *state_to_str(int state) {
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
-    int64_t delta_time_ns = 0;  // seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = 0;//seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
     MOVEMENT_FRAME_COUNT = ACCEL_SAMPLE_RATE_HZ / 10;
     //
     ElevatorState state = ELEVATOR_STOPPED;
@@ -204,9 +204,10 @@ static void *_accel_thread_routin(void *args) {
         l++;
 
         int ret = moving_window_update(_accel_moving_w, data.accel_z);
-        if (ret != 0 || _accel_moving_w->mean_prev == 0)
+        if (ret != 0 || _accel_moving_w->mean == 0)
             continue;
 
+        // window is full ...
         // 静止或者匀速,开始运动或者结束了
         if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
             if (fabs(velocity) > 0.1) {
@@ -219,9 +220,10 @@ static void *_accel_thread_routin(void *args) {
             }
         } else {
             printf("running ....\n");
+            printf("old v:%f, d:%f, a:%f\n", velocity, distance, accel);
             distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
-            velocity += (_accel_moving_w->data[_accel_moving_w->index] - _G) * data.dt;
-            printf("current v:%f, d:%f, a:%f, stddev:%f\n", velocity, distance, accel, _accel_moving_w->stddev);
+            velocity += accel /*(_accel_moving_w->data[_accel_moving_w->index] - _G)*/ * data.dt;
+            printf("current v:%f, d:%f, a:%f, stddev:%f, dt:%f\n", velocity, distance, accel, _accel_moving_w->stddev, data.dt);
             if (velocity * accel > 0) {
                 printf("speeding ..........\n");
             } else {
@@ -421,7 +423,8 @@ static int core_acceleration_start(void) {
 }
 int core_run(void) {
     // wait device still
-    core_acceleration_calibration();
+    // core_acceleration_calibration();
+    _G = 9.843f;
 
     printf("now device is ready ...\n");
 
