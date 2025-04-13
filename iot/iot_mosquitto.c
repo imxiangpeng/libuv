@@ -683,6 +683,8 @@ static int _store_config(struct iot_config *conf) {
         rename(tmp, path);
 
         free(tmp);
+        
+        free(data);
     }
     cJSON_Delete(root);
     return 0;
@@ -1091,6 +1093,22 @@ int main(int argc, char **argv) {
         hr_list_for_each_entry_safe(p, n, &_topic_list, entry) {
             dm__topic_free(p);
         }
+    }
+
+    // free config
+     if (_plat.conf.device.product_key) {
+        free(_plat.conf.device.product_key);
+        _plat.conf.device.product_key = NULL;
+    }
+
+    if (_plat.conf.device.name) {
+        free(_plat.conf.device.name);
+        _plat.conf.device.name = NULL;
+    }
+
+    if (_plat.conf.device.secret) {
+        free(_plat.conf.device.secret);
+        _plat.conf.device.secret = NULL;
     }
 
     uv_loop_close(_plat.loop);

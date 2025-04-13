@@ -14,6 +14,8 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    tui_init();
+    
     core_run();
 
     while (1) {

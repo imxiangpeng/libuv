@@ -21,7 +21,7 @@ option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" ON)
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 
-set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c)
+set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
 list(APPEND SOURCES simulate.c)
@@ -40,3 +40,4 @@ TARGET_LINK_LIBRARIES(elevator_sensor ${libuv_library})
 
 TARGET_LINK_LIBRARIES(elevator_sensor m)
 TARGET_LINK_LIBRARIES(elevator_sensor pthread)
+TARGET_LINK_LIBRARIES(elevator_sensor ncurses tinfo)

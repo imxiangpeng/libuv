@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <math.h>
+// #include <ncurses.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,13 +11,17 @@
 #include "barometer.h"
 #include "hr_log.h"
 
+#include "core.h"
+
 #if USE_LOCAL_SIMULATE_DATA
 #include "simulate.h"
 #endif
 
+static struct core_observer * _sensor_observers[_SENSOR_MAX][10] = {{0}, {0}};
 static int ACCEL_SAMPLE_RATE_HZ = 100;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
+static double VELOCITY_ZUPT_THRESHOLD = 0.2f;
 
 static pthread_t _accel_tid = 0;
 
@@ -168,14 +173,80 @@ const char *state_to_str(int state) {
     return "";
 }
 
+struct ncurses_data {
+    double accel;
+    double velocity;
+    double distance;
+};
+
+#define NCURSES_DATA_WINDOW_MAX 200
+struct ncurses_data_window {
+    size_t size;
+    int index;
+    struct ncurses_data max;
+    struct ncurses_data data[NCURSES_DATA_WINDOW_MAX];
+};
+
+static int ncurses_data_window_update(struct ncurses_data_window *w, double accel, double velocity, double distance) {
+    struct ncurses_data *d = w->data + w->index;
+    d->accel = accel;
+    d->velocity = velocity;
+    d->distance = distance;
+
+    w->index = (w->index + 1) % NCURSES_DATA_WINDOW_MAX;  // circle buffer
+    if (w->size != NCURSES_DATA_WINDOW_MAX) {
+        w->size++;
+    }
+    if (fabs(accel) > w->max.accel) {
+        w->max.accel = fabs(accel);
+    }
+    if (fabs(velocity) > w->max.velocity) {
+        w->max.velocity = fabs(velocity);
+    }
+    if (fabs(distance) > w->max.distance) {
+        w->max.distance = fabs(distance);
+    }
+    return 0;
+}
+#if 0
+void drawAxes(WINDOW *win, int startX, int startY, int width, int height) {
+    // 绘制 X 轴
+    for (int x = startX; x < startX + width; x++) {
+        mvwaddch(win, startY + height - 1, x, '-');
+    }
+
+    // 绘制 Y 轴
+    for (int y = startY; y < startY + height; y++) {
+        mvwaddch(win, y, startX, '|');
+    }
+
+    // 绘制原点
+    mvwaddch(win, startY + height - 1, startX, '+');  // 原点
+    mvwaddch(win, startY + height - 1, startX + width - 1, '>');  // X 轴右端标记
+    mvwaddch(win, startY, startX, '^');  // Y 轴上端标记
+
+    // 刷新窗口
+    wrefresh(win);
+}
+#endif
+
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
-    int64_t delta_time_ns = 0;//seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCEL_SAMPLE_RATE_HZ;
     MOVEMENT_FRAME_COUNT = ACCEL_SAMPLE_RATE_HZ / 10;
     //
     ElevatorState state = ELEVATOR_STOPPED;
     ElevatorState state_pending = ELEVATOR_UNKNOWN;
+
+    struct ncurses_data_window *n = (struct ncurses_data_window *)calloc(1, sizeof(struct ncurses_data_window));
+    if (!n) {
+        return NULL;
+    }
+
+    // int max_x, max_y;
+    // getmaxyx(stdscr, max_x, max_y);
+    // WINDOW *win = newwin(30, 200, 0, 0);  // 高20，宽80的窗口
 
     if (!_accel_moving_w) {
         printf("error: can not init moving avg window\n");
@@ -210,8 +281,8 @@ static void *_accel_thread_routin(void *args) {
         // window is full ...
         // 静止或者匀速,开始运动或者结束了
         if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
-            if (fabs(velocity) > 0.1) {
-                printf("velocity ....:%f\n", velocity);
+            if (fabs(velocity) > VELOCITY_ZUPT_THRESHOLD) {
+                // printf("velocity ....:%f\n", velocity);
                 distance += velocity * data.dt;
             } else {
                 // printf("not running ...\n");
@@ -219,15 +290,15 @@ static void *_accel_thread_routin(void *args) {
                 // printf("ZUPT\n");
             }
         } else {
-            printf("running ....\n");
-            printf("old v:%f, d:%f, a:%f\n", velocity, distance, accel);
+            // printf("running ....\n");
+            // printf("old v:%f, d:%f, a:%f\n", velocity, distance, accel);
             distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
             velocity += accel /*(_accel_moving_w->data[_accel_moving_w->index] - _G)*/ * data.dt;
-            printf("current v:%f, d:%f, a:%f, stddev:%f, dt:%f\n", velocity, distance, accel, _accel_moving_w->stddev, data.dt);
+            // printf("current v:%f, d:%f, a:%f, stddev:%f, dt:%f\n", velocity, distance, accel, _accel_moving_w->stddev, data.dt);
             if (velocity * accel > 0) {
-                printf("speeding ..........\n");
+                // printf("speeding ..........\n");
             } else {
-                printf("slowing ......\n");
+                // printf("slowing ......\n");
             }
         }
 
@@ -240,6 +311,55 @@ static void *_accel_thread_routin(void *args) {
         }
 #endif
 #endif
+
+        ncurses_data_window_update(n, accel, velocity, distance);
+#if 0
+        {
+            int i;
+            int width = getmaxx(win);   // 获取窗口宽度
+            int height = getmaxy(win);  // 获取窗口高度
+
+            werase(win);
+
+            mvwprintw(win, 1, 2, "Acceleration: %.2f m/s^2", accel);
+            mvwprintw(win, 1 + 1, 2, "Speed: %.2f m/s", velocity);
+            mvwprintw(win, 1 + 2, 2, "Distance: %.2f m", distance);
+
+     // 绘制 X 轴
+    for (int x = 0; x < width; x++) {
+        mvwaddch(win, height - 1, x, '-');
+    }
+
+    // 绘制 Y 轴
+    for (int y = 0; y < height; y++) {
+        mvwaddch(win, y, 0, '|');
+    }
+
+    // 绘制原点
+    mvwaddch(win, height - 1, 0, '+');
+    mvwaddch(win, height - 1, width - 1, '>');  // X 轴结束标记
+    mvwaddch(win, 0, 0, '^');                  // Y 轴结束标记
+    mvwaddch(win, 0, width - 1, '+');  // 原点标记
+
+    // 刷新窗口
+    wrefresh(win);           
+            int pos = 0;
+            for (i = n->index; i < n->size; i++) {
+                pos++;
+                int y = height + 4 - height * fabs(n->data[i].velocity) / 4 ;//n->max.velocity;//  - (int)(fabs(n->data[i].velocity) * height / 2.0);  // 将加速度映射到窗口高度
+                mvwaddch(win, y, pos % width, '*');                       // 在窗口位置 i 绘制 #
+            }
+
+            if (n->size == NCURSES_DATA_WINDOW_MAX) {
+                for (i = 0; i < n->index; i++) {
+                    pos++;
+                    int y = height +4 - height * fabs(n->data[i].velocity) / 4;//n->max.velocity;//  - (int)(fabs(n->data[i].velocity) * height / 2.0);  // 将加速度映射到窗口高度
+                    mvwaddch(win, y, pos % width, '*');                       // 在窗口位置 i 绘制 #
+                }
+            }
+        }
+#endif
+
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
@@ -299,6 +419,7 @@ int core_initalize(int argc, char **argv) {
     }
     acceleration_initialize();
     barometer_initialize();
+
     return 0;
 }
 
@@ -365,7 +486,7 @@ static int core_acceleration_calibration(void) {
 
     free(calibration_data);
     calibration_data = NULL;
-    
+
     return 0;
 }
 
@@ -418,7 +539,7 @@ static int core_acceleration_start(void) {
             ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
 
     pthread_attr_destroy(&attr);
-    
+
     return 0;
 }
 int core_run(void) {
@@ -429,7 +550,29 @@ int core_run(void) {
     printf("now device is ready ...\n");
 
     core_acceleration_start();
-    
 
+    return 0;
+}
+
+int core_register_observer(enum core_sensor type, struct core_observer *observer) {
+    int i = 0;
+    int available = -1;
+
+    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer); i++) {
+    struct core_observer *obs = _sensor_observers[type][i];
+        if (!obs) {
+            if (available == -1) {
+                available = i;
+            }
+        } else {
+            if (obs == observer) {
+                // already exists!
+                return 0;
+            }
+        }
+    }
+    if (available == -1)
+        return -1;
+    _sensor_observers[type][available] = observer;
     return 0;
 }
