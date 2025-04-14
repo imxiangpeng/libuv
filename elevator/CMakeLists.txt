@@ -13,7 +13,7 @@ FIND_LIBRARY(cjson_library NAMES cjson)
 #find_package(LibXml2 REQUIRED)
 
 
-option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" ON)
+option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 
 #INCLUDE_DIRECTORIES(j2s)
 
@@ -21,7 +21,7 @@ option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" ON)
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 
-set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c)
+set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
 list(APPEND SOURCES simulate.c)

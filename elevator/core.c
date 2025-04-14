@@ -347,11 +347,11 @@ static void *_accel_thread_routin(void *args) {
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
-#endif
 
         struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .high = distance, .floor = 0, .pressure = data.pressure, .barometer_velocity = barometer_velocity, .barometer_distance = barometer_distance};
         notify_observers(SENSOR_ACCELERATION, &stat);
 
+#endif
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
         spec.tv_nsec = (now + delta_time_ns) % 1000000000;
