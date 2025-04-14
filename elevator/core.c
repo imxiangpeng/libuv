@@ -34,7 +34,7 @@ static int ACCEL_SAMPLE_RATE_HZ = 100;
 static int BAROMETER_SAMPLE_RATE_HZ = 10;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
-static double VELOCITY_ZUPT_THRESHOLD = 0.2f;
+static double VELOCITY_ZUPT_THRESHOLD = 0.1f;
 
 static pthread_t _accel_tid = 0;
 
@@ -258,7 +258,7 @@ static void *_accel_thread_routin(void *args) {
     }
 #if DUMP_DATA_TO_FILE
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev,v,d\n");
+        snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev,v,d,v2,d2\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
@@ -299,7 +299,7 @@ static void *_accel_thread_routin(void *args) {
         // }
         // 静止或者匀速,开始运动或者结束了
         // printf("fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) :%f,%f\n", fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) , _accel_moving_w->stddev);
-        if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
+        if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.09 && _accel_moving_w->stddev < 0.03) {
             if (fabs(velocity) > VELOCITY_ZUPT_THRESHOLD) {
                 // printf("velocity ....:%f\n", velocity);
                 distance += velocity * data.dt;
@@ -333,10 +333,17 @@ static void *_accel_thread_routin(void *args) {
         }
 
         accel = _accel_moving_w->data[_accel_moving_w->index] - _G;
+        if (fabs(accel) < 0.03) {
+            accel = 0;
+        }
 
+        if (accel == 0) {
+            if (fabs(velocity) < 0.3)
+                velocity = 0;
+        }
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, _accel_moving_w->stddev, velocity, distance);
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, _accel_moving_w->stddev, velocity, distance, barometer_velocity, barometer_distance);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -618,9 +625,9 @@ static int core_acceleration_start(void) {
 }
 int core_run(void) {
     // wait device still
-    core_acceleration_calibration();
+    // core_acceleration_calibration();
     // _G = 9.843f;
-    // _G = -9.823f;
+    _G = -9.823f;
 
     printf("now device is ready ...\n");
 
