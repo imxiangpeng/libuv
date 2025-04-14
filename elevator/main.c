@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
-
+#include "tui.h"
 #include "core.h"
 
 int main(int argc, char** argv) {

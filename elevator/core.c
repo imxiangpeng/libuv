@@ -230,6 +230,18 @@ void drawAxes(WINDOW *win, int startX, int startY, int width, int height) {
 }
 #endif
 
+
+static int notify_observers(enum core_sensor type, void *data) {
+    int i = 0;
+
+    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer*); i++) {
+    struct core_observer *obs = _sensor_observers[type][i];
+        if (obs) {
+            obs->update(type, data);
+        }
+    }
+    return 0;
+}
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
@@ -312,8 +324,11 @@ static void *_accel_thread_routin(void *args) {
 #endif
 #endif
 
-        ncurses_data_window_update(n, accel, velocity, distance);
+        struct live_stat stat = {accel, fabs(velocity), distance, distance, 0};
+        notify_observers(SENSOR_ACCELERATION, &stat);
+
 #if 0
+        ncurses_data_window_update(n, accel, velocity, distance);
         {
             int i;
             int width = getmaxx(win);   // 获取窗口宽度
@@ -558,7 +573,7 @@ int core_register_observer(enum core_sensor type, struct core_observer *observer
     int i = 0;
     int available = -1;
 
-    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer); i++) {
+    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer*); i++) {
     struct core_observer *obs = _sensor_observers[type][i];
         if (!obs) {
             if (available == -1) {

@@ -6,6 +6,13 @@ enum core_sensor {
     _SENSOR_MAX
 };
 
+struct live_stat{
+    double accel;
+    double speed;
+    double distance;
+    double high;
+    int floor;
+};
 struct core_observer{
     void (*update) (enum core_sensor, void *data);
 };
