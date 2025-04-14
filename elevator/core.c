@@ -179,58 +179,6 @@ struct ncurses_data {
     double distance;
 };
 
-#define NCURSES_DATA_WINDOW_MAX 200
-struct ncurses_data_window {
-    size_t size;
-    int index;
-    struct ncurses_data max;
-    struct ncurses_data data[NCURSES_DATA_WINDOW_MAX];
-};
-
-static int ncurses_data_window_update(struct ncurses_data_window *w, double accel, double velocity, double distance) {
-    struct ncurses_data *d = w->data + w->index;
-    d->accel = accel;
-    d->velocity = velocity;
-    d->distance = distance;
-
-    w->index = (w->index + 1) % NCURSES_DATA_WINDOW_MAX;  // circle buffer
-    if (w->size != NCURSES_DATA_WINDOW_MAX) {
-        w->size++;
-    }
-    if (fabs(accel) > w->max.accel) {
-        w->max.accel = fabs(accel);
-    }
-    if (fabs(velocity) > w->max.velocity) {
-        w->max.velocity = fabs(velocity);
-    }
-    if (fabs(distance) > w->max.distance) {
-        w->max.distance = fabs(distance);
-    }
-    return 0;
-}
-#if 0
-void drawAxes(WINDOW *win, int startX, int startY, int width, int height) {
-    // 绘制 X 轴
-    for (int x = startX; x < startX + width; x++) {
-        mvwaddch(win, startY + height - 1, x, '-');
-    }
-
-    // 绘制 Y 轴
-    for (int y = startY; y < startY + height; y++) {
-        mvwaddch(win, y, startX, '|');
-    }
-
-    // 绘制原点
-    mvwaddch(win, startY + height - 1, startX, '+');  // 原点
-    mvwaddch(win, startY + height - 1, startX + width - 1, '>');  // X 轴右端标记
-    mvwaddch(win, startY, startX, '^');  // Y 轴上端标记
-
-    // 刷新窗口
-    wrefresh(win);
-}
-#endif
-
-
 static int notify_observers(enum core_sensor type, void *data) {
     int i = 0;
 
@@ -250,15 +198,6 @@ static void *_accel_thread_routin(void *args) {
     //
     ElevatorState state = ELEVATOR_STOPPED;
     ElevatorState state_pending = ELEVATOR_UNKNOWN;
-
-    struct ncurses_data_window *n = (struct ncurses_data_window *)calloc(1, sizeof(struct ncurses_data_window));
-    if (!n) {
-        return NULL;
-    }
-
-    // int max_x, max_y;
-    // getmaxyx(stdscr, max_x, max_y);
-    // WINDOW *win = newwin(30, 200, 0, 0);  // 高20，宽80的窗口
 
     if (!_accel_moving_w) {
         printf("error: can not init moving avg window\n");
@@ -326,54 +265,6 @@ static void *_accel_thread_routin(void *args) {
 
         struct live_stat stat = {accel, fabs(velocity), distance, distance, 0};
         notify_observers(SENSOR_ACCELERATION, &stat);
-
-#if 0
-        ncurses_data_window_update(n, accel, velocity, distance);
-        {
-            int i;
-            int width = getmaxx(win);   // 获取窗口宽度
-            int height = getmaxy(win);  // 获取窗口高度
-
-            werase(win);
-
-            mvwprintw(win, 1, 2, "Acceleration: %.2f m/s^2", accel);
-            mvwprintw(win, 1 + 1, 2, "Speed: %.2f m/s", velocity);
-            mvwprintw(win, 1 + 2, 2, "Distance: %.2f m", distance);
-
-     // 绘制 X 轴
-    for (int x = 0; x < width; x++) {
-        mvwaddch(win, height - 1, x, '-');
-    }
-
-    // 绘制 Y 轴
-    for (int y = 0; y < height; y++) {
-        mvwaddch(win, y, 0, '|');
-    }
-
-    // 绘制原点
-    mvwaddch(win, height - 1, 0, '+');
-    mvwaddch(win, height - 1, width - 1, '>');  // X 轴结束标记
-    mvwaddch(win, 0, 0, '^');                  // Y 轴结束标记
-    mvwaddch(win, 0, width - 1, '+');  // 原点标记
-
-    // 刷新窗口
-    wrefresh(win);           
-            int pos = 0;
-            for (i = n->index; i < n->size; i++) {
-                pos++;
-                int y = height + 4 - height * fabs(n->data[i].velocity) / 4 ;//n->max.velocity;//  - (int)(fabs(n->data[i].velocity) * height / 2.0);  // 将加速度映射到窗口高度
-                mvwaddch(win, y, pos % width, '*');                       // 在窗口位置 i 绘制 #
-            }
-
-            if (n->size == NCURSES_DATA_WINDOW_MAX) {
-                for (i = 0; i < n->index; i++) {
-                    pos++;
-                    int y = height +4 - height * fabs(n->data[i].velocity) / 4;//n->max.velocity;//  - (int)(fabs(n->data[i].velocity) * height / 2.0);  // 将加速度映射到窗口高度
-                    mvwaddch(win, y, pos % width, '*');                       // 在窗口位置 i 绘制 #
-                }
-            }
-        }
-#endif
 
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
         spec.tv_sec = (now + delta_time_ns) / 1000000000;

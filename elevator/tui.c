@@ -23,20 +23,20 @@ enum panel {
     _PANEL_MAX
 };
 
-#define TUI_DATA_WINDOW_MAX 200
+#define TUI_DATA_CACHED_SIZE 300
 
-struct tui_data_window {
+struct tui_data {
     size_t size;
     int index;
     double max_value;
-    double values[TUI_DATA_WINDOW_MAX];
+    double values[TUI_DATA_CACHED_SIZE];
 };
 
-static int tui_data_window_update(struct tui_data_window *w, double val) {
+static int tui_data_update(struct tui_data *w, double val) {
     w->values[w->index] = val;
 
-    w->index = (w->index + 1) % TUI_DATA_WINDOW_MAX;  // circle buffer
-    if (w->size != TUI_DATA_WINDOW_MAX) {
+    w->index = (w->index + 1) % TUI_DATA_CACHED_SIZE;  // circle buffer
+    if (w->size != TUI_DATA_CACHED_SIZE) {
         w->size++;
     }
     if (fabs(val) > w->max_value) {
@@ -52,7 +52,7 @@ static volatile sig_atomic_t winch_received = 0;
 // distance:  left
 static WINDOW *_tui_panel[_PANEL_MAX] = {0};
 
-static struct tui_data_window _tui_data_windows[2] = {{0}};
+static struct tui_data _tui_data_windows[2] = {{0}};
 static double _accel_realtime = 0.0f;
 static double _speed_realtime = 0.0f;
 static double _distance_realtime = 0.0f;
@@ -145,13 +145,13 @@ static void *tui_thread_routin(void *args) {
         mvwprintw(_tui_panel[PANEL_TOP], 3, 2, "Floor: %d", _floor_realtime);
         wrefresh(_tui_panel[PANEL_TOP]);
 
-        tui_data_window_update(&_tui_data_windows[0], _speed_realtime);
-        tui_data_window_update(&_tui_data_windows[1], _distance_realtime);
+        tui_data_update(&_tui_data_windows[0], _speed_realtime);
+        tui_data_update(&_tui_data_windows[1], _distance_realtime);
 
         // draw speed panel
         {
             int i = 0, x = 0;
-            struct tui_data_window *w = &_tui_data_windows[0];
+            struct tui_data *w = &_tui_data_windows[0];
 
             getmaxyx(_tui_panel[PANEL_SPEED], rows, cols);
 
@@ -177,7 +177,7 @@ static void *tui_thread_routin(void *args) {
                 x--;
             }
 
-            if (w->size == TUI_DATA_WINDOW_MAX) {
+            if (w->size == TUI_DATA_CACHED_SIZE) {
                 for (i = w->size - 1; i >= w->index && x >= 0; i--) {
                     int y = available_y * (1 - w->values[i] / max_label);
                     mvwaddch(_tui_panel[PANEL_SPEED], y, x, '*');
@@ -186,8 +186,8 @@ static void *tui_thread_routin(void *args) {
             }
 #else
             x = 0;
-            if (w->size == TUI_DATA_WINDOW_MAX) {
-                for (i = w->index; i < TUI_DATA_WINDOW_MAX; i++) {
+            if (w->size == TUI_DATA_CACHED_SIZE) {
+                for (i = w->index; i < TUI_DATA_CACHED_SIZE; i++) {
                     int y = ceil(available_y * (1 - w->values[i] / max_label));
                     mvwaddch(_tui_panel[PANEL_SPEED], y, x, '*');
                     x++;
@@ -205,7 +205,7 @@ static void *tui_thread_routin(void *args) {
         // draw distance panel
         {
             int i = 0, x = 0;
-            struct tui_data_window *w = &_tui_data_windows[1];
+            struct tui_data *w = &_tui_data_windows[1];
 
             getmaxyx(_tui_panel[PANEL_DISTANCE], rows, cols);
 
@@ -227,7 +227,7 @@ static void *tui_thread_routin(void *args) {
                 x--;
             }
 
-            if (w->size == TUI_DATA_WINDOW_MAX) {
+            if (w->size == TUI_DATA_CACHED_SIZE) {
                 for (i = w->size - 1; i >= w->index && x >= 0; i--) {
                     int y = available_y * (1 - w->values[i] / max_label);
                     mvwaddch(_tui_panel[PANEL_DISTANCE], y, x, '*');
