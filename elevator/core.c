@@ -9,15 +9,14 @@
 
 #include "acceleration.h"
 #include "barometer.h"
-#include "hr_log.h"
-
 #include "core.h"
+#include "hr_log.h"
 
 #if USE_LOCAL_SIMULATE_DATA
 #include "simulate.h"
 #endif
 
-static struct core_observer * _sensor_observers[_SENSOR_MAX][10] = {{0}, {0}};
+static struct core_observer *_sensor_observers[_SENSOR_MAX][10] = {{0}, {0}};
 static int ACCEL_SAMPLE_RATE_HZ = 100;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
@@ -182,8 +181,8 @@ struct ncurses_data {
 static int notify_observers(enum core_sensor type, void *data) {
     int i = 0;
 
-    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer*); i++) {
-    struct core_observer *obs = _sensor_observers[type][i];
+    for (i = 0; i < sizeof(_sensor_observers[type]) / sizeof(struct core_observer *); i++) {
+        struct core_observer *obs = _sensor_observers[type][i];
         if (obs) {
             obs->update(type, data);
         }
@@ -464,8 +463,8 @@ int core_register_observer(enum core_sensor type, struct core_observer *observer
     int i = 0;
     int available = -1;
 
-    for(i = 0; i < sizeof(_sensor_observers[type])/sizeof(struct core_observer*); i++) {
-    struct core_observer *obs = _sensor_observers[type][i];
+    for (i = 0; i < sizeof(_sensor_observers[type]) / sizeof(struct core_observer *); i++) {
+        struct core_observer *obs = _sensor_observers[type][i];
         if (!obs) {
             if (available == -1) {
                 available = i;

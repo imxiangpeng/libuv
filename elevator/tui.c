@@ -14,12 +14,14 @@
 #define PERIOD_MS 50
 #define SPEED_DEFAULT_AXIS_MAX 1  // 4 m/s
 
-#define PANEL_TOP_ROWS 4
+#define PANEL_TOP_ROWS 2
 
 enum panel {
     PANEL_TOP = 0,
     PANEL_SPEED,
     PANEL_DISTANCE,
+    PANEL_BAROMETER_SPEED,
+    PANEL_BAROMETER_DISTANCE,
     _PANEL_MAX
 };
 
@@ -50,6 +52,8 @@ static volatile sig_atomic_t winch_received = 0;
 // top: 4 line, max width
 // speed: (height - 4) 2 / 5
 // distance:  left
+// |--------------------------------------|
+
 static WINDOW *_tui_panel[_PANEL_MAX] = {0};
 
 static struct tui_data _tui_data_windows[2] = {{0}};
@@ -95,10 +99,25 @@ static void *tui_thread_routin(void *args) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
         if (layout_ready == 0 || winch_received == 1) {
+            // layout as following:
+            // +-------------------------------------------------------------------+
+            // |                                                                   |
+            // +-------------------------------------------------------------------+
+            // ^                                ^                                  |
+            // |       accel speed              |      accel distance              |
+            // |                                |                                  |
+            // |                                |                                  |
+            // +------------------------------->+--------------------------------->+
+            // ^                                ^                                  |
+            // |                                |                                  |
+            // |                                |                                  |
+            // |        barometer speed         |       barometer high             |
+            // +------------------------------->+--------------------------------->+
+
             getmaxyx(stdscr, rows_max, cols_max);
 
             printf("rows_max:%d, cols_max:%d\n", rows_max, cols_max);
-#if 1
+
             resize_term(rows_max, cols_max);
 
             if (!_tui_panel[PANEL_TOP]) {
@@ -109,16 +128,30 @@ static void *tui_thread_routin(void *args) {
 
             rows = (rows_max - PANEL_TOP_ROWS) * 2 / 5;
             if (!_tui_panel[PANEL_SPEED]) {
-                _tui_panel[PANEL_SPEED] = newwin(rows, cols_max, PANEL_TOP_ROWS, 0);
+                _tui_panel[PANEL_SPEED] = newwin(rows, cols_max / 2, PANEL_TOP_ROWS, 0);
             } else {
-                wresize(_tui_panel[PANEL_SPEED], rows, cols_max);
+                wresize(_tui_panel[PANEL_SPEED], rows, cols_max / 2);
             }
 
             if (!_tui_panel[PANEL_DISTANCE]) {
-                _tui_panel[PANEL_DISTANCE] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max, PANEL_TOP_ROWS + rows, 0);
+                _tui_panel[PANEL_DISTANCE] = newwin(rows, cols_max / 2, PANEL_TOP_ROWS, cols_max / 2);
             } else {
-                wresize(_tui_panel[PANEL_DISTANCE], rows_max - PANEL_TOP_ROWS - rows, cols_max);
-                mvwin(_tui_panel[PANEL_DISTANCE], PANEL_TOP_ROWS + rows, 0);
+                wresize(_tui_panel[PANEL_DISTANCE], rows, cols_max / 2);
+                mvwin(_tui_panel[PANEL_DISTANCE], PANEL_TOP_ROWS + rows, cols_max / 2);
+            }
+
+            if (!_tui_panel[PANEL_BAROMETER_SPEED]) {
+                _tui_panel[PANEL_BAROMETER_SPEED] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max / 2, PANEL_TOP_ROWS + rows, 0);
+            } else {
+                wresize(_tui_panel[PANEL_BAROMETER_SPEED], rows_max - PANEL_TOP_ROWS - rows, cols_max / 2);
+                mvwin(_tui_panel[PANEL_BAROMETER_SPEED], rows_max - PANEL_TOP_ROWS - rows, 0);
+            }
+
+            if (!_tui_panel[PANEL_BAROMETER_DISTANCE]) {
+                _tui_panel[PANEL_BAROMETER_DISTANCE] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max / 2, PANEL_TOP_ROWS + rows, cols_max / 2);
+            } else {
+                wresize(_tui_panel[PANEL_BAROMETER_DISTANCE], rows_max - PANEL_TOP_ROWS - rows, cols_max / 2);
+                mvwin(_tui_panel[PANEL_BAROMETER_DISTANCE], PANEL_TOP_ROWS + rows, cols_max / 2);
             }
 
             clear();
@@ -129,20 +162,30 @@ static void *tui_thread_routin(void *args) {
             getmaxyx(_tui_panel[PANEL_DISTANCE], rows, cols);
             tui_draw_axes(_tui_panel[PANEL_DISTANCE], 0, rows - 1, cols, rows - 1);
 
+            getmaxyx(_tui_panel[PANEL_BAROMETER_SPEED], rows, cols);
+            tui_draw_axes(_tui_panel[PANEL_BAROMETER_SPEED], 0, rows - 1, cols, rows - 1);
+
+            getmaxyx(_tui_panel[PANEL_BAROMETER_DISTANCE], rows, cols);
+            tui_draw_axes(_tui_panel[PANEL_BAROMETER_DISTANCE], 0, rows - 1, cols, rows - 1);
+
             wrefresh(_tui_panel[PANEL_TOP]);
             wrefresh(_tui_panel[PANEL_SPEED]);
             wrefresh(_tui_panel[PANEL_DISTANCE]);
-#endif
+            wrefresh(_tui_panel[PANEL_BAROMETER_SPEED]);
+            wrefresh(_tui_panel[PANEL_BAROMETER_DISTANCE]);
+
             winch_received = 0;
             layout_ready = 1;
         }
 
         // draw top panel
         werase(_tui_panel[PANEL_TOP]);
-        mvwprintw(_tui_panel[PANEL_TOP], 0, 2, "Acceleration: %.3f m/s^2", _accel_realtime);
-        mvwprintw(_tui_panel[PANEL_TOP], 1, 2, "Speed: %.3f m/s", _speed_realtime);
-        mvwprintw(_tui_panel[PANEL_TOP], 2, 2, "Distance: %.3f m", _distance_realtime);
-        mvwprintw(_tui_panel[PANEL_TOP], 3, 2, "Floor: %d", _floor_realtime);
+        // Floor: %d accel: %.3f     speed: %.3f
+        //           distance: %.3f
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 1, "Floor: %03d", _floor_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 20, "Accel: %.3f m/s^2", _accel_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 60, "Speed: %.3f m/s", _speed_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_realtime);
         wrefresh(_tui_panel[PANEL_TOP]);
 
         tui_data_update(&_tui_data_windows[0], _speed_realtime);
