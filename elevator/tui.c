@@ -56,11 +56,15 @@ static volatile sig_atomic_t winch_received = 0;
 
 static WINDOW *_tui_panel[_PANEL_MAX] = {0};
 
-static struct tui_data _tui_data_windows[2] = {{0}};
+static struct tui_data _tui_data_windows[4] = {{0}};
 static double _accel_realtime = 0.0f;
 static double _speed_realtime = 0.0f;
 static double _distance_realtime = 0.0f;
 static int _floor_realtime = 0.0f;
+
+static double _barometer_pressure_realtime = 0;
+static double _barometer_speed_realtime = 0;
+static double _barometer_distance_realtime = 0;
 
 static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     (void)sigcontext;
@@ -134,17 +138,19 @@ static void *tui_thread_routin(void *args) {
             }
 
             if (!_tui_panel[PANEL_DISTANCE]) {
-                _tui_panel[PANEL_DISTANCE] = newwin(rows, cols_max / 2, PANEL_TOP_ROWS, cols_max / 2);
+                _tui_panel[PANEL_DISTANCE] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max / 2, PANEL_TOP_ROWS + rows, 0);
+                // _tui_panel[PANEL_DISTANCE] = newwin(rows, cols_max / 2, PANEL_TOP_ROWS, cols_max / 2);
             } else {
                 wresize(_tui_panel[PANEL_DISTANCE], rows, cols_max / 2);
-                mvwin(_tui_panel[PANEL_DISTANCE], PANEL_TOP_ROWS + rows, cols_max / 2);
+                mvwin(_tui_panel[PANEL_DISTANCE], PANEL_TOP_ROWS + rows, 0);
             }
 
             if (!_tui_panel[PANEL_BAROMETER_SPEED]) {
-                _tui_panel[PANEL_BAROMETER_SPEED] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max / 2, PANEL_TOP_ROWS + rows, 0);
+                _tui_panel[PANEL_BAROMETER_SPEED] = newwin(rows, cols_max / 2, PANEL_TOP_ROWS, cols_max / 2);
+                //_tui_panel[PANEL_BAROMETER_SPEED] = newwin(rows_max - PANEL_TOP_ROWS - rows, cols_max / 2, PANEL_TOP_ROWS + rows, 0);
             } else {
-                wresize(_tui_panel[PANEL_BAROMETER_SPEED], rows_max - PANEL_TOP_ROWS - rows, cols_max / 2);
-                mvwin(_tui_panel[PANEL_BAROMETER_SPEED], rows_max - PANEL_TOP_ROWS - rows, 0);
+                wresize(_tui_panel[PANEL_BAROMETER_SPEED], rows, cols_max / 2);
+                mvwin(_tui_panel[PANEL_BAROMETER_SPEED], PANEL_TOP_ROWS, cols_max / 2);
             }
 
             if (!_tui_panel[PANEL_BAROMETER_DISTANCE]) {
@@ -184,12 +190,20 @@ static void *tui_thread_routin(void *args) {
         //           distance: %.3f
         mvwprintw(_tui_panel[PANEL_TOP], 0, 1, "Floor: %03d", _floor_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 0, 20, "Accel: %.3f m/s^2", _accel_realtime);
-        mvwprintw(_tui_panel[PANEL_TOP], 0, 60, "Speed: %.3f m/s", _speed_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 40, "Speed: %.3f m/s", _speed_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_realtime);
+
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 60, "Pressure: %.2f Pa", _barometer_pressure_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 0, 80, "Speed: %.3f m/s", _barometer_speed_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 1, 80, "Distance: %.3f m", _barometer_distance_realtime);
+
         wrefresh(_tui_panel[PANEL_TOP]);
 
         tui_data_update(&_tui_data_windows[0], _speed_realtime);
         tui_data_update(&_tui_data_windows[1], _distance_realtime);
+
+        tui_data_update(&_tui_data_windows[2], _barometer_speed_realtime);
+        tui_data_update(&_tui_data_windows[3], _barometer_distance_realtime);
 
         // draw speed panel
         {
@@ -265,7 +279,7 @@ static void *tui_thread_routin(void *args) {
             // draw from end to begin
             x = cols - 1;
             for (i = w->index - 1; i >= 0 && x >= 0; i--) {
-                int y = round(available_y * (1 - w->values[i] / max_label));
+                int y = 1 * (available_y * (1 - w->values[i] / max_label));
                 mvwaddch(_tui_panel[PANEL_DISTANCE], y, x, '*');
                 x--;
             }
@@ -280,6 +294,81 @@ static void *tui_thread_routin(void *args) {
 
             wrefresh(_tui_panel[PANEL_DISTANCE]);
         }
+#if 1
+         // draw barometer speed panel
+        {
+            int i = 0, x = 0;
+            struct tui_data *w = &_tui_data_windows[2];
+
+            getmaxyx(_tui_panel[PANEL_BAROMETER_SPEED], rows, cols);
+
+            int available_x = cols - 1;  // remove > label
+            int available_y = rows - 1;  // remove ^ label
+            int max_label = ceil(fabs(w->max_value));
+            if (max_label < SPEED_DEFAULT_AXIS_MAX) {
+                max_label = SPEED_DEFAULT_AXIS_MAX;
+            }
+
+            // draw axis label (max speed)
+            werase(_tui_panel[PANEL_BAROMETER_SPEED]);
+            tui_draw_axes(_tui_panel[PANEL_BAROMETER_SPEED], 0, rows - 1, cols, rows - 1);
+
+            mvwprintw(_tui_panel[PANEL_BAROMETER_SPEED], 0, 2, "%.2f m/s", max_label * 1.0);
+
+            // draw from end to begin
+            x = cols - 1;
+            for (i = w->index - 1; i >= 0 && x >= 0; i--) {
+                int y = round(available_y * (1 - w->values[i] / max_label));
+                mvwaddch(_tui_panel[PANEL_BAROMETER_SPEED], y, x, '*');
+                x--;
+            }
+
+            if (w->size == TUI_DATA_CACHED_SIZE) {
+                for (i = w->size - 1; i >= w->index && x >= 0; i--) {
+                    int y = available_y * (1 - w->values[i] / max_label);
+                    mvwaddch(_tui_panel[PANEL_BAROMETER_SPEED], y, x, '*');
+                    x--;
+                }
+            }
+            wrefresh(_tui_panel[PANEL_BAROMETER_SPEED]);
+        }
+
+        // draw distance panel
+        {
+            int i = 0, x = 0;
+            struct tui_data *w = &_tui_data_windows[3];
+
+            getmaxyx(_tui_panel[PANEL_BAROMETER_DISTANCE], rows, cols);
+
+            int available_x = cols - 1;  // remove > label
+            int available_y = rows - 1;  // remove ^ label
+            int max_label = ceil(fabs(w->max_value));
+
+            // draw axis label (max speed)
+            werase(_tui_panel[PANEL_BAROMETER_DISTANCE]);
+            tui_draw_axes(_tui_panel[PANEL_BAROMETER_DISTANCE], 0, rows - 1, cols, rows - 1);
+
+            mvwprintw(_tui_panel[PANEL_BAROMETER_DISTANCE], 0, 2, "%.2f m", max_label * 1.0);
+
+            // draw from end to begin
+            x = cols - 1;
+            for (i = w->index - 1; i >= 0 && x >= 0; i--) {
+                int y = round(available_y * (1 - w->values[i] / max_label));
+                mvwaddch(_tui_panel[PANEL_BAROMETER_DISTANCE], y, x, '*');
+                x--;
+            }
+
+            if (w->size == TUI_DATA_CACHED_SIZE) {
+                for (i = w->size - 1; i >= w->index && x >= 0; i--) {
+                    int y = available_y * (1 - w->values[i] / max_label);
+                    mvwaddch(_tui_panel[PANEL_BAROMETER_DISTANCE], y, x, '*');
+                    x--;
+                }
+            }
+
+            wrefresh(_tui_panel[PANEL_BAROMETER_DISTANCE]);
+        }
+#endif
 
         usleep(1000 * PERIOD_MS);
     };
@@ -302,13 +391,16 @@ static void tui_thread_start(void) {
 
 static void _observer_update(enum core_sensor sensor, void *data) {
     struct live_stat *stat = (struct live_stat *)data;
-    _accel_realtime = stat->accel;
-    _speed_realtime = stat->speed;
-    _distance_realtime = stat->distance;
+    _accel_realtime = fabs(stat->accel);
+    _speed_realtime = fabs(stat->speed);
+    _distance_realtime = fabs(stat->distance);
     _floor_realtime = stat->floor;
     // printf("speed : %f\n", _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[0], _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[1], _distance_realtime);
+    _barometer_speed_realtime = fabs(stat->barometer_velocity);
+    _barometer_distance_realtime = fabs(stat->barometer_distance);
+    _barometer_pressure_realtime = stat->pressure;
 }
 
 static struct core_observer _tui_core_observer = {

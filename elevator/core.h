@@ -12,6 +12,9 @@ struct live_stat{
     double distance;
     double high;
     int floor;
+    double pressure;
+    double barometer_velocity;
+    double barometer_distance;
 };
 struct core_observer{
     void (*update) (enum core_sensor, void *data);

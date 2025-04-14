@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <float.h>
 #include <math.h>
 // #include <ncurses.h>
 #include <pthread.h>
@@ -16,15 +17,28 @@
 #include "simulate.h"
 #endif
 
+// 海平面标准气压 (Pa)
+#define P0 101325.0
+
+// 温度递减率 (K/m)
+#define L 0.0065
+
+static const double PRESSURE_L = 0.0065;
+static const double PRESSURE_R = 8.31432;
+static const double PRESSURE_M = 0.0289644;
+
+static const double G0 = 9.823;
+
 static struct core_observer *_sensor_observers[_SENSOR_MAX][10] = {{0}, {0}};
 static int ACCEL_SAMPLE_RATE_HZ = 100;
+static int BAROMETER_SAMPLE_RATE_HZ = 10;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
 static double VELOCITY_ZUPT_THRESHOLD = 0.2f;
 
 static pthread_t _accel_tid = 0;
 
-static double _G = 9.81;
+static double _G = 9.823;
 
 #define MAX_LINE_LENGTH 1000
 
@@ -42,6 +56,23 @@ enum {
     JITTER_STABLE,
     JITTER_UNSTABLE
 };
+
+typedef enum {
+    STATE_STILL,
+    STATE_MOVING_UP,
+    STATE_MOVING_DOWN,
+
+} motion_state_e;
+
+typedef enum {
+    ELEVATOR_UNKNOWN = 0,
+    ELEVATOR_STOPPED,
+    ELEVATOR_STARTING,
+    ELEVATOR_CONSTANT,
+    ELEVATOR_SLOWING
+} ElevatorState;
+
+static ElevatorState _elevator_state = ELEVATOR_STOPPED;
 
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
 
@@ -61,7 +92,14 @@ static double velocity = 0;
 static double distance = 0;
 static double accel = 0;
 
+static double barometer_velocity = 0;
+static double barometer_distance = 0;
+static double barometer_pressure = 0;
+static double barometer_begin = 0;
+static double barometer_end = 0;
+
 static struct moving_window *_accel_moving_w = NULL;
+static struct moving_window *_barometer_moving_w = NULL;
 
 struct moving_window *moving_window_init(int size) {
     // data is append at end of struct moving_avg_window
@@ -117,6 +155,28 @@ static int moving_window_update(struct moving_window *w, double val) {
     return 0;
 }
 
+static int moving_window_trim_avg(struct moving_window *w, double *val) {
+    double max = -DBL_MAX;
+    double min = DBL_MAX;
+    if (w->size < 3) return -1;
+
+    for (int i = 0; i < w->size; ++i) {
+        double val = w->data[i];
+        if (val > max) max = val;
+        if (val < min) min = val;
+    }
+
+    *val = (w->sum - max - min) / (w->size - 2);
+
+    return 0;
+}
+
+static int moving_window_deinit(struct moving_window *w) {
+    if (!w) return -1;
+
+    free(w);
+    return 0;
+}
 int moving_window_is_stable(struct moving_window *w, double val) {
     if (moving_window_update(w, val) != 0) {
         return JITTER_UNKNOWN;
@@ -140,22 +200,6 @@ static int64_t system_mono_time_nanoseconds(void) {
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
-
-typedef enum {
-    STATE_STILL,
-    STATE_MOVING_UP,
-    STATE_MOVING_DOWN,
-
-} motion_state_e;
-
-typedef enum {
-    ELEVATOR_UNKNOWN = 0,
-    ELEVATOR_STOPPED,
-    ELEVATOR_STARTING,
-    ELEVATOR_CONSTANT,
-    ELEVATOR_SLOWING
-} ElevatorState;
-
 static int MOVEMENT_FRAME_COUNT = 30;
 
 const char *state_to_str(int state) {
@@ -189,6 +233,11 @@ static int notify_observers(enum core_sensor type, void *data) {
     }
     return 0;
 }
+
+double calculate_height_difference(double pressure1, double pressure2, double temperature) {
+    static double fac = PRESSURE_L * PRESSURE_R / PRESSURE_M / G0;
+    return ((temperature + 273.15) / L) * (1 - pow(pressure2 / pressure1, fac /*0.190284*/));
+}
 static void *_accel_thread_routin(void *args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
@@ -203,6 +252,10 @@ static void *_accel_thread_routin(void *args) {
         return NULL;
     }
 
+    if (!_barometer_moving_w) {
+        printf("error: can not init moving avg window\n");
+        return NULL;
+    }
 #if DUMP_DATA_TO_FILE
     if (_dump_fp) {
         snprintf(buf, sizeof(buf), "now,accel,pressure,temp,mean,stddev,v,d\n");
@@ -227,6 +280,112 @@ static void *_accel_thread_routin(void *args) {
         int ret = moving_window_update(_accel_moving_w, data.accel_z);
         if (ret != 0 || _accel_moving_w->mean == 0)
             continue;
+
+        ret = moving_window_update(_barometer_moving_w, data.pressure);
+
+        double old_pressure = barometer_pressure;
+        ret = moving_window_trim_avg(_barometer_moving_w, &barometer_pressure);
+
+        // printf("_elevator_state:%d\n", _elevator_state);
+        if (ret == 0 && old_pressure != 0 && barometer_pressure != 0) {
+            double d = calculate_height_difference(barometer_pressure, old_pressure, data.temp);
+            barometer_distance += d;
+            barometer_velocity = d * 1000000000 / delta_time_ns;
+            // printf("old %f vs %f(%f) -> barometer distance:%f(%f),velocity:%f\n", old_pressure, barometer_pressure, data.pressure, barometer_distance, d, barometer_velocity);
+        }
+        // window is full ...
+        // if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) > 0.2 && _accel_moving_w->stddev > 0.03) {
+        //       printf("begin .......................\n");
+        // }
+        // 静止或者匀速,开始运动或者结束了
+        // printf("fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) :%f,%f\n", fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) , _accel_moving_w->stddev);
+        if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
+            if (fabs(velocity) > VELOCITY_ZUPT_THRESHOLD) {
+                // printf("velocity ....:%f\n", velocity);
+                distance += velocity * data.dt;
+                _elevator_state = ELEVATOR_CONSTANT;
+            } else {
+                // printf("not running ...\n");
+                velocity = 0;
+                // printf("ZUPT\n");
+                _elevator_state = ELEVATOR_STOPPED;
+                barometer_end = data.pressure;
+
+                double high = calculate_height_difference(barometer_pressure, barometer_begin, data.temp);
+                // printf("run finished: high:%f v %f\n", high, barometer_distance);
+            }
+        } else {
+            // printf("running ....\n");
+            // printf("old v:%f, d:%f, a:%f\n", velocity, distance, accel);
+            distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
+            velocity += accel /*(_accel_moving_w->data[_accel_moving_w->index] - _G)*/ * data.dt;
+            // printf("current v:%f, d:%f, a:%f, stddev:%f, dt:%f\n", velocity, distance, accel, _accel_moving_w->stddev, data.dt);
+            if (velocity * accel > 0) {
+                if (_elevator_state == ELEVATOR_STOPPED) {
+                    barometer_begin = data.pressure;
+                }
+                _elevator_state = ELEVATOR_STARTING;
+                // printf("speeding ..........\n");
+            } else {
+                // printf("slowing ......\n");
+                _elevator_state = ELEVATOR_SLOWING;
+            }
+        }
+
+        accel = _accel_moving_w->data[_accel_moving_w->index] - _G;
+
+#if DUMP_DATA_TO_FILE
+        if (_dump_fp) {
+            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, _accel_moving_w->stddev, velocity, distance);
+            fwrite(buf, 1, strlen(buf), _dump_fp);
+        }
+#endif
+#endif
+
+        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .high = distance, .floor = 0, .pressure = data.pressure, .barometer_velocity = barometer_velocity, .barometer_distance = barometer_distance};
+        notify_observers(SENSOR_ACCELERATION, &stat);
+
+        // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
+        spec.tv_sec = (now + delta_time_ns) / 1000000000;
+        spec.tv_nsec = (now + delta_time_ns) % 1000000000;
+        int err;
+        do {
+            err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
+        } while (err < 0 && errno == EINTR);
+    }
+
+#if USE_LOCAL_SIMULATE_DATA
+    simulate_data_deinit();
+#endif
+
+#if DUMP_DATA_TO_FILE
+    if (_dump_fp) {
+        fclose(_dump_fp);
+        _dump_fp = NULL;
+    }
+#endif
+    printf("finished ...\n");
+    return NULL;
+}
+
+#if 0
+static void _barometer_threadroutin(void *args) {
+    for (;;) {
+        struct timespec spec;
+        int64_t now = system_mono_time_nanoseconds();
+
+#if USE_LOCAL_SIMULATE_DATA
+        struct simulate_data data;
+        if (simulate_data_read(&data) != 0) {
+            break;
+        }
+
+        int ret = moving_window_update(_accel_moving_w, data.accel_z);
+        if (ret != 0 || _accel_moving_w->mean == 0)
+            continue;        struct simulate_data data;
+        if (simulate_data_read(&data) != 0) {
+            break;
+        
 
         // window is full ...
         // 静止或者匀速,开始运动或者结束了
@@ -287,6 +446,7 @@ static void *_accel_thread_routin(void *args) {
     printf("finished ...\n");
     return NULL;
 }
+#endif
 
 #if DUMP_DATA_TO_FILE
 int dump_data_init() {
@@ -322,6 +482,13 @@ int core_initalize(int argc, char **argv) {
     if (!_accel_moving_w) {
         return -1;
     }
+
+    _barometer_moving_w = moving_window_init(BAROMETER_SAMPLE_RATE_HZ);
+    if (!_barometer_moving_w) {
+        moving_window_deinit(_accel_moving_w);
+        return -1;
+    }
+
     acceleration_initialize();
     barometer_initialize();
 
@@ -336,10 +503,12 @@ static int core_acceleration_calibration(void) {
     double *calibration_data = (double *)calloc(sizeof(double), calibration_retries_max);
     if (!calibration_data)
         return -1;
+    int l = 0;
     for (;;) {
         struct timespec spec;
         int64_t now = system_mono_time_nanoseconds();
 
+        l++;
 #if USE_LOCAL_SIMULATE_DATA
         struct simulate_data data;
         if (simulate_data_read(&data) != 0) {
@@ -367,14 +536,14 @@ static int core_acceleration_calibration(void) {
                         }
                         printf("avg: -> %f\n", sum / calibration_retries_max);
                         _G = round(sum * 10000 / calibration_retries_max) / 10000;
-                        printf("it's still: %lf\n", _G);
+                        printf("it's still: %lf, %d\n", _G, l);
                         break;
                     } else {
                         calibration_retries = 0;
                     }
                 }
             } else {
-                printf("not still \n");
+                printf("not still:%d \n", l);
                 calibration_retries = 0;
             }
         }
@@ -449,8 +618,9 @@ static int core_acceleration_start(void) {
 }
 int core_run(void) {
     // wait device still
-    // core_acceleration_calibration();
-    _G = 9.843f;
+    core_acceleration_calibration();
+    // _G = 9.843f;
+    // _G = -9.823f;
 
     printf("now device is ready ...\n");
 
