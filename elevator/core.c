@@ -625,9 +625,9 @@ static int core_acceleration_start(void) {
 }
 int core_run(void) {
     // wait device still
-    // core_acceleration_calibration();
+    core_acceleration_calibration();
     // _G = 9.843f;
-    _G = -9.823f;
+    //_G = -9.823f;
 
     printf("now device is ready ...\n");
 

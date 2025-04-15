@@ -1,10 +1,13 @@
 #ifndef SENSOR_H
 #define SENSOR_H
 
+#define IMU_AXES 3
+
 enum sensor {
-    SENSOR_ACCELERATION,
-    SENSOR_GYRO,
-    SENSOR_BARO,
+    SENSOR_ACCELEROMETER,
+    SENSOR_GYROSCOPE,
+    SENSOR_BAROMETER,
+    SENSOR_TEMPERATURE,
     _SENSOR_MAX
 };
 
@@ -12,25 +15,19 @@ struct sensor_data {
     enum sensor type;
 };
 
-struct sensor_data_accelerator {
+struct sensor_data_accelerometer {
     struct sensor_data self;
-    double x;
-    double y;
-    double z;
+    double x[IMU_AXES];
 };
 
-struct sensor_data_gyro {
+struct sensor_data_gyroscope {
     struct sensor_data self;
-    double x;
-    double y;
-    double z;
+    double x[IMU_AXES];
 };
 
-struct sensor_data_baro{
+struct sensor_data_barometer{
     struct sensor_data self;
-    double x;
-    double y;
-    double z;
+    double pressure;
 };
 
 struct sensor_data_temperature {

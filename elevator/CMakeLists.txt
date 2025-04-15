@@ -20,8 +20,10 @@ option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
+INCLUDE_DIRECTORIES(sensors)
 
-set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c)
+set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c
+    sensors/sensor_bmi270.c sensors/sensor_bmp388.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
 list(APPEND SOURCES simulate.c)
@@ -37,6 +39,7 @@ endif()
 TARGET_LINK_LIBRARIES(elevator_sensor ${cjson_library})
 TARGET_LINK_LIBRARIES(elevator_sensor ${mosquitto_library})
 TARGET_LINK_LIBRARIES(elevator_sensor ${libuv_library})
+TARGET_LINK_LIBRARIES(elevator_sensor iio)
 
 TARGET_LINK_LIBRARIES(elevator_sensor m)
 TARGET_LINK_LIBRARIES(elevator_sensor pthread)
