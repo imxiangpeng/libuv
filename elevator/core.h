@@ -3,9 +3,8 @@ int core_run(void);
 enum core_sensor {
     SENSOR_ACCELERATION = 0,
     SENSOR_PRESSURE,
-    _SENSOR_MAX
+    __SENSOR_MAX
 };
-
 struct live_stat{
     double accel;
     double speed;

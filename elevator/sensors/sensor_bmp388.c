@@ -3,6 +3,8 @@
 #include "hr_log.h"
 #include "sensor.h"
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
 static const char* IIO_BMP388_NAME = "bmp388";
 static const char *IIO_CH_PRESSURE_NAME = "pressure";
 static const char *IIO_CH_TEMPERATURE_NAME = "temp";

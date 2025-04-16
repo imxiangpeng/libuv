@@ -4,10 +4,9 @@ project(elevator_sensor LANGUAGES C)
 
 FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(cjson_library NAMES cjson)
-#FIND_LIBRARY(curl_library NAMES curl)
-#FIND_LIBRARY(uuid_library NAMES uuid)
-#FIND_LIBRARY(jsonc_library NAMES json-c)
-#FIND_LIBRARY(mosquitto_library NAMES mosquitto)
+FIND_LIBRARY(libiio_library NAMES iio)
+FIND_LIBRARY(libuv_library NAMES uv)
+FIND_LIBRARY(libmosquitto_library NAMES mosquitto)
 
 
 #find_package(LibXml2 REQUIRED)
@@ -23,24 +22,28 @@ INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(sensors)
 
 set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c
-    sensors/sensor_bmi270.c sensors/sensor_bmp388.c)
+    sensors/sensor.c sensors/sensor_bmi270.c sensors/sensor_bmp388.c
+    sensors/sensor_simulate.c
+    accelerometer_motion.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
-list(APPEND SOURCES simulate.c)
+list(APPEND SOURCES sensors/sensor_simulate.c)
 endif()
 
-ADD_EXECUTABLE(elevator_sensor ${SOURCES})
+ADD_EXECUTABLE(elevatord ${SOURCES})
 
 if(USE_LOCAL_SIMULATE_DATA)
-TARGET_COMPILE_DEFINITIONS(elevator_sensor PRIVATE USE_LOCAL_SIMULATE_DATA=1)
+TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE USE_LOCAL_SIMULATE_DATA=1)
 endif()
 
 
-TARGET_LINK_LIBRARIES(elevator_sensor ${cjson_library})
-TARGET_LINK_LIBRARIES(elevator_sensor ${mosquitto_library})
-TARGET_LINK_LIBRARIES(elevator_sensor ${libuv_library})
-TARGET_LINK_LIBRARIES(elevator_sensor iio)
+TARGET_LINK_LIBRARIES(elevatord ${cjson_library})
+TARGET_LINK_LIBRARIES(elevatord ${mosquitto_library})
+TARGET_LINK_LIBRARIES(elevatord ${libuv_library})
+TARGET_LINK_LIBRARIES(elevatord ${libiio_library})
 
-TARGET_LINK_LIBRARIES(elevator_sensor m)
-TARGET_LINK_LIBRARIES(elevator_sensor pthread)
-TARGET_LINK_LIBRARIES(elevator_sensor ncurses tinfo)
+TARGET_LINK_LIBRARIES(elevatord m)
+TARGET_LINK_LIBRARIES(elevatord pthread)
+TARGET_LINK_LIBRARIES(elevatord ncurses)
+
+#INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

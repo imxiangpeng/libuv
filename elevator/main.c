@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include "tui.h"
 #include "core.h"
+#include "sensor.h"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -9,12 +10,14 @@ int main(int argc, char** argv) {
     }
     // process_csv(argv[1]);
 
+    sensor_manager_init();
+
     if (0 != core_initalize(argc, argv)) {
         printf("error, can not initalize core ...\n");
         return -1;
     }
 
-    tui_init();
+    //tui_init();
     
     core_run();
 

@@ -1,39 +1,82 @@
 #include <assert.h>
 #include <iio.h>
 
+#include <string.h>
+#include "file_util.h"
 #include "hr_log.h"
 #include "sensor.h"
 
-static const char *IIO_BMI270_NAME = "bmi270";
-static const char *IIO_ACCEL_CHS[IMU_AXES] = {"accel_x, accel_y, accel_z"};
-static const char *IIO_GYRO_CHS[IMU_AXES] = {"anglvel_x", "anglvel_y", "anglvel_z"};
-
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-static struct iio_device *_bmi270 = NULL;
-static int bmi270_init() {
-    if (!_bmi270)
-        _bmi270 = iio_context_find_device(iio_create_default_context(), IIO_BMI270_NAME);
+static const int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
+// +-2G
+static const double ACCELEROMETER_SCALE = 0.000598;
 
-    if (!_bmi270)
+static const char* IIO_BMI270_NAME = "bmi270";
+static const char* IIO_ACCEL_CHS[IMU_AXES] = {"accel_x", "accel_y", "accel_z"};
+static const char* IIO_GYRO_CHS[IMU_AXES] = {"anglvel_x", "anglvel_y", "anglvel_z"};
+
+static struct iio_device* _bmi270 = NULL;
+
+static int bmi270_init() {
+    struct iio_channel* ch = NULL;
+    if (!_bmi270) {
+        _bmi270 = iio_context_find_device(iio_create_default_context(), IIO_BMI270_NAME);
+    }
+
+    if (!_bmi270) {
+        HR_LOGE("%s(%d): can not found: %s\n", __FUNCTION__, __LINE__, IIO_BMI270_NAME);
         return -1;
+    }
+
+    // why sampling_frequency is not device's attribute?
+
+    ch = iio_device_find_channel(_bmi270, IIO_ACCEL_CHS[0], false);
+    if (!ch) {
+        HR_LOGE("%s(%d): can not found: %s\n", __FUNCTION__, __LINE__, IIO_ACCEL_CHS[0]);
+        return -1;
+    }
+
+    iio_channel_attr_write_double(ch, "sampling_frequency", ACCELEROMETER_SAMPLE_RATE_HZ);
+    iio_channel_attr_write_double(ch, "scale", ACCELEROMETER_SCALE);
 
     return 0;
 }
 static int accelerometer_init() {
-    return bmi270_init();
+    int ret = 0;
+    if (bmi270_init() != 0) {
+        HR_LOGE("%s(%d): accelerometer init failed\n", __FUNCTION__, __LINE__);
+        return -1;
+    }
+    return 0;
 }
 static int accelerometer_configure(int sampling_rate) {
+    struct iio_channel* ch = NULL;
+
+    if (!_bmi270) {
+        return -1;
+    }
+
+    // why sampling_frequency is not device's attribute?
+
+    ch = iio_device_find_channel(_bmi270, IIO_ACCEL_CHS[0], false);
+    if (!ch) {
+        return -1;
+    }
+
+    iio_channel_attr_write_double(ch, "sampling_frequency", sampling_rate);
+
     return 0;
 }
 
-static int accelerometer_read(struct sensor_data *data) {
+static int accelerometer_read(struct sensor_data* data) {
     int i = 0;
-    double *p = NULL;
-    struct iio_channel *ch = NULL;
-    struct sensor_data_accelerometer *accel = (struct sensor_data_accelerometer *)data;
-    if (!accel)
+    double* p = NULL;
+    struct iio_channel* ch = NULL;
+    struct sensor_data_accelerometer* accel = (struct sensor_data_accelerometer*)data;
+    if (!accel) {
         return -1;
+    }
 
     accel->self.type = SENSOR_ACCELEROMETER;
 
@@ -73,14 +116,15 @@ static int gyroscope_configure(int sampling_rate) {
     return 0;
 }
 
-static int gyroscope_read(struct sensor_data *data) {
+static int gyroscope_read(struct sensor_data* data) {
     int i = 0;
-    double *p = NULL;
-    struct iio_channel *ch = NULL;
-    struct sensor_data_gyroscope *gyro = (struct sensor_data_gyroscope *)data;
+    double* p = NULL;
+    struct iio_channel* ch = NULL;
+    struct sensor_data_gyroscope* gyro = (struct sensor_data_gyroscope*)data;
 
-    if (!gyro)
+    if (!gyro) {
         return -1;
+    }
 
     gyro->self.type = SENSOR_GYROSCOPE;
 

@@ -18,6 +18,10 @@ struct sensor_data {
 struct sensor_data_accelerometer {
     struct sensor_data self;
     double x[IMU_AXES];
+    
+#if USE_LOCAL_SIMULATE_DATA    
+    double dt;
+#endif    
 };
 
 struct sensor_data_gyroscope {
@@ -45,4 +49,7 @@ struct sensor_device {
     int (*close)();
 };
 
+int sensor_manager_init();
+
+struct sensor_device* sensor_manager_get_device(enum sensor type);
 #endif

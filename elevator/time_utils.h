@@ -1,7 +1,9 @@
 #ifndef TIME_UTILS_H
 #define TIME_UTILS_H
+
 #include <stdint.h>
-inline int64_t seconds_to_nanoseconds(int64_t secs) {
+
+static inline int64_t seconds_to_nanoseconds(int64_t secs) {
     return secs * 1000000000;
 }
 
