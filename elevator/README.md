@@ -24,3 +24,10 @@
    - hrlog-YYYY-mm-dd-H-M-S.log： 本次运行的日志
    - result.csv 在开启 `dump` 功能时，会将滤波后数据保存在这个文件中
  
+ 4. 楼层修正
+ 
+    这个数据对应是从 -1 （-6.1M）开始运行的，可以在 `core.c` 中赋一个初始值：
+    
+    ```c
+        _accelerometer_motion.height = 6.1;
+    ```

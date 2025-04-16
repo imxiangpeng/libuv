@@ -14,7 +14,6 @@
 #include "sensors/sensor.h"
 #include "time_utils.h"
 
-
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 // 海平面标准气压 (Pa)
@@ -219,7 +218,6 @@ int moving_window_is_stable(struct moving_window* w, double val) {
     return JITTER_UNSTABLE;
 }
 
-
 static int MOVEMENT_FRAME_COUNT = 30;
 
 const char* motion_state_str(enum motion_state state) {
@@ -363,7 +361,19 @@ static void* _accelerometer_thread_routin(void* args) {
 
 #if DUMP_DATA_TO_FILE
 int dump_data_init() {
-    FILE* fp = fopen("result.csv", "w+");
+    char path[256] = "result-";
+    char* ptr = path + strlen(path);
+    struct tm tm;
+    struct timespec ts;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M-%S", &tm);
+    strcat(path, ".csv");
+    HR_LOGD("dump path:%s\n", path);
+
+    FILE* fp = fopen(path, "w+");
     if (!fp) {
         perror("open error:");
         fclose(fp);
@@ -466,7 +476,6 @@ static int core_acceleration_start(void) {
     return 0;
 }
 int core_run(void) {
-
     core_acceleration_start();
     // wait device still
 
