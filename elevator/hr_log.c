@@ -15,6 +15,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <sys/syslog.h>
 #include <sys/time.h>
@@ -24,6 +25,8 @@
 #include <unistd.h>
 
 #define LOG_BUF_SIZE 1024
+
+static FILE* persist_fp = NULL;
 
 int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     int ret = -1;
@@ -75,7 +78,23 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     }
     va_end(ap);
 
-    printf("%s", buf);
+    // printf("%s", buf);
     // syslog(LOG_SYSLOG, "%s", buf);
+    if (!persist_fp) {
+        char path[256] = "./hrlog-";
+        char* ptr = path + strlen(path);
+        strftime(ptr, available, "%Y-%m-%d-%H-%M-%S", &tm);
+        strcat(path, ".log");
+        printf("path:%s\n", path);
+        persist_fp = fopen(path, "w");
+        if (!persist_fp) {
+            printf("failed create output ..\n");
+        }
+    }
+    
+    if (persist_fp) {
+        fprintf(persist_fp, "%s", buf);
+    }
+
     return 0;
 }

@@ -68,7 +68,7 @@ static int accelerometer_read(struct sensor_data* data) {
     sda->dt = dt;
 
     line_num++;
-    printf("line:%ld, now:%f, accel: %f-%f-%f-%f\n", line_num, now, accel_x, accel_y, accel_z, accel_r);
+    HR_LOGD("line:%ld, now:%f, accel: %f-%f-%f-%f\n", line_num, now, accel_x, accel_y, accel_z, accel_r);
 
     return 0;
 }

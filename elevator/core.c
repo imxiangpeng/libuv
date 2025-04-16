@@ -162,15 +162,15 @@ static int moving_window_update(struct moving_window* w, double val) {
     w->stddev_prev = w->stddev;
 
     w->mean = w->sum / w->size;
-    // printf("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
+    // HR_LOGD("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
     for (int i = 0; i < w->size; i++) {
-        // printf("%f", w->data[i]);
+        // HR_LOGD("%f", w->data[i]);
         // if (i != w->size - 1) {
-        //     printf(" ");
+        //     HR_LOGD(" ");
         // }
         var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
     }
-    // printf("\n");
+    // HR_LOGD("\n");
 
     w->stddev = sqrt(var_sum / w->size);
     return 0;
@@ -211,7 +211,7 @@ int moving_window_is_stable(struct moving_window* w, double val) {
         return JITTER_UNKNOWN;
     }
 
-    printf("stddev:%f\n", w->stddev);
+    HR_LOGD("stddev:%f\n", w->stddev);
     if (w->stddev < ACCEL_JITTER_STD_THRESHOLD) {
         return JITTER_STABLE;
     }
@@ -260,19 +260,19 @@ double calculate_height_difference(double pressure1, double pressure2, double te
 static void* _accelerometer_thread_routin(void* args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
-    int64_t delta_time_ns = 0;  // seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
     MOVEMENT_FRAME_COUNT = ACCELEROMETER_SAMPLE_RATE_HZ / 10;
     //
     ElevatorState state = ELEVATOR_STOPPED;
     ElevatorState state_pending = ELEVATOR_UNKNOWN;
 
     if (!_accel_moving_w) {
-        printf("error: can not init moving avg window\n");
+        HR_LOGE("error: can not init moving avg window\n");
         return NULL;
     }
 
     if (!_barometer_moving_w) {
-        printf("error: can not init moving avg window\n");
+        HR_LOGE("error: can not init moving avg window\n");
         return NULL;
     }
 #if DUMP_DATA_TO_FILE
@@ -312,8 +312,8 @@ static void* _accelerometer_thread_routin(void* args) {
             new_state = CONSTANTING;
         }
 
-        _accelerometer_motion.velocity = result[1];
-        _accelerometer_motion.distance = result[2];
+        _accelerometer_motion.velocity = velocity;
+        _accelerometer_motion.distance = distance;
 
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
@@ -330,7 +330,7 @@ static void* _accelerometer_thread_routin(void* args) {
             }
         }
 
-        printf("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
+        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
             snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height);
@@ -338,7 +338,7 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 #endif
 
-        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .high = distance, .floor = 0};
+        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = 0, .running = (new_state != STOPPED)};
         notify_observers(SENSOR_ACCELERATION, &stat);
 
     next_iteration:
@@ -357,89 +357,9 @@ static void* _accelerometer_thread_routin(void* args) {
         _dump_fp = NULL;
     }
 #endif
-    printf("finished ...\n");
+    HR_LOGD("finished ...\n");
     return NULL;
 }
-
-#if 0
-static void _barometer_threadroutin(void *args) {
-    for (;;) {
-        struct timespec spec;
-        int64_t now = system_mono_time_nanoseconds();
-
-#if USE_LOCAL_SIMULATE_DATA
-        struct simulate_data data;
-        if (simulate_data_read(&data) != 0) {
-            break;
-        }
-
-        int ret = moving_window_update(_accel_moving_w, data.accel_z);
-        if (ret != 0 || _accel_moving_w->mean == 0)
-            continue;        struct simulate_data data;
-        if (simulate_data_read(&data) != 0) {
-            break;
-        
-
-        // window is full ...
-        // 静止或者匀速,开始运动或者结束了
-        if (fabs(_accel_moving_w->data[_accel_moving_w->index] - _G) < 0.02 && _accel_moving_w->stddev < 0.03) {
-            if (fabs(velocity) > VELOCITY_ZUPT_THRESHOLD) {
-                // printf("velocity ....:%f\n", velocity);
-                distance += velocity * data.dt;
-            } else {
-                // printf("not running ...\n");
-                velocity = 0;
-                // printf("ZUPT\n");
-            }
-        } else {
-            // printf("running ....\n");
-            // printf("old v:%f, d:%f, a:%f\n", velocity, distance, accel);
-            distance += velocity * data.dt + 0.5 * accel * data.dt * data.dt;
-            velocity += accel /*(_accel_moving_w->data[_accel_moving_w->index] - _G)*/ * data.dt;
-            // printf("current v:%f, d:%f, a:%f, stddev:%f, dt:%f\n", velocity, distance, accel, _accel_moving_w->stddev, data.dt);
-            if (velocity * accel > 0) {
-                // printf("speeding ..........\n");
-            } else {
-                // printf("slowing ......\n");
-            }
-        }
-
-        accel = _accel_moving_w->data[_accel_moving_w->index] - _G;
-
-#if DUMP_DATA_TO_FILE
-        if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f\n", data.now, data.accel_z, data.pressure, data.temp, _accel_moving_w->mean, _accel_moving_w->stddev, velocity, distance);
-            fwrite(buf, 1, strlen(buf), _dump_fp);
-        }
-#endif
-#endif
-
-        struct live_stat stat = {accel, fabs(velocity), distance, distance, 0};
-        notify_observers(SENSOR_ACCELERATION, &stat);
-
-        // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
-        spec.tv_sec = (now + delta_time_ns) / 1000000000;
-        spec.tv_nsec = (now + delta_time_ns) % 1000000000;
-        int err;
-        do {
-            err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
-        } while (err < 0 && errno == EINTR);
-    }
-
-#if USE_LOCAL_SIMULATE_DATA
-    simulate_data_deinit();
-#endif
-
-#if DUMP_DATA_TO_FILE
-    if (_dump_fp) {
-        fclose(_dump_fp);
-        _dump_fp = NULL;
-    }
-#endif
-    printf("finished ...\n");
-    return NULL;
-}
-#endif
 
 #if DUMP_DATA_TO_FILE
 int dump_data_init() {
@@ -464,6 +384,7 @@ int core_initalize(int argc, char** argv) {
     memset((void*)&_accelerometer_motion, 0, sizeof(_accelerometer_motion));
 
     _accelerometer_motion.stream = accelerometer_motion_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
+    _accelerometer_motion.height = 6.1;
 
     if (!_accelerometer_motion.stream) {
         HR_LOGE("can not find accelerometer ...\n");
@@ -516,10 +437,10 @@ static int core_acceleration_start(void) {
     ret = pthread_attr_setschedparam(&attr, &param);
     if (ret != 0) {
         perror("pri:");
-        printf("failed:%d ...\n", ret);
+        HR_LOGD("failed:%d ...\n", ret);
     }
 
-    printf("max level:%d\n", param.sched_priority);
+    HR_LOGD("max level:%d\n", param.sched_priority);
     ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_attr_setdetachstate\n", __FUNCTION__, __LINE__);
@@ -535,7 +456,7 @@ static int core_acceleration_start(void) {
     ret = pthread_getschedparam(_accel_tid, &thread_policy, &param);
     if (ret != 0) {
         perror("pri:");
-        printf("failed ...\n");
+        HR_LOGD("failed ...\n");
     }
     HR_LOGD("thread policy is %s, priority is %d\n",
             ((thread_policy == SCHED_FIFO) ? "FIFO" : (thread_policy == SCHED_RR ? "RR" : (thread_policy == SCHED_OTHER ? "OTHER" : "unknown"))), param.sched_priority);
@@ -549,7 +470,7 @@ int core_run(void) {
     core_acceleration_start();
     // wait device still
 
-    // printf("now device is ready ...\n");
+    // HR_LOGD("now device is ready ...\n");
 
     return 0;
 }

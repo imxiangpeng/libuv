@@ -9,8 +9,9 @@ struct live_stat{
     double accel;
     double speed;
     double distance;
-    double high;
+    double height;
     int floor;
+    int running;
     double pressure;
     double barometer_velocity;
     double barometer_distance;

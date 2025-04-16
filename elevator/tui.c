@@ -10,6 +10,7 @@
 
 #include "core.h"
 #include "time_utils.h"
+#include "hr_log.h"
 
 #define PERIOD_MS 50
 #define SPEED_DEFAULT_AXIS_MAX 1  // 4 m/s
@@ -60,7 +61,9 @@ static struct tui_data _tui_data_windows[4] = {{0}};
 static double _accel_realtime = 0.0f;
 static double _speed_realtime = 0.0f;
 static double _distance_realtime = 0.0f;
-static int _floor_realtime = 0.0f;
+static double _height_realtime = 0.0f;
+static int _floor_realtime = 0;
+static int _running_realtime = 1;
 
 static double _barometer_pressure_realtime = 0;
 static double _barometer_speed_realtime = 0;
@@ -68,8 +71,6 @@ static double _barometer_distance_realtime = 0;
 
 static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     (void)sigcontext;
-
-    printf("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
     if (SIGWINCH == signum) {
         winch_received = 1;
@@ -160,7 +161,7 @@ static void *tui_thread_routin(void *args) {
 
             getmaxyx(stdscr, rows_max, cols_max);
 
-            printf("rows_max:%d, cols_max:%d\n", rows_max, cols_max);
+            HR_LOGD("rows_max:%d, cols_max:%d\n", rows_max, cols_max);
 
             resize_term(rows_max, cols_max);
 
@@ -231,7 +232,9 @@ static void *tui_thread_routin(void *args) {
         mvwprintw(_tui_panel[PANEL_TOP], 0, 1, "Floor: %03d", _floor_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 0, 20, "Accel: %.3f m/s^2", _accel_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 0, 40, "Speed: %.3f m/s", _speed_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 1, 1, "Running: %d", _running_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_realtime);
+        mvwprintw(_tui_panel[PANEL_TOP], 1, 40, "Height: %.3f m", _height_realtime);
 
         mvwprintw(_tui_panel[PANEL_TOP], 0, 60, "Pressure: %.2f Pa", _barometer_pressure_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 0, 80, "Speed: %.3f m/s", _barometer_speed_realtime);
@@ -280,7 +283,7 @@ static void tui_thread_start(void) {
 
     ret = pthread_create(&_tui_tid, &attr, tui_thread_routin, NULL);
     if (0 != ret) {
-        printf("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
+        HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
         return;
     }
     pthread_attr_destroy(&attr);
@@ -291,8 +294,10 @@ static void _observer_update(enum core_sensor sensor, void *data) {
     _accel_realtime = fabs(stat->accel);
     _speed_realtime = fabs(stat->speed);
     _distance_realtime = fabs(stat->distance);
+    _height_realtime = stat->height;
     _floor_realtime = stat->floor;
-    // printf("speed : %f\n", _speed_realtime);
+    _running_realtime = stat->running;
+    // HR_LOGD("speed : %f\n", _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[0], _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[1], _distance_realtime);
     _barometer_speed_realtime = fabs(stat->barometer_velocity);

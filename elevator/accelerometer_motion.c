@@ -101,7 +101,7 @@ static void calibration(struct motion_stream* m, double accel) {
     }
 
     int ret = moving_window_update(m->mw, accel);
-    printf("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, m->mw->stddev, m->mw->mean, m->calibration_retries_max);
+    HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, m->mw->stddev, m->mw->mean, m->calibration_retries_max);
     if (ret == 0 && !isnan(m->mw->stddev)) {
         if (m->mw->stddev < ACCEL_JITTER_STD_THRESHOLD) {
             m->calibration_data[m->calibration_retries] = m->mw->mean;
@@ -111,17 +111,17 @@ static void calibration(struct motion_stream* m, double accel) {
                 double sum = 0;
                 m->calibration_retries = 0;
                 for (i = 0; i < m->calibration_retries_max; i++) {
-                    printf("calibration: %f\n", m->calibration_data[i]);
+                    HR_LOGD("calibration: %f\n", m->calibration_data[i]);
                     sum += m->calibration_data[i];
                 }
-                printf("%s(%d):avg: -> %f\n", __FUNCTION__, __LINE__, sum / m->calibration_retries_max);
+                HR_LOGD("%s(%d):avg: -> %f\n", __FUNCTION__, __LINE__, sum / m->calibration_retries_max);
                 m->G = round(sum * 10000 / m->calibration_retries_max) / 10000;
-                printf("%s(%d): it's still: %lf\n", __FUNCTION__, __LINE__, m->G);
+                HR_LOGD("%s(%d): it's still: %lf\n", __FUNCTION__, __LINE__, m->G);
                 m->calibration = 1;
                 return;
             }
         } else {
-            printf("not still:\n");
+            HR_LOGD("not still:\n");
             m->calibration_retries = 0;
         }
     }
@@ -141,10 +141,12 @@ static int accelerometer_motion_stream_read(struct stream* stream, void* data, s
 
     if (ms->now == 0) {
         dt = 0;
+		ms->now = get_monotonic_nanoseconds();
     } else {
-        dt = ms->now;
-        ms->now = get_monotonic_nanoseconds() / 1000000000.0f;
-        dt = ms->now - dt;
+	    int64_t prev = ms->now;
+
+        ms->now = get_monotonic_nanoseconds();
+        dt = (ms->now - prev) / 1000000000.0;
     }
 
     ret = ms->sensor->read(&accel.self);
@@ -160,7 +162,7 @@ static int accelerometer_motion_stream_read(struct stream* stream, void* data, s
     dt = accel.dt;
 #endif
 
-    printf("dt:%f\n", dt);
+    HR_LOGD("dt:%f\n", dt);
     accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
 
     accel_filter = butterworth_filter_process(ms->bw_filter, accel_union);
@@ -186,7 +188,7 @@ static int accelerometer_motion_stream_read(struct stream* stream, void* data, s
     _bw_distance += _bw_velocity * dt + 0.5 * (accel_filter - ms->G) * dt *dt;
     _bw_velocity += (accel_filter - ms->G) * dt;
 
-    printf("bw filter: accel:%f, distance:%f, velocity:%f\n", accel_filter, _bw_distance, _bw_velocity);
+    HR_LOGD("bw filter: accel:%f, distance:%f, velocity:%f\n", accel_filter, _bw_distance, _bw_velocity);
     _distance += dt * _velocity + 0.5 * (accel_union - ms->G) * dt * dt;
     _velocity += dt * (accel_union - ms->G);
     HR_LOGD("manual distance & velocity: [%f, %f]\n", _distance, _velocity);
@@ -208,7 +210,7 @@ static int accelerometer_motion_stream_calibration_completed(struct stream* stre
 }
 
 static int accelerometer_motion_stream_reset(struct stream* stream) {
-    printf("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
     struct motion_stream* ms = container_of(stream, struct motion_stream, self);
     if (!stream || !ms) {
@@ -222,7 +224,7 @@ static int accelerometer_motion_stream_reset(struct stream* stream) {
     return 0;
 }
 static int accelerometer_motion_stream_close(struct stream* stream) {
-    printf("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }
 
@@ -237,7 +239,6 @@ struct stream* accelerometer_motion_stream_init(int sampling_frequency) {
     }
 
     ms->G = G;
-    printf("%s(%d): motion stream:%p vs %p\n", __FUNCTION__, __LINE__, ms, &ms->self);
     ms->sampling_frequency = sampling_frequency;
     ms->self.enter_calibration = accelerometer_motion_stream_calibration_enter;
     ms->self.calibration_completed = accelerometer_motion_stream_calibration_completed;
@@ -326,15 +327,15 @@ static int moving_window_update(struct moving_window* w, double val) {
     }
 
     w->mean = w->sum / w->size;
-    // printf("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
+    // HR_LOGD("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
     for (int i = 0; i < w->size; i++) {
-        // printf("%f", w->data[i]);
+        // HR_LOGD("%f", w->data[i]);
         // if (i != w->size - 1) {
-        //     printf(" ");
+        //     HR_LOGD(" ");
         // }
         var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
     }
-    // printf("\n");
+    // HR_LOGD("\n");
 
     w->stddev = sqrt(var_sum / w->size);
     return 0;
@@ -390,10 +391,10 @@ static void _ekf_run_model(struct motion_stream* self, double input, double dt) 
         linear_accel = 0;
     }
 
-    printf("a:%f, x:%f-%f-%f-%f\n", input, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
+    HR_LOGD("a:%f, x:%f-%f-%f-%f\n", input, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
     if (self->calibration == 0 || fabs(ekf->x[1]) < 0.1 && fabs(linear_accel) < 0.09) {
-        printf("ZUPT ...............\n");
+        HR_LOGD("ZUPT ...............\n");
         fx[1] = 0;
         ekf->x[1] = 0;             // 速度置 0
         ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
