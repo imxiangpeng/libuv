@@ -23,7 +23,6 @@ INCLUDE_DIRECTORIES(sensors)
 
 set(SOURCES main.c core.c acceleration.c barometer.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c
     sensors/sensor.c sensors/sensor_bmi270.c sensors/sensor_bmp388.c
-    sensors/sensor_simulate.c
     accelerometer_motion.c)
 
 if(USE_LOCAL_SIMULATE_DATA)

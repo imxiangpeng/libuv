@@ -336,14 +336,15 @@ static void* _accelerometer_thread_routin(void* args) {
                 // 推测当前楼层，然后更正高度信息
                 // 重置运动模型下次运行数据
                 // if (_accelerometer_motion.velocity != 0) {
-                // input->reset(input);
+                input->reset(input);
                 //}
                 // real height = height + distance
-                //_accelerometer_motion.height += _accelerometer_motion.distance;
+                _accelerometer_motion.height += _accelerometer_motion.distance;
+                _accelerometer_motion.distance = 0;
             }
         }
 
-        printf("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + distance);
+        printf("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
             snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height);

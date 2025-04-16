@@ -75,8 +75,7 @@ double Q[EKF_N * EKF_N] = {
     0, 0, 1e-1, 0,
     0, 0, 0, 1e-3};
 
-static const double R[EKF_M * EKF_M] = {1e-1, 0,
-                                        0, 1e-3};
+static const double R[EKF_M * EKF_M] = {1e-1, 0,                                        0, 1e-3};
 
 static const double ACCEL_JITTER_STD_THRESHOLD = 0.03;
 static const double G = 9.81;
@@ -87,7 +86,7 @@ static double _distance = 0;
 static double _bw_velocity = 0;
 static double _bw_distance = 0;
 
-static void _ekf_run_model(struct motion_stream* self, double input, double);
+static void _ekf_run_model(struct motion_stream* self, double input, double dt);
 
 static struct moving_window* moving_window_init(int size);
 static int moving_window_update(struct moving_window* w, double val);

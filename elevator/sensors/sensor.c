@@ -9,9 +9,9 @@ extern struct sensor_device sensor_bmi270_gyroscope;
 extern struct sensor_device sensor_bmp388_barometer;
 extern struct sensor_device sensor_bmp388_temperature;
 
-//#if USE_LOCAL_SIMULATE_DATA
+#if USE_LOCAL_SIMULATE_DATA
 extern struct sensor_device sensor_simulate_accelerometer;
-//#endif
+#endif
 
 static struct sensor_device* _sensor_devices[_SENSOR_MAX] = {
     [SENSOR_ACCELEROMETER] = &sensor_bmi270_accelerometer,
