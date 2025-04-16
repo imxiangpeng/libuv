@@ -8,17 +8,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "acceleration.h"
 #include "accelerometer_motion.h"
-#include "barometer.h"
 #include "core.h"
 #include "hr_log.h"
 #include "sensors/sensor.h"
 #include "time_utils.h"
 
-#if USE_LOCAL_SIMULATE_DATA
-// #include "simulate.h"
-#endif
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -224,16 +219,7 @@ int moving_window_is_stable(struct moving_window* w, double val) {
     return JITTER_UNSTABLE;
 }
 
-/*static inline int64_t seconds_to_nanoseconds(int64_t secs) {
-    return secs * 1000000000;
-}
 
-static int64_t system_mono_time_nanoseconds(void) {
-    struct timespec t;
-    t.tv_sec = t.tv_nsec = 0;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
-}*/
 static int MOVEMENT_FRAME_COUNT = 30;
 
 const char* motion_state_str(enum motion_state state) {
@@ -559,14 +545,11 @@ static int core_acceleration_start(void) {
     return 0;
 }
 int core_run(void) {
-    // wait device still
-    // core_acceleration_calibration();
-    // _G = 9.843f;
-    // _G = -9.823f;
-
-    printf("now device is ready ...\n");
 
     core_acceleration_start();
+    // wait device still
+
+    // printf("now device is ready ...\n");
 
     return 0;
 }
