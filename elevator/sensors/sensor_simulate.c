@@ -56,12 +56,12 @@ static int accelerometer_read(struct sensor_data* data) {
         return -1;
     }
 
-    if (sscanf(p, "%lf,%lf,%lf,%lf,%lf,%lf,%*f,%*f,%*f,%lf,%lf,%lf", &now, &dt, &accel_x,  &accel_y, &accel_z, &accel_r, &pressure, &temp, &ag) != 9) {
+    if (sscanf(p, "%lf,%lf,%lf,%lf,%lf,%lf,%*f,%*f,%*f,%lf,%lf,%lf", &now, &dt, &accel_x, &accel_y, &accel_z, &accel_r, &pressure, &temp, &ag) != 9) {
         printf("CSV 解析错误:%s\n", line);
 
         return -1;
     }
-    
+
     sda->x[0] = accel_x;
     sda->x[1] = accel_y;
     sda->x[2] = accel_z * -1.0;
@@ -72,16 +72,16 @@ static int accelerometer_read(struct sensor_data* data) {
 
     return 0;
 }
-    static int accelerometer_close() {
-        if (_simulate_data_fp) {
-            fclose(_simulate_data_fp);
-            _simulate_data_fp = NULL;
-        }
-        return 0;
+static int accelerometer_close() {
+    if (_simulate_data_fp) {
+        fclose(_simulate_data_fp);
+        _simulate_data_fp = NULL;
     }
+    return 0;
+}
 
-    struct sensor_device sensor_simulate_accelerometer = {
-        .init = accelerometer_init,
-        .configure = accelerometer_configure,
-        .read = accelerometer_read,
-        .close = accelerometer_close};
+struct sensor_device sensor_simulate_accelerometer = {
+    .init = accelerometer_init,
+    .configure = accelerometer_configure,
+    .read = accelerometer_read,
+    .close = accelerometer_close};
