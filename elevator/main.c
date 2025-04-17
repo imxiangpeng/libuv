@@ -3,6 +3,7 @@
 #include "tui.h"
 #include "core.h"
 #include "sensor.h"
+#include "floor.h"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -17,8 +18,10 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    tui_init();
+    floor_init();
+    // tui_init();
     
+    // return 0;;
     core_run();
 
     while (1) {

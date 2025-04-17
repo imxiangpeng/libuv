@@ -64,7 +64,7 @@ static int accelerometer_read(struct sensor_data* data) {
     
     sda->x[0] = accel_x;
     sda->x[1] = accel_y;
-    sda->x[2] = accel_z;
+    sda->x[2] = accel_z * -1.0;
     sda->dt = dt;
 
     line_num++;

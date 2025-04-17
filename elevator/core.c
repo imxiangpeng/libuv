@@ -394,7 +394,8 @@ int core_initalize(int argc, char** argv) {
     memset((void*)&_accelerometer_motion, 0, sizeof(_accelerometer_motion));
 
     _accelerometer_motion.stream = accelerometer_motion_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
-    _accelerometer_motion.height = 6.1;
+    // simulate data, initialize floor
+    _accelerometer_motion.height = -6.1;
 
     if (!_accelerometer_motion.stream) {
         HR_LOGE("can not find accelerometer ...\n");
