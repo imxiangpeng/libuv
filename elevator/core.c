@@ -13,6 +13,7 @@
 #include "hr_log.h"
 #include "sensors/sensor.h"
 #include "time_utils.h"
+#include "floor.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -264,6 +265,9 @@ static void* _accelerometer_thread_routin(void* args) {
     ElevatorState state = ELEVATOR_STOPPED;
     ElevatorState state_pending = ELEVATOR_UNKNOWN;
 
+    int floor_num = 0;
+    char floor_label[64] = {0};
+
     if (!_accel_moving_w) {
         HR_LOGE("error: can not init moving avg window\n");
         return NULL;
@@ -325,9 +329,11 @@ static void* _accelerometer_thread_routin(void* args) {
                 // real height = height + distance
                 _accelerometer_motion.height += _accelerometer_motion.distance;
                 _accelerometer_motion.distance = 0;
+                
             }
         }
 
+        floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
         HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
@@ -336,7 +342,7 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 #endif
 
-        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = 0, .running = (new_state != STOPPED)};
+        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
         notify_observers(SENSOR_ACCELERATION, &stat);
 
     next_iteration:
