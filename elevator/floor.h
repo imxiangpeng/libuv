@@ -3,4 +3,7 @@
 int floor_init();
 
 int floor_predict(double height, int *num, char* label, int length);
+
+int floor_relative_height(int num, double* height);
+
 #endif

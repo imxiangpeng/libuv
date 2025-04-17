@@ -16,6 +16,7 @@
 #include "floor.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
 
 // 海平面标准气压 (Pa)
 #define P0 101325.0
@@ -300,12 +301,16 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 
         double accel = result[0];
-        double velocity = round(result[1] * 1000) / 1000;
+        double velocity = round(result[1] * 100) / 100;
         double distance = round(result[2] * 1000) / 1000;
 
         enum motion_state new_state = _accelerometer_motion.state;
+
         if (velocity == 0) {
             new_state = STOPPED;
+        } else if (fabs(velocity) < VELOCITY_ZUPT_THRESHOLD) {
+            // keep old state until velocity change significantly
+            // new_state = STOPPED;
         } else if (fabs(velocity) > fabs(_accelerometer_motion.velocity)) {
             new_state = ACCELERATING;
         } else if (fabs(velocity) < fabs(_accelerometer_motion.velocity)) {
@@ -314,13 +319,20 @@ static void* _accelerometer_thread_routin(void* args) {
             new_state = CONSTANTING;
         }
 
-        _accelerometer_motion.velocity = velocity;
-        _accelerometer_motion.distance = distance;
+        // use high precision value, not round!
+        _accelerometer_motion.velocity = result[1];//velocity;
+        _accelerometer_motion.distance = result[2];//distance;
 
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
-            _accelerometer_motion.state = new_state;
+            if (_accelerometer_motion.state == STOPPED) {
+
+
+                HR_LOGD("starting-------------------from:%d -> %s----->\n", floor_num, floor_label);
+
+            }
             if (new_state == STOPPED) {
+                HR_LOGD("stopping------------------------>\n");
                 // 推测当前楼层，然后更正高度信息
                 // 重置运动模型下次运行数据
                 // if (_accelerometer_motion.velocity != 0) {
@@ -329,12 +341,24 @@ static void* _accelerometer_thread_routin(void* args) {
                 // real height = height + distance
                 _accelerometer_motion.height += _accelerometer_motion.distance;
                 _accelerometer_motion.distance = 0;
-                
+#if AUTO_FIXED_HEIGHT_WHEN_STOPPING
+                if (0 == floor_predict(_accelerometer_motion.height, &floor_num, (char*)&floor_label, sizeof(floor_label))) {
+                    HR_LOGD("update height accroding stopping floor relative height\n");
+                    HR_LOGD("stopping:-------------------at:%d -> %s----->\n", floor_num, floor_label);
+                    double height = _accelerometer_motion.height;
+                    if (0 == floor_relative_height(floor_num, &height)) {
+                        HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
+                        _accelerometer_motion.height = height;
+                    }
+                }
+#endif
             }
+            _accelerometer_motion.state = new_state;
         }
 
         floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
-        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n", accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
+        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n",
+                accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
             snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height);

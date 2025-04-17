@@ -212,14 +212,19 @@ static int accelerometer_motion_stream_calibration_completed(struct stream* stre
 static int accelerometer_motion_stream_reset(struct stream* stream) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
+    ekf_t* ekf = NULL;  //&self->ekf;
     struct motion_stream* ms = container_of(stream, struct motion_stream, self);
     if (!stream || !ms) {
         return -1;
     }
 
+    ekf = &ms->ekf;
+
     // clear distance & speed
     ms->ekf.x[0] = 0;
+    ekf->P[0] = 1e-6;
     ms->ekf.x[1] = 0;
+    ekf->P[EKF_N + 1] = 1e-6;
 
     return 0;
 }
@@ -391,9 +396,9 @@ static void _ekf_run_model(struct motion_stream* self, double input, double dt) 
         linear_accel = 0;
     }
 
-    HR_LOGD("a:%f, x:%f-%f-%f-%f\n", input, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
+    // HR_LOGD("a:%f, x:%f-%f-%f-%f\n", input, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
-    if (self->calibration == 0 || fabs(ekf->x[1]) < 0.1 && fabs(linear_accel) < 0.09) {
+    if (self->calibration == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
         HR_LOGD("ZUPT ...............\n");
         fx[1] = 0;
         ekf->x[1] = 0;             // 速度置 0
@@ -404,8 +409,8 @@ static void _ekf_run_model(struct motion_stream* self, double input, double dt) 
         _velocity = 0;
     }
 
-    HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
-    HR_LOGD("x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
+    // HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
+    // HR_LOGD("x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
     ekf_predict(ekf, fx, F, Q);
 
     if (fabs(linear_accel) < 0.03) {
@@ -416,10 +421,10 @@ static void _ekf_run_model(struct motion_stream* self, double input, double dt) 
 
     const double hx[EKF_M] = {ekf->x[2], ekf->x[3]};
 
-    HR_LOGD("z: [%f, %f]\n", z[0], z[1]);
-    HR_LOGD("hx: [%f, %f]\n", hx[0], hx[1]);
+    // HR_LOGD("z: [%f, %f]\n", z[0], z[1]);
+    // HR_LOGD("hx: [%f, %f]\n", hx[0], hx[1]);
     ekf_update(ekf, z, hx, H, R);
-    HR_LOGD("after x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
+    // HR_LOGD("after x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
     //_distance += dt * _velocity + 0.5 * linear_accel * dt *dt;
     //_velocity += dt * linear_accel;

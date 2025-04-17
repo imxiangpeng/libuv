@@ -11,11 +11,8 @@ struct floor {
     int num;
     char label[64];  // name
     double height;
-    double height_relative;  // height relative to the base floor
+    double height_relative;  // height relative to the base floor(ground floor)
 };
-
-// static int _building.models = 0;
-// static struct floor* _building.model = NULL;
 
 struct building_model {
     int base_floor_num;
@@ -26,7 +23,7 @@ struct building_model {
 int floor_load_model(const char* path) {
     int ret = -1;
     ssize_t len = 0;
-    char* data = NULL, *version = NULL, *date = NULL;
+    char *data = NULL, *version = NULL, *date = NULL;
     cJSON *root = NULL, *ele = NULL, *floor_array = NULL;
     int floors = 0, i = 0, base_id = -1;
     double base_num = 1;
@@ -154,11 +151,17 @@ int floor_predict(double height, int* num, char* label, int length) {
     return -1;
 }
 
-double floor_height(int num) {
+// height relative to base floor
+int floor_relative_height(int num, double* height) {
     int i = 0;
+    if (!height) return -1;
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
-        if (f->num == num)
-            return f->height_relative;
+        if (f->num == num) {
+            *height = f->height_relative;
+            return 0;
+        }
     }
+
+    return -1;
 }

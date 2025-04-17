@@ -19,9 +19,9 @@ int main(int argc, char** argv) {
     }
 
     floor_init();
-    //tui_init();
+    tui_init();
     
-    return 0;;
+    // return 0;;
     core_run();
 
     while (1) {
