@@ -28,7 +28,7 @@ int floor_load_model(const char* path) {
     ssize_t len = 0;
     char* data = NULL, *version = NULL, *date = NULL;
     cJSON *root = NULL, *ele = NULL, *floor_array = NULL;
-    int floors = 0, id = 0, base_id = -1;
+    int floors = 0, i = 0, base_id = -1;
     double base_num = 1;
 
     if (!path) {
@@ -55,11 +55,12 @@ int floor_load_model(const char* path) {
     base_num = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "base_num"));
     floor_array = cJSON_GetObjectItem(root, "floor");
     floors = cJSON_GetArraySize(floor_array);
-    printf("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
+
     if (!version || !date || isnan(base_num) || floors == 0) {
         cJSON_Delete(root);
         return -1;
     }
+
     printf("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
 
     _building.base_floor_num = base_num;
@@ -76,9 +77,9 @@ int floor_load_model(const char* path) {
         _building.floor_nums = floors;
     }
 
-    id = 0;
+    i = 0;
     cJSON_ArrayForEach(ele, floor_array) {
-        struct floor* p = &_building.model[id];
+        struct floor* p = &_building.model[i];
         double num = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "num"));
         const char* label = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "name"));
         double height = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "height"));
@@ -96,36 +97,36 @@ int floor_load_model(const char* path) {
         p->height = height;
 
         if (p->num == base_num) {
-            base_id = id;
+            base_id = i;
         }
-        printf("id:%d, base_id:%d, num:%d name:%s, height:%f\n", id, base_id, p->num, label, height);
-        id++;
+        printf("id:%d, base_id:%d, num:%d name:%s, height:%f\n", i, base_id, p->num, label, height);
+        i++;
     }
 
     // 1 lou height == 0
     _building.model[base_id].height_relative = 0;
-    for (id = base_id - 1; id >= 0; id--) {
-        _building.model[id].height_relative = _building.model[id + 1].height_relative - _building.model[id].height;
+    for (i = base_id - 1; i >= 0; i--) {
+        _building.model[i].height_relative = _building.model[i + 1].height_relative - _building.model[i].height;
 
         printf("id:%d, name:%s, height:%f, height_base:%f\n",
-               id, _building.model[id].label,
-               _building.model[id].height, _building.model[id].height_relative);
+               i, _building.model[i].label,
+               _building.model[i].height, _building.model[i].height_relative);
     }
 
-    for (id = base_id + 1; id < floors; id++) {
-        _building.model[id].height_relative = _building.model[id - 1].height + _building.model[id - 1].height_relative;
+    for (i = base_id + 1; i < floors; i++) {
+        _building.model[i].height_relative = _building.model[i - 1].height + _building.model[i - 1].height_relative;
 
         printf("id:%d, name:%s, height:%f, height_base:%f\n",
-               id, _building.model[id].label,
-               _building.model[id].height, _building.model[id].height_relative);
+               i, _building.model[i].label,
+               _building.model[i].height, _building.model[i].height_relative);
     }
 
     printf("=========================\n");
 
-    for (id = 0; id < floors; id++) {
+    for (i = 0; i < floors; i++) {
         printf("id:%d, name:%s, height:%f, height_base:%f\n",
-               id, _building.model[id].label,
-               _building.model[id].height, _building.model[id].height_relative);
+               i, _building.model[i].label,
+               _building.model[i].height, _building.model[i].height_relative);
     }
     cJSON_Delete(root);
 
@@ -134,7 +135,6 @@ int floor_load_model(const char* path) {
 
 int floor_init() {
     floor_load_model("floor_model.json");
-    // core_register_observer(SENSOR_ACCELERATION, &_building.model_core_observer);
 }
 
 // return predict floor according height
