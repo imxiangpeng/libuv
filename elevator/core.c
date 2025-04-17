@@ -10,10 +10,10 @@
 
 #include "accelerometer_motion.h"
 #include "core.h"
+#include "floor.h"
 #include "hr_log.h"
 #include "sensors/sensor.h"
 #include "time_utils.h"
-#include "floor.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
@@ -30,7 +30,7 @@ static const double PRESSURE_M = 0.0289644;
 
 static const double G0 = 9.823;
 
-static struct core_observer* _sensor_observers[__SENSOR_MAX][10] = {{0}, {0}};
+static struct core_observer* _observers[10] = {0};
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
 static int BAROMETER_SAMPLE_RATE_HZ = 10;
 
@@ -99,15 +99,6 @@ static double barometer_pressure = 0;
 static double barometer_begin = 0;
 static double barometer_end = 0;
 
-enum accelerometer_motion_stage {
-    COLIBRATION,
-    READY
-};
-
-enum motion_state { STOPPED,
-                    ACCELERATING,
-                    DECELERATING,
-                    CONSTANTING };
 struct accelerometer_motion {
     struct stream* stream;
     double height;    // --> physical height
@@ -119,6 +110,8 @@ struct accelerometer_motion {
 
 static struct moving_window* _accel_moving_w = NULL;
 static struct moving_window* _barometer_moving_w = NULL;
+
+static int notify_observer(enum observer_action action, void* data);
 
 struct moving_window* moving_window_init(int size) {
     // data is append at end of struct moving_avg_window
@@ -235,24 +228,6 @@ const char* motion_state_str(enum motion_state state) {
     }
 }
 
-struct ncurses_data {
-    double accel;
-    double velocity;
-    double distance;
-};
-
-static int notify_observers(enum core_sensor type, void* data) {
-    int i = 0;
-
-    for (i = 0; i < sizeof(_sensor_observers[type]) / sizeof(struct core_observer*); i++) {
-        struct core_observer* obs = _sensor_observers[type][i];
-        if (obs) {
-            obs->update(type, data);
-        }
-    }
-    return 0;
-}
-
 double calculate_height_difference(double pressure1, double pressure2, double temperature) {
     static double fac = PRESSURE_L * PRESSURE_R / PRESSURE_M / G0;
     return ((temperature + 273.15) / L) * (1 - pow(pressure2 / pressure1, fac /*0.190284*/));
@@ -320,16 +295,19 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 
         // use high precision value, not round!
-        _accelerometer_motion.velocity = result[1];//velocity;
-        _accelerometer_motion.distance = result[2];//distance;
+        _accelerometer_motion.velocity = result[1];  // velocity;
+        _accelerometer_motion.distance = result[2];  // distance;
 
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
             if (_accelerometer_motion.state == STOPPED) {
-
-
                 HR_LOGD("starting-------------------from:%d -> %s----->\n", floor_num, floor_label);
 
+                struct motion_data md = {
+                    .state = new_state,
+                    .distance = distance};
+
+                notify_observer(OBSERVER_ACTION_ON_MOTION, &md);
             }
             if (new_state == STOPPED) {
                 HR_LOGD("stopping------------------------>\n");
@@ -341,6 +319,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 // real height = height + distance
                 _accelerometer_motion.height += _accelerometer_motion.distance;
                 _accelerometer_motion.distance = 0;
+                HR_LOGD("stopping-----------:%f------------->\n", _accelerometer_motion.height);
 #if AUTO_FIXED_HEIGHT_WHEN_STOPPING
                 if (0 == floor_predict(_accelerometer_motion.height, &floor_num, (char*)&floor_label, sizeof(floor_label))) {
                     HR_LOGD("update height accroding stopping floor relative height\n");
@@ -352,6 +331,11 @@ static void* _accelerometer_thread_routin(void* args) {
                     }
                 }
 #endif
+                struct motion_data md = {
+                    .state = new_state,
+                    .distance = distance};
+
+                notify_observer(OBSERVER_ACTION_ON_MOTION, &md);
             }
             _accelerometer_motion.state = new_state;
         }
@@ -366,8 +350,8 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 #endif
 
-        struct live_stat stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
-        notify_observers(SENSOR_ACCELERATION, &stat);
+        struct status_data stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
+        notify_observer(OBSERVER_ACTION_ON_STATUS, &stat);
 
     next_iteration:
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
@@ -515,16 +499,14 @@ int core_run(void) {
     return 0;
 }
 
-int core_register_observer(enum core_sensor type, struct core_observer* observer) {
+int core_register_observer(struct core_observer* observer) {
     int i = 0;
-    int available = -1;
 
-    for (i = 0; i < sizeof(_sensor_observers[type]) / sizeof(struct core_observer*); i++) {
-        struct core_observer* obs = _sensor_observers[type][i];
+    for (i = 0; i < ARRAY_SIZE(_observers); i++) {
+        struct core_observer* obs = _observers[i];
         if (!obs) {
-            if (available == -1) {
-                available = i;
-            }
+            _observers[i] = observer;
+            return 0;
         } else {
             if (obs == observer) {
                 // already exists!
@@ -532,9 +514,31 @@ int core_register_observer(enum core_sensor type, struct core_observer* observer
             }
         }
     }
-    if (available == -1) {
-        return -1;
+
+    return -1;
+}
+
+static int notify_observer(enum observer_action action, void* data) {
+    int i = 0;
+
+    for (i = 0; i < ARRAY_SIZE(_observers); i++) {
+        struct core_observer* obs = _observers[i];
+        if (obs) {
+            switch (action) {
+                case OBSERVER_ACTION_ON_STATUS:
+                    if (obs->on_status) {
+                        obs->on_status((struct status_data*)data);
+                    }
+                    break;
+                case OBSERVER_ACTION_ON_MOTION:
+                    if (obs->on_motion) {
+                        obs->on_motion((struct motion_data*)data);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
     }
-    _sensor_observers[type][available] = observer;
     return 0;
 }

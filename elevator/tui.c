@@ -289,24 +289,24 @@ static void tui_thread_start(void) {
     pthread_attr_destroy(&attr);
 }
 
-static void _observer_update(enum core_sensor sensor, void *data) {
-    struct live_stat *stat = (struct live_stat *)data;
-    _accel_realtime = fabs(stat->accel);
-    _speed_realtime = fabs(stat->speed);
-    _distance_realtime = fabs(stat->distance);
-    _height_realtime = stat->height;
-    _floor_realtime = stat->floor;
-    _running_realtime = stat->running;
+static void _observer_on_status(struct status_data *st) {
+    if (!st) return;
+    _accel_realtime = fabs(st->accel);
+    _speed_realtime = fabs(st->speed);
+    _distance_realtime = fabs(st->distance);
+    _height_realtime = st->height;
+    _floor_realtime = st->floor;
+    _running_realtime = st->running;
     // HR_LOGD("speed : %f\n", _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[0], _speed_realtime);
     // tui_data_window_update(&_tui_data_windows[1], _distance_realtime);
-    _barometer_speed_realtime = fabs(stat->barometer_velocity);
-    _barometer_distance_realtime = fabs(stat->barometer_distance);
-    _barometer_pressure_realtime = stat->pressure;
+    _barometer_speed_realtime = fabs(st->barometer_velocity);
+    _barometer_distance_realtime = fabs(st->barometer_distance);
+    _barometer_pressure_realtime = st->pressure;
 }
 
-static struct core_observer _tui_core_observer = {
-    .update = _observer_update};
+static struct core_observer _tui_observer = {
+    .on_status = _observer_on_status};
 
 int tui_init() {
     struct sigaction action;
@@ -327,7 +327,7 @@ int tui_init() {
 
     keypad(stdscr, TRUE);
 
-    core_register_observer(SENSOR_ACCELERATION, &_tui_core_observer);
+    core_register_observer(&_tui_observer);
 
     tui_thread_start();
     return 0;

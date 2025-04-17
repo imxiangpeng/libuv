@@ -16,10 +16,13 @@ struct floor {
 
 struct building_model {
     int base_floor_num;
+    int floors_under_base;
     int floor_nums;
     struct floor* model;
-} _building = {0, 0, NULL};
+} _building = {0, 0, 0, NULL};
 
+static int _floor_calibration = 0;
+static int _floor_calibration_index = 0;
 int floor_load_model(const char* path) {
     int ret = -1;
     ssize_t len = 0;
@@ -129,14 +132,56 @@ int floor_load_model(const char* path) {
 
     return ret;
 }
+static void _observer_on_motion(struct motion_data* data) {
+    if (!data)
+        return;
+    if (data->state == STOPPED) {
+        double height = data->distance;
+        HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f\n", __FUNCTION__, __LINE__, height, data->pressure);
+
+        if (_floor_calibration) {
+            struct floor* f = &_building.model[_floor_calibration_index];
+            f->height = height;
+            if (_floor_calibration_index < _building.floors_under_base) {
+                f->num = _floor_calibration_index - _building.floors_under_base;
+            } else {
+                f->num = _floor_calibration_index - _building.floors_under_base + _building.base_floor_num;
+            }
+            snprintf(f->label, sizeof(f->label), "%d", f->num);
+            HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
+
+            _floor_calibration_index++;
+            // we can not detect the last floor
+            if (_floor_calibration_index == _building.floor_nums - 1) {
+                _floor_calibration = 0;
+
+                HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
+            }
+        }
+    }
+}
+
+static struct core_observer _floor_observer = {
+    .on_motion = _observer_on_motion,
+};
 
 int floor_init() {
     floor_load_model("floor_model.json");
+    core_register_observer(&_floor_observer);
 }
 
 // return predict floor according height
 int floor_predict(double height, int* num, char* label, int length) {
     int i = 0;
+
+    if (!num || !label) {
+        return -1;
+    }
+
+    // not support when calibration
+    if (_floor_calibration) {
+        return -1;
+    }
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
         if (height > f->height_relative - f->height / 2 &&
@@ -147,6 +192,9 @@ int floor_predict(double height, int* num, char* label, int length) {
         }
     }
 
+    HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
+    // dundi
+
     // exception
     return -1;
 }
@@ -154,7 +202,15 @@ int floor_predict(double height, int* num, char* label, int length) {
 // height relative to base floor
 int floor_relative_height(int num, double* height) {
     int i = 0;
-    if (!height) return -1;
+    if (!height) {
+        return -1;
+    }
+
+    // not support when calibration
+    if (_floor_calibration) {
+        return -1;
+    }
+
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
         if (f->num == num) {
@@ -164,4 +220,36 @@ int floor_relative_height(int num, double* height) {
     }
 
     return -1;
+}
+
+// base_floor: 0 or 1
+int floor_enter_calibration(int floors_under_base, int base_floor, int floors_max) {
+    _floor_calibration = 1;
+    _floor_calibration_index = 0;
+
+    if (_building.model && _building.floor_nums != floors_max) {
+        free(_building.model);
+        _building.floor_nums = 0;
+    }
+
+    if (!_building.model) {
+        _building.model = (struct floor*)calloc(sizeof(struct floor), floors_max);
+        if (!_building.model) {
+            return -1;
+        }
+        _building.floor_nums = floors_max;
+    }
+
+    memset((void*)_building.model, 0, sizeof(struct floor) * _building.floor_nums);
+
+    // initialize base floor
+    _building.base_floor_num = base_floor;
+    _building.floors_under_base = floors_under_base;
+
+    struct floor* bf = &_building.model[floors_under_base];
+    bf->height_relative = 0;
+    bf->num = base_floor;
+    snprintf(bf->label, sizeof(bf->label), "%d", base_floor);
+
+    return 0;
 }

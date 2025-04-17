@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     // return 0;;
     core_run();
 
+    floor_enter_calibration(1, 1, 23);
     while (1) {
         sleep(2);
     }
