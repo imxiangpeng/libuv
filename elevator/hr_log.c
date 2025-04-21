@@ -78,7 +78,8 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     }
     va_end(ap);
 
-    // printf("%s", buf);
+    printf("%s", buf);
+#if 0
     // syslog(LOG_SYSLOG, "%s", buf);
     if (!persist_fp) {
         char path[256] = "./hrlog-";
@@ -96,6 +97,7 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     if (persist_fp) {
         fprintf(persist_fp, "%s", buf);
     }
+#endif
 
     return 0;
 }

@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-// #include <tinyekf.h>
 #include "butterworth_filter.h"
 #include "hr_log.h"
 #include "sensor.h"
@@ -24,12 +23,12 @@
     (type*)((char*)__mptr - offsetof(type, member));  \
 })
 
-enum motion_state {
+/*enum motion_state {
     MOTION_STATE_STOPPED = 0,
     MOTION_STATE_STARTING,
     MOTION_STATE_CONSTANT,
     MOTION_STATE_SLOWING,
-};
+};*/
 
 struct moving_window {
     int capability;
@@ -46,7 +45,7 @@ struct motion_stream {
 
     int sampling_frequency;
     struct sensor_device* sensor;
-    struct filter* filter;
+    // struct filter* filter;
     struct butterworth_filter* bw_filter;
 
     double distance;
@@ -55,7 +54,7 @@ struct motion_stream {
     double high;
 
     double G;
-    enum motion_state state;
+    // enum motion_state state;
 
     int calibration;
     int calibration_retries;
@@ -126,6 +125,7 @@ static void calibration(struct motion_stream* m, double accel) {
         }
     }
 }
+
 static int accelerometer_motion_stream_read(struct stream* stream, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
@@ -206,7 +206,12 @@ static int accelerometer_motion_stream_calibration_enter(struct stream* stream) 
     return 0;
 }
 static int accelerometer_motion_stream_calibration_completed(struct stream* stream) {
-    return 0;
+     struct motion_stream* ms = container_of(stream, struct motion_stream, self);
+    if (!stream || !ms) {
+        return -1;
+    }
+
+    return ms->calibration;
 }
 
 static int accelerometer_motion_stream_reset(struct stream* stream) {
