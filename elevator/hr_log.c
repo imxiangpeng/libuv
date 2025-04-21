@@ -24,7 +24,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOG_BUF_SIZE 1024
+#define LOG_BUF_SIZE 1024 * 2
 
 static FILE* persist_fp = NULL;
 

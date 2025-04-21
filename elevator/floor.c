@@ -1,12 +1,21 @@
+
+#define _GNU_SOURCE
+#include <fcntl.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
 #include "core.h"
 #include "file_util.h"
 #include "hr_log.h"
 
 #include "cjson/cJSON.h"
 
+#define FLOOR_MODEL_VERSION "1.0"
 struct floor {
     int num;
     char label[64];  // name
@@ -132,12 +141,89 @@ int floor_load_model(const char* path) {
 
     return ret;
 }
+
+static int _replace_floor_model_config(const char* path, char* data, int size) {
+    int fd = -1;
+    char* tmp = NULL;
+    int tmp_len = 0;
+
+    const char* TMPFILE_TEMPLATE = "tmp_XXXXXX";
+
+    tmp_len = strlen(path) + strlen(TMPFILE_TEMPLATE) + 1;  // + '\0'
+
+    tmp = (char*)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
+    if (!tmp)
+        return -1;
+
+    snprintf(tmp, tmp_len, "%s%s", path, TMPFILE_TEMPLATE);
+    fd = mkostemp(tmp, O_RDWR | O_TRUNC | O_CREAT);
+    if (fd < 0) {
+        free(tmp);
+        return -1;
+    }
+
+    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
+
+    futil_write_fd(fd, data, size);
+
+    close(fd);
+
+    HR_LOGD("replace %s with :%s\n", path, tmp);
+    unlink(path);
+    rename(tmp, path);
+
+    free(tmp);
+}
+static int floor_store_model() {
+    int i = 0;
+    struct tm tm;
+    struct timespec ts;
+    char tmp[64] = {0};
+    cJSON *root = NULL, *floor_array = NULL;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    strftime(tmp, sizeof(tmp) - 1, "%Y.%m.%d %H:%M:%S", &tm);
+
+    root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "version", FLOOR_MODEL_VERSION);
+    cJSON_AddStringToObject(root, "date", tmp);
+    cJSON_AddNumberToObject(root, "base_num", _building.base_floor_num);
+
+    floor_array = cJSON_AddArrayToObject(root, "floor");
+    if (!floor_array) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    for (i = 0; i < _building.floor_nums; i++) {
+        struct floor* f = &_building.model[i];
+        cJSON* ele = cJSON_CreateObject();
+        if (!ele) {
+            cJSON_Delete(root);
+            return -1;
+        }
+        cJSON_AddItemToArray(floor_array, ele);
+        cJSON_AddNumberToObject(ele, "num", (double)f->num);
+        snprintf(tmp, sizeof(tmp), "%d", f->num);
+        cJSON_AddStringToObject(ele, "name", tmp);
+        cJSON_AddNumberToObject(ele, "height", f->height);
+    }
+
+    char* data = cJSON_Print(root);
+    HR_LOGD("floor model:%s\n", data);
+_replace_floor_model_config("floor_model_generated.json", data, strlen(data));
+    free(data);
+    cJSON_Delete(root);
+    return 0;
+}
 static void _observer_on_motion(struct motion_data* data) {
     if (!data)
         return;
     if (data->state == STOPPED) {
         double height = data->distance;
-        HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f\n", __FUNCTION__, __LINE__, height, data->pressure);
+        HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f, _floor_calibration:%d\n", __FUNCTION__, __LINE__, height, data->pressure, _floor_calibration);
 
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
@@ -151,11 +237,13 @@ static void _observer_on_motion(struct motion_data* data) {
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
 
             _floor_calibration_index++;
+            HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d, floor_nums:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index, _building.floor_nums);
             // we can not detect the last floor
-            if (_floor_calibration_index == _building.floor_nums - 1) {
+            if (_floor_calibration_index == _building.floor_nums) {
                 _floor_calibration = 0;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
+                floor_store_model();
             }
         }
     }
@@ -229,6 +317,7 @@ int floor_enter_calibration(int floors_under_base, int base_floor, int floors_ma
 
     if (_building.model && _building.floor_nums != floors_max) {
         free(_building.model);
+        _building.model = NULL;
         _building.floor_nums = 0;
     }
 
