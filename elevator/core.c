@@ -3,6 +3,7 @@
 #include <math.h>
 // #include <ncurses.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,10 @@ static const double G0 = 9.81;
 static struct core_observer* _observers[10] = {0};
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
 static int BAROMETER_SAMPLE_RATE_HZ = 20;
+
+// 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
+// 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
+static double BAROMETER_WINDOW_DELAY_SECONDS = 1;
 
 static double MOVEMENT_THRESHOLD = 0.1f;
 static double VELOCITY_ZUPT_THRESHOLD = 0.1f;
@@ -88,7 +93,7 @@ struct moving_window {
     double mean;
     double stddev;
     double mean_prev;
-    double stddev_prev;
+    // double stddev_prev;
 };
 
 static double velocity = 0;
@@ -117,10 +122,12 @@ struct barometer_motion {
     double height;
     double distance;
     double velocity;
+
+    struct moving_window* mw;
+    int64_t delay_stop_ts_ns;
 } _barometer_motion;
 
 static struct moving_window* _accel_moving_w = NULL;
-static struct moving_window* _barometer_moving_w = NULL;
 
 static int notify_observer(enum observer_action action, void* data);
 
@@ -136,7 +143,7 @@ struct moving_window* moving_window_init(int size) {
     w->data = (double*)((char*)w + ss);
 
     w->stddev = NAN;
-    w->stddev_prev = NAN;
+    // w->stddev_prev = NAN;
     return w;
 }
 
@@ -164,7 +171,6 @@ static int moving_window_update(struct moving_window* w, double val) {
     }
 
     w->mean_prev = w->mean;
-    w->stddev_prev = w->stddev;
 
     w->mean = w->sum / w->size;
     // HR_LOGD("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
@@ -260,10 +266,6 @@ static void* _accelerometer_thread_routin(void* args) {
         return NULL;
     }
 
-    if (!_barometer_moving_w) {
-        HR_LOGE("error: can not init moving avg window\n");
-        return NULL;
-    }
 #if DUMP_DATA_TO_FILE
     if (_dump_fp) {
         snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,baro_height\n");
@@ -356,7 +358,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance,barometer_distance);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_distance);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -391,15 +393,15 @@ static void* _barometer_thread_routin(void* args) {
     int floor_num = 0;
     char floor_label[64] = {0};
 
-#if 0    
-    if (!_barometer_moving_w) {
+#if 1
+    if (!_barometer_motion.mw) {
         HR_LOGE("error: can not init moving avg window\n");
         return NULL;
     }
 #endif
 
     struct stream* input = _barometer_motion.stream;
-    double result[4] = {0};  // {pressure, velocity, distance}
+    double result[4] = {0};  // {pressure, temp}
 
     enum motion_state prev_state = STOPPED;
     double prev_pressure = 0;
@@ -418,17 +420,19 @@ static void* _barometer_thread_routin(void* args) {
         }
 
         double pressure = result[0];
+        double temp = result[1];
         // double velocity = round(result[1] * 100) / 100;
         // double distance = round(result[2] * 1000) / 1000;
 
+        moving_window_update(_barometer_motion.mw, pressure);
         HR_LOGD("%s(%d): now:%ld, pressure:%f\n", __FUNCTION__, __LINE__, now, pressure);
         if (prev_pressure == 0) {
             prev_pressure = pressure;
         }
 
         // detect jump
-        if (fabs(prev_pressure - pressure) > 50) {
-            barometer_height_discontinuous += calculate_height_difference(prev_pressure, pressure, 25);
+        if (fabs(pressure - prev_pressure) > 50) {
+            barometer_height_discontinuous += calculate_height_difference(prev_pressure, pressure, temp);
             HR_LOGD("%s(%d): mxp jump ... now:%ld, pressure:%f, previous:%f, height:%f\n",
                     __FUNCTION__, __LINE__,
                     now, pressure, prev_pressure, barometer_height_discontinuous);
@@ -439,22 +443,35 @@ static void* _barometer_thread_routin(void* args) {
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {
             prev_state = _accelerometer_motion.state;
             // we should record last 2 second pressure's avg
+            HR_LOGD("mxp last mean:%f vs current %f\n", _barometer_motion.mw->mean, pressure);
             barometer_begin = pressure;
             prev_state = _accelerometer_motion.state;
+            _barometer_motion.delay_stop_ts_ns = 0;
+            
+            // reset discontinuous value before running
+            barometer_height_discontinuous = 0;
         }
         if (_accelerometer_motion.state == STOPPED && prev_state != STOPPED) {
             prev_state = STOPPED;
 
-            // we should record last 2 second pressure's avg
-            barometer_end = pressure;
+            _barometer_motion.delay_stop_ts_ns = get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
+            HR_LOGD("delay finished ....... delay_stop_ts_ns:%ld, current pressure:%f\n", _barometer_motion.delay_stop_ts_ns, pressure);
+        }
 
-            barometer_distance += calculate_height_difference(barometer_begin, barometer_end, 27.7);
+        // should verify state is stopped
+        if (_barometer_motion.delay_stop_ts_ns != 0) {
+            if (now > _barometer_motion.delay_stop_ts_ns) {
+                _barometer_motion.delay_stop_ts_ns = 0;
+                barometer_end = pressure;
 
-            HR_LOGD("%s(%d): mxp finished ... now:%ld, pressure begin:%f, end:%f, height:%f, discontinus:%f\n",
-                    __FUNCTION__, __LINE__,
-                    now, barometer_begin, barometer_end, barometer_distance,
-                    barometer_height_discontinuous);
-            barometer_height_discontinuous = 0;
+                barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
+
+                HR_LOGD("%s(%d): mxp finished ... now:%ld, pressure begin:%f, end:%f, height:%f, discontinus:%f\n",
+                        __FUNCTION__, __LINE__,
+                        now, barometer_begin, barometer_end, barometer_distance,
+                        barometer_height_discontinuous);
+                barometer_height_discontinuous = 0;
+            }
         }
 
     next_iteration:
@@ -503,7 +520,7 @@ int core_initalize(int argc, char** argv) {
 
     _accelerometer_motion.stream = accelerometer_motion_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
     // simulate data, initialize floor
-    _accelerometer_motion.height = -6.1;
+    // _accelerometer_motion.height = -6.1;
 
     if (!_accelerometer_motion.stream) {
         HR_LOGE("can not find accelerometer ...\n");
@@ -526,8 +543,8 @@ int core_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_moving_w = moving_window_init(BAROMETER_SAMPLE_RATE_HZ);
-    if (!_barometer_moving_w) {
+    _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ * BAROMETER_WINDOW_DELAY_SECONDS);
+    if (!_barometer_motion.mw) {
         moving_window_deinit(_accel_moving_w);
         return -1;
     }
@@ -619,8 +636,8 @@ int core_run(void) {
     core_acceleration_start();
     // wait device still
 
-    //core_barometer_start();
-    // HR_LOGD("now device is ready ...\n");
+    // core_barometer_start();
+    //  HR_LOGD("now device is ready ...\n");
 
     return 0;
 }

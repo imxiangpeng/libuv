@@ -12,7 +12,6 @@ extern struct sensor_device sensor_bmp388_temperature;
 #if USE_LOCAL_SIMULATE_DATA
 extern struct sensor_device sensor_simulate_accelerometer;
 extern struct sensor_device sensor_simulate_barometer;
-extern struct sensor_device sensor_simulate_temperature;
 #endif
 
 static struct sensor_device* _sensor_devices[_SENSOR_MAX] = {
@@ -27,7 +26,6 @@ int sensor_manager_init() {
 #if USE_LOCAL_SIMULATE_DATA
     _sensor_devices[SENSOR_ACCELEROMETER] = &sensor_simulate_accelerometer;
     _sensor_devices[SENSOR_BAROMETER] = &sensor_simulate_barometer;
-    _sensor_devices[SENSOR_TEMPERATURE] = &sensor_simulate_temperature;
 #endif
     for (i = 0; i < _SENSOR_MAX; i++) {
         struct sensor_device* sensor = sensor_manager_get_device(SENSOR_ACCELEROMETER);

@@ -158,6 +158,7 @@ static int barometer_read(struct sensor_data* data) {
     sdb->self.type = SENSOR_BAROMETER;
 
     sdb->pressure = _current_record.pressure;
+    sdb->temperature = _current_record.temperature;
 
     return 0;
 }
@@ -170,38 +171,3 @@ struct sensor_device sensor_simulate_barometer = {
     .configure = barometer_configure,
     .read = barometer_read,
     .close = barometer_close};
-
- 
-static int temperature_init() {
-    return 0;
-}
-static int temperature_configure(int sampling_rate) {
-    // why sampling_frequency is not device's attribute?
-    return 0;
-}
-
-static int temperature_read(struct sensor_data* data) {
-    int i = 0;
-    char* p = NULL;
-    struct sensor_data_temperature* sdt = (struct sensor_data_temperature*)data;
-    if (!sdt) {
-        return -1;
-    }
-
-    // use cached data
-    sdt->self.type = SENSOR_TEMPERATURE;
-    sdt->temperature = _current_record.temperature;
-
-    return 0;
-}
-static int temperature_close() {
-    return 0;
-}
-
-struct sensor_device sensor_simulate_temperature = {
-    .init = temperature_init,
-    .configure = temperature_configure,
-    .read = temperature_read,
-    .close = temperature_close};
-
-      

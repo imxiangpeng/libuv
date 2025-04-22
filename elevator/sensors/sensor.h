@@ -32,6 +32,7 @@ struct sensor_data_gyroscope {
 struct sensor_data_barometer{
     struct sensor_data self;
     double pressure;
+    double temperature;
 };
 
 struct sensor_data_temperature {

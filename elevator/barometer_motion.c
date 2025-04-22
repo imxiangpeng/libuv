@@ -62,7 +62,7 @@ static int barometer_motion_read(struct stream* stream, void* data, size_t count
     }
 
     p[0] = sensor.pressure;
-    // p[0] = sensor.pressure;
+    p[1] = sensor.temperature;
     return 0;
 }
 
@@ -130,6 +130,7 @@ struct stream* barometer_motion_stream_init(int sampling_frequency) {
 
     bm->pressure_device->read(&baro.self);
 
+#if 0    
     bm->temperature_device = sensor_manager_get_device(SENSOR_TEMPERATURE);
 
     if (0 != bm->temperature_device->init()) {
@@ -138,6 +139,7 @@ struct stream* barometer_motion_stream_init(int sampling_frequency) {
     }
 
     bm->temperature_device->read(&temp.self);
+#endif
 
     bm->calibration = 0;
 
