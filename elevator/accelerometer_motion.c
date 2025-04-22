@@ -1,3 +1,5 @@
+#include "accelerometer_motion.h"
+
 #include <assert.h>
 #include <math.h>
 #include <stddef.h>
@@ -6,10 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
 #include "butterworth_filter.h"
 #include "hr_log.h"
+#include "moving_window.h"
 #include "sensor.h"
-#include "stream.h"
 #include "time_utils.h"
 
 #define EKF_N 4  // only accel
@@ -22,30 +25,11 @@
     const typeof(((type*)0)->member)* __mptr = (ptr); \
     (type*)((char*)__mptr - offsetof(type, member));  \
 })
-
-/*enum motion_state {
-    MOTION_STATE_STOPPED = 0,
-    MOTION_STATE_STARTING,
-    MOTION_STATE_CONSTANT,
-    MOTION_STATE_SLOWING,
-};*/
-
-struct moving_window {
-    int capability;
-    double* data;
-    int index;
-    int size;
-    double sum;
-    double mean;
-    double stddev;
-};
-
-struct motion_stream {
-    struct stream self;
+struct accelerometer_motion {
+    struct motion self;
 
     int sampling_frequency;
-    struct sensor_device* sensor;
-    // struct filter* filter;
+    struct sensor* sensor;
     struct butterworth_filter* bw_filter;
 
     double distance;
@@ -54,7 +38,6 @@ struct motion_stream {
     double high;
 
     double G;
-    // enum motion_state state;
 
     int calibration;
     int calibration_retries;
@@ -85,16 +68,13 @@ static double _distance = 0;
 static double _bw_velocity = 0;
 static double _bw_distance = 0;
 
-static void _ekf_run_model(struct motion_stream* self, double input, double dt);
-
-static struct moving_window* moving_window_init(int size);
-static int moving_window_update(struct moving_window* w, double val);
+static void _ekf_run_model(struct accelerometer_motion* self, double input, double dt);
 
 static double calculate_veritical_acceleration(double x, double y, double z) {
     return sqrt(x * x + y * y + z * z) * (z < 0 ? -1 : 1);
 }
 
-static void calibration(struct motion_stream* m, double accel) {
+static void calibration(struct accelerometer_motion* m, double accel) {
     if (m->calibration != 0) {
         return;
     }
@@ -126,13 +106,13 @@ static void calibration(struct motion_stream* m, double accel) {
     }
 }
 
-static int accelerometer_motion_stream_read(struct stream* stream, void* data, size_t count) {
+static int accelerometer_motion_run_once(struct motion* stream, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
     double* p = (double*)data;
     double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
-    struct motion_stream* ms = container_of(stream, struct motion_stream, self);
+    struct accelerometer_motion* ms = container_of(stream, struct accelerometer_motion, self);
     if (!stream || !ms) {
         return -1;
     }
@@ -195,8 +175,8 @@ static int accelerometer_motion_stream_read(struct stream* stream, void* data, s
     return 0;
 }
 
-static int accelerometer_motion_stream_calibration_enter(struct stream* stream) {
-    struct motion_stream* ms = container_of(stream, struct motion_stream, self);
+static int accelerometer_motion_calibration_enter(struct motion* stream) {
+    struct accelerometer_motion* ms = container_of(stream, struct accelerometer_motion, self);
     if (!stream || !ms) {
         return -1;
     }
@@ -205,8 +185,8 @@ static int accelerometer_motion_stream_calibration_enter(struct stream* stream) 
     ms->calibration_retries = 0;
     return 0;
 }
-static int accelerometer_motion_stream_calibration_completed(struct stream* stream) {
-     struct motion_stream* ms = container_of(stream, struct motion_stream, self);
+static int accelerometer_motion_calibration_completed(struct motion* stream) {
+    struct accelerometer_motion* ms = container_of(stream, struct accelerometer_motion, self);
     if (!stream || !ms) {
         return -1;
     }
@@ -214,11 +194,11 @@ static int accelerometer_motion_stream_calibration_completed(struct stream* stre
     return ms->calibration;
 }
 
-static int accelerometer_motion_stream_reset(struct stream* stream) {
+static int accelerometer_motion_reset(struct motion* stream) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
     ekf_t* ekf = NULL;  //&self->ekf;
-    struct motion_stream* ms = container_of(stream, struct motion_stream, self);
+    struct accelerometer_motion* ms = container_of(stream, struct accelerometer_motion, self);
     if (!stream || !ms) {
         return -1;
     }
@@ -233,28 +213,28 @@ static int accelerometer_motion_stream_reset(struct stream* stream) {
 
     return 0;
 }
-static int accelerometer_motion_stream_close(struct stream* stream) {
+static int accelerometer_motion_close(struct motion* stream) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }
 
-struct stream* accelerometer_motion_stream_init(int sampling_frequency) {
+struct motion* accelerometer_motion_init(int sampling_frequency) {
     int ret = 0;
     int i = 0;
     double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
-    struct motion_stream* ms = (struct motion_stream*)calloc(1, sizeof(struct motion_stream));
+    struct accelerometer_motion* ms = (struct accelerometer_motion*)calloc(1, sizeof(struct accelerometer_motion));
     if (!ms) {
         return NULL;
     }
 
     ms->G = G;
     ms->sampling_frequency = sampling_frequency;
-    ms->self.enter_calibration = accelerometer_motion_stream_calibration_enter;
-    ms->self.calibration_completed = accelerometer_motion_stream_calibration_completed;
-    ms->self.runonce = accelerometer_motion_stream_read;
-    ms->self.reset = accelerometer_motion_stream_reset;
-    ms->self.close = accelerometer_motion_stream_close;
+    ms->self.enter_calibration = accelerometer_motion_calibration_enter;
+    ms->self.calibration_completed = accelerometer_motion_calibration_completed;
+    ms->self.runonce = accelerometer_motion_run_once;
+    ms->self.reset = accelerometer_motion_reset;
+    ms->self.close = accelerometer_motion_close;
 
     ms->bw_filter = butterworth_filter_init(5, sampling_frequency);
 
@@ -297,61 +277,7 @@ struct stream* accelerometer_motion_stream_init(int sampling_frequency) {
 
     return &ms->self;
 }
-
-static struct moving_window* moving_window_init(int size) {
-    // data is append at end of struct moving_avg_window
-    // make sure it's align on 4 bytes
-    int ss = ((sizeof(struct moving_window) + 3) / 4) * 4;
-    struct moving_window* w = (struct moving_window*)calloc(1, ss + size * sizeof(double));
-    if (!w) {
-        return NULL;
-    }
-    w->capability = size;
-    w->data = (double*)((char*)w + ss);
-
-    w->stddev = NAN;
-    return w;
-}
-
-static int moving_window_update(struct moving_window* w, double val) {
-    double var_sum = 0.0;
-
-    if (!w) {
-        return -1;
-    }
-
-    // window full
-    // remove old value from sum
-    if (w->size == w->capability) {
-        w->sum -= w->data[w->index];
-    }
-    w->data[w->index] = val;
-    w->sum += val;
-    w->index = (w->index + 1) % w->capability;  // circle buffer
-    if (w->size != w->capability) {
-        w->size++;
-    }
-
-    if (w->size != w->capability) {
-        return -1;  // not full window
-    }
-
-    w->mean = w->sum / w->size;
-    // HR_LOGD("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
-    for (int i = 0; i < w->size; i++) {
-        // HR_LOGD("%f", w->data[i]);
-        // if (i != w->size - 1) {
-        //     HR_LOGD(" ");
-        // }
-        var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
-    }
-    // HR_LOGD("\n");
-
-    w->stddev = sqrt(var_sum / w->size);
-    return 0;
-}
-
-static void _ekf_run_model(struct motion_stream* self, double input, double dt) {
+static void _ekf_run_model(struct accelerometer_motion* self, double input, double dt) {
     // double dt = 0.01;
     ekf_t* ekf = NULL;  //&self->ekf;
     double linear_accel = 0;

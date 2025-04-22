@@ -1,7 +1,6 @@
 #include <errno.h>
 #include <float.h>
 #include <math.h>
-// #include <ncurses.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,13 +10,14 @@
 
 #include "accelerometer_motion.h"
 #include "barometer_motion.h"
-#include "core.h"
 #include "floor.h"
 #include "hr_log.h"
-#include "sensors/sensor.h"
+#include "motion.h"
+#include "moving_window.h"
 #include "time_utils.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+// please define it when release version
 // #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
 
 // 海平面标准气压 (Pa)
@@ -32,21 +32,22 @@ static const double PRESSURE_M = 0.0289644;
 
 static const double G0 = 9.81;
 
-static struct core_observer* _observers[10] = {0};
+static struct motion_observer* _motion_observers[10] = {0};
+
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
-static int BAROMETER_SAMPLE_RATE_HZ = 20;
+static int BAROMETER_SAMPLE_RATE_HZ = 10;
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
 static double BAROMETER_WINDOW_DELAY_SECONDS = 1;
 
-static double MOVEMENT_THRESHOLD = 0.1f;
-static double VELOCITY_ZUPT_THRESHOLD = 0.1f;
+// 低于该速度的时候不更新状态，保持原有状态
+static double VELOCITY_ZUPT_THRESHOLD = 0.1;
+
+static const double BAROMETER_DISCONTINUOUS_THRESHOLD = 50.0;
 
 static pthread_t _accel_tid = 0;
 static pthread_t _barometer_tid = 0;
-
-static double _G = 9.823;
 
 #define MAX_LINE_LENGTH 1000
 
@@ -56,45 +57,7 @@ static double _G = 9.823;
 static FILE* _dump_fp = NULL;
 #endif
 
-// -1: not enough data, fill again
-// 0: not stable
-// 1: stable
-enum {
-    JITTER_UNKNOWN = 0,
-    JITTER_STABLE,
-    JITTER_UNSTABLE
-};
-
-typedef enum {
-    STATE_STILL,
-    STATE_MOVING_UP,
-    STATE_MOVING_DOWN,
-
-} motion_state_e;
-
-typedef enum {
-    ELEVATOR_UNKNOWN = 0,
-    ELEVATOR_STOPPED,
-    ELEVATOR_STARTING,
-    ELEVATOR_CONSTANT,
-    ELEVATOR_SLOWING
-} ElevatorState;
-
-static ElevatorState _elevator_state = ELEVATOR_STOPPED;
-
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
-
-struct moving_window {
-    int capability;
-    double* data;
-    int index;
-    int size;
-    double sum;
-    double mean;
-    double stddev;
-    double mean_prev;
-    // double stddev_prev;
-};
 
 static double velocity = 0;
 static double distance = 0;
@@ -109,7 +72,7 @@ static double barometer_end = 0;
 static double barometer_height_discontinuous = 0;
 
 struct accelerometer_motion {
-    struct stream* stream;
+    struct motion* stream;
     double height;    // --> physical height
     double distance;  // current running distance, maybe reset to zero when running finished
     double velocity;  // velocity, +-
@@ -118,7 +81,7 @@ struct accelerometer_motion {
 } _accelerometer_motion;
 
 struct barometer_motion {
-    struct stream* stream;
+    struct motion* stream;
     double height;
     double distance;
     double velocity;
@@ -129,110 +92,9 @@ struct barometer_motion {
 
 static struct moving_window* _accel_moving_w = NULL;
 
-static int notify_observer(enum observer_action action, void* data);
+static int notify_observer(enum motion_observer_action action, void* data);
 
-struct moving_window* moving_window_init(int size) {
-    // data is append at end of struct moving_avg_window
-    // make sure it's align on 4 bytes
-    int ss = ((sizeof(struct moving_window) + 3) / 4) * 4;
-    struct moving_window* w = (struct moving_window*)calloc(1, ss + size * sizeof(double));
-    if (!w) {
-        return NULL;
-    }
-    w->capability = size;
-    w->data = (double*)((char*)w + ss);
-
-    w->stddev = NAN;
-    // w->stddev_prev = NAN;
-    return w;
-}
-
-static int moving_window_update(struct moving_window* w, double val) {
-    double var_sum = 0.0;
-
-    if (!w) {
-        return -1;
-    }
-
-    // window full
-    // remove old value from sum
-    if (w->size == w->capability) {
-        w->sum -= w->data[w->index];
-    }
-    w->data[w->index] = val;
-    w->sum += val;
-    w->index = (w->index + 1) % w->capability;  // circle buffer
-    if (w->size != w->capability) {
-        w->size++;
-    }
-
-    if (w->size != w->capability) {
-        return -1;  // not full window
-    }
-
-    w->mean_prev = w->mean;
-
-    w->mean = w->sum / w->size;
-    // HR_LOGD("capability:%d, index:%d, size:%d, mean:%f :\n", w->capability, w->index, w->size, w->mean);
-    for (int i = 0; i < w->size; i++) {
-        // HR_LOGD("%f", w->data[i]);
-        // if (i != w->size - 1) {
-        //     HR_LOGD(" ");
-        // }
-        var_sum += (w->data[i] - w->mean) * (w->data[i] - w->mean);
-    }
-    // HR_LOGD("\n");
-
-    w->stddev = sqrt(var_sum / w->size);
-    return 0;
-}
-
-static int moving_window_trim_avg(struct moving_window* w, double* val) {
-    double max = -DBL_MAX;
-    double min = DBL_MAX;
-    if (w->size < 3) {
-        return -1;
-    }
-
-    for (int i = 0; i < w->size; ++i) {
-        double val = w->data[i];
-        if (val > max) {
-            max = val;
-        }
-        if (val < min) {
-            min = val;
-        }
-    }
-
-    *val = (w->sum - max - min) / (w->size - 2);
-
-    return 0;
-}
-
-static int moving_window_deinit(struct moving_window* w) {
-    if (!w) {
-        return -1;
-    }
-
-    free(w);
-    return 0;
-}
-int moving_window_is_stable(struct moving_window* w, double val) {
-    if (moving_window_update(w, val) != 0) {
-        return JITTER_UNKNOWN;
-    }
-
-    HR_LOGD("stddev:%f\n", w->stddev);
-    if (w->stddev < ACCEL_JITTER_STD_THRESHOLD) {
-        return JITTER_STABLE;
-    }
-
-    return JITTER_UNSTABLE;
-}
-
-static int MOVEMENT_FRAME_COUNT = 30;
-
-const char* motion_state_str(enum motion_state state) {
+static const char* motion_state_str(enum motion_state state) {
     switch (state) {
         case STOPPED:
             return "stopped";
@@ -245,18 +107,15 @@ const char* motion_state_str(enum motion_state state) {
     }
 }
 
-double calculate_height_difference(double pressure1, double pressure2, double temperature) {
+static double calculate_height_difference(double p0, double p1, double temperature) {
     static double fac = PRESSURE_L * PRESSURE_R / PRESSURE_M / G0;
-    return ((temperature + 273.15) / L) * (1 - pow(pressure2 / pressure1, fac /*0.190284*/));
+    return ((temperature + 273.15) / L) * (1 - pow(p1 / p0, fac /*0.190284*/));
 }
+
 static void* _accelerometer_thread_routin(void* args) {
     char buf[MAX_LINE_LENGTH] = {0};
     int over_threshold_count = 0;
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
-    MOVEMENT_FRAME_COUNT = ACCELEROMETER_SAMPLE_RATE_HZ / 10;
-    //
-    ElevatorState state = ELEVATOR_STOPPED;
-    ElevatorState state_pending = ELEVATOR_UNKNOWN;
 
     int floor_num = 0;
     char floor_label[64] = {0};
@@ -273,7 +132,7 @@ static void* _accelerometer_thread_routin(void* args) {
     }
 #endif
 
-    struct stream* input = _accelerometer_motion.stream;
+    struct motion* input = _accelerometer_motion.stream;
     double result[4] = {0};
     for (;;) {
         struct timespec spec;
@@ -320,7 +179,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     .state = new_state,
                     .distance = distance};
 
-                notify_observer(OBSERVER_ACTION_ON_MOTION, &md);
+                notify_observer(MOTION_OBSERVER_ACTION_ON_MOTION, &md);
             }
             if (new_state == STOPPED) {
                 HR_LOGD("stopping------------------------>\n");
@@ -348,7 +207,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     .state = new_state,
                     .distance = distance};
 
-                notify_observer(OBSERVER_ACTION_ON_MOTION, &md);
+                notify_observer(MOTION_OBSERVER_ACTION_ON_MOTION, &md);
             }
             _accelerometer_motion.state = new_state;
         }
@@ -363,8 +222,8 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 #endif
 
-        struct status_data stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
-        notify_observer(OBSERVER_ACTION_ON_STATUS, &stat);
+        struct motion_status stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
+        notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
 
     next_iteration:
         // HR_LOGD("now:%ld, a:%f, stddev:%f, mean:%f\n", now, data.accel_z, stddev, w->mean);
@@ -393,18 +252,16 @@ static void* _barometer_thread_routin(void* args) {
     int floor_num = 0;
     char floor_label[64] = {0};
 
-#if 1
+    struct motion* input = _barometer_motion.stream;
+    double result[2] = {0};  // {pressure, temp}
+
+    enum motion_state prev_state = STOPPED;
+    double prev_pressure = 0;
+
     if (!_barometer_motion.mw) {
         HR_LOGE("error: can not init moving avg window\n");
         return NULL;
     }
-#endif
-
-    struct stream* input = _barometer_motion.stream;
-    double result[4] = {0};  // {pressure, temp}
-
-    enum motion_state prev_state = STOPPED;
-    double prev_pressure = 0;
 
     while (1) {
         struct timespec spec;
@@ -425,7 +282,7 @@ static void* _barometer_thread_routin(void* args) {
         // double distance = round(result[2] * 1000) / 1000;
 
         moving_window_update(_barometer_motion.mw, pressure);
-        HR_LOGD("%s(%d): now:%ld, pressure:%f\n", __FUNCTION__, __LINE__, now, pressure);
+
         if (prev_pressure == 0) {
             prev_pressure = pressure;
         }
@@ -447,7 +304,7 @@ static void* _barometer_thread_routin(void* args) {
             barometer_begin = pressure;
             prev_state = _accelerometer_motion.state;
             _barometer_motion.delay_stop_ts_ns = 0;
-            
+
             // reset discontinuous value before running
             barometer_height_discontinuous = 0;
         }
@@ -511,14 +368,14 @@ int dump_data_init() {
 }
 #endif
 
-int core_initalize(int argc, char** argv) {
+int motion_initalize(int argc, char** argv) {
 #if DUMP_DATA_TO_FILE
     dump_data_init();
 #endif
 
     memset((void*)&_accelerometer_motion, 0, sizeof(_accelerometer_motion));
 
-    _accelerometer_motion.stream = accelerometer_motion_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
+    _accelerometer_motion.stream = accelerometer_motion_init(ACCELEROMETER_SAMPLE_RATE_HZ);
     // simulate data, initialize floor
     // _accelerometer_motion.height = -6.1;
 
@@ -537,7 +394,7 @@ int core_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_motion.stream = barometer_motion_stream_init(BAROMETER_SAMPLE_RATE_HZ);
+    _barometer_motion.stream = barometer_motion_init(BAROMETER_SAMPLE_RATE_HZ);
     if (!_barometer_motion.stream) {
         HR_LOGE("can not find barometer ...\n");
         return -1;
@@ -545,7 +402,7 @@ int core_initalize(int argc, char** argv) {
 
     _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ * BAROMETER_WINDOW_DELAY_SECONDS);
     if (!_barometer_motion.mw) {
-        moving_window_deinit(_accel_moving_w);
+        moving_window_release(_accel_moving_w);
         return -1;
     }
 
@@ -631,7 +488,7 @@ static int core_barometer_start(void) {
     return 0;
 }
 
-int core_run(void) {
+int motion_run(void) {
     core_barometer_start();
     core_acceleration_start();
     // wait device still
@@ -642,13 +499,13 @@ int core_run(void) {
     return 0;
 }
 
-int core_register_observer(struct core_observer* observer) {
+int motion_register_observer(struct motion_observer* observer) {
     int i = 0;
 
-    for (i = 0; i < ARRAY_SIZE(_observers); i++) {
-        struct core_observer* obs = _observers[i];
+    for (i = 0; i < ARRAY_SIZE(_motion_observers); i++) {
+        struct motion_observer* obs = _motion_observers[i];
         if (!obs) {
-            _observers[i] = observer;
+            _motion_observers[i] = observer;
             return 0;
         } else {
             if (obs == observer) {
@@ -661,19 +518,19 @@ int core_register_observer(struct core_observer* observer) {
     return -1;
 }
 
-static int notify_observer(enum observer_action action, void* data) {
+static int notify_observer(enum motion_observer_action action, void* data) {
     int i = 0;
 
-    for (i = 0; i < ARRAY_SIZE(_observers); i++) {
-        struct core_observer* obs = _observers[i];
+    for (i = 0; i < ARRAY_SIZE(_motion_observers); i++) {
+        struct motion_observer* obs = _motion_observers[i];
         if (obs) {
             switch (action) {
-                case OBSERVER_ACTION_ON_STATUS:
+                case MOTION_OBSERVER_ACTION_ON_STATUS:
                     if (obs->on_status) {
-                        obs->on_status((struct status_data*)data);
+                        obs->on_status((struct motion_status*)data);
                     }
                     break;
-                case OBSERVER_ACTION_ON_MOTION:
+                case MOTION_OBSERVER_ACTION_ON_MOTION:
                     if (obs->on_motion) {
                         obs->on_motion((struct motion_data*)data);
                     }

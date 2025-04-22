@@ -19,12 +19,16 @@ option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
-INCLUDE_DIRECTORIES(sensors)
+INCLUDE_DIRECTORIES(include)
 
-set(SOURCES main.c core.c hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c
-    sensors/sensor.c sensors/sensor_bmi270.c sensors/sensor_bmp388.c
+set(SOURCES main.c
+    motion.c
     accelerometer_motion.c
     barometer_motion.c
+    sensors/sensor.c
+    sensors/sensor_bmi270.c
+    sensors/sensor_bmp388.c
+    hr_log.c butterworth_filter.c tui.c time_utils.c file_util.c moving_window.c
     floor.c)
 
 if(USE_LOCAL_SIMULATE_DATA)

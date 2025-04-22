@@ -9,7 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "core.h"
+#include "motion.h"
 #include "file_util.h"
 #include "hr_log.h"
 
@@ -249,13 +249,13 @@ static void _observer_on_motion(struct motion_data* data) {
     }
 }
 
-static struct core_observer _floor_observer = {
+static struct motion_observer _floor_observer = {
     .on_motion = _observer_on_motion,
 };
 
 int floor_init() {
     floor_load_model("floor_model.json");
-    core_register_observer(&_floor_observer);
+    motion_register_observer(&_floor_observer);
 }
 
 // return predict floor according height

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "core.h"
+#include "motion.h"
 #include "time_utils.h"
 #include "hr_log.h"
 
@@ -289,7 +289,7 @@ static void tui_thread_start(void) {
     pthread_attr_destroy(&attr);
 }
 
-static void _observer_on_status(struct status_data *st) {
+static void _observer_on_status(struct motion_status *st) {
     if (!st) return;
     _accel_realtime = fabs(st->accel);
     _speed_realtime = fabs(st->speed);
@@ -305,7 +305,7 @@ static void _observer_on_status(struct status_data *st) {
     _barometer_pressure_realtime = st->pressure;
 }
 
-static struct core_observer _tui_observer = {
+static struct motion_observer _tui_observer = {
     .on_status = _observer_on_status};
 
 int tui_init() {
@@ -327,7 +327,7 @@ int tui_init() {
 
     keypad(stdscr, TRUE);
 
-    core_register_observer(&_tui_observer);
+    motion_register_observer(&_tui_observer);
 
     tui_thread_start();
     return 0;

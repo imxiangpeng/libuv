@@ -3,7 +3,7 @@
 
 #define IMU_AXES 3
 
-enum sensor {
+enum sensor_type {
     SENSOR_ACCELEROMETER,
     SENSOR_GYROSCOPE,
     SENSOR_BAROMETER,
@@ -12,7 +12,7 @@ enum sensor {
 };
 
 struct sensor_data {
-    enum sensor type;
+    enum sensor_type type;
 };
 
 struct sensor_data_accelerometer {
@@ -43,7 +43,7 @@ struct sensor_data_temperature {
 
 
 
-struct sensor_device {
+struct sensor {
     int (*init)();
     int (*configure)(int sampling_rate);
     int (*read)(struct sensor_data* data);
@@ -52,5 +52,5 @@ struct sensor_device {
 
 int sensor_manager_init();
 
-struct sensor_device* sensor_manager_get_device(enum sensor type);
+struct sensor* sensor_manager_get_device(enum sensor_type type);
 #endif

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "tui.h"
-#include "core.h"
+#include "motion.h"
 #include "sensor.h"
 #include "floor.h"
 
@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
 
     sensor_manager_init();
 
-    if (0 != core_initalize(argc, argv)) {
+    if (0 != motion_initalize(argc, argv)) {
         printf("error, can not initalize core ...\n");
         return -1;
     }
@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     // tui_init();
     
     // return 0;;
-    core_run();
+    motion_run();
 
     floor_enter_calibration(1, 1, 23);
     while (1) {

@@ -157,12 +157,12 @@ static int gyroscope_close() {
     return 0;
 }
 
-struct sensor_device sensor_bmi270_accelerometer = {
+struct sensor sensor_bmi270_accelerometer = {
     .init = accelerometer_init,
     .configure = accelerometer_configure,
     .read = accelerometer_read,
     .close = accelerometer_close};
-struct sensor_device sensor_bmi270_gyroscope = {
+struct sensor sensor_bmi270_gyroscope = {
     .init = gyroscope_init,
     .configure = gyroscope_configure,
     .read = gyroscope_read,

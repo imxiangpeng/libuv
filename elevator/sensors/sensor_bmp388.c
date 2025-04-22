@@ -44,7 +44,16 @@ static int barometer_read(struct sensor_data *data) {
         HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
         return -1;
     }
+    ch = iio_device_find_channel(_bmp388, IIO_CH_TEMPERATURE_NAME, false);
+    if (!ch) {
+        return -1;
+    }
 
+    if (iio_channel_attr_read_double(ch, "input", &baro->temperature) != 0) {
+        HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
+        return -1;
+    }
+       
     return 0;
 }
 
@@ -61,18 +70,18 @@ static int termperature_configure(int sampling_rate) {
 
 static int termperature_read(struct sensor_data *data) {
     struct iio_channel *ch = NULL;
-    struct sensor_data_barometer *baro = (struct sensor_data_barometer *)data;
+    struct sensor_data_temperature *baro = (struct sensor_data_temperature *)data;
 
     if (!baro)
         return -1;
 
-    baro->self.type = SENSOR_BAROMETER;
-    ch = iio_device_find_channel(_bmp388, IIO_CH_PRESSURE_NAME, false);
+    baro->self.type = SENSOR_TEMPERATURE;
+    ch = iio_device_find_channel(_bmp388, IIO_CH_TEMPERATURE_NAME, false);
     if (!ch) {
         return -1;
     }
 
-    if (iio_channel_attr_read_double(ch, "input", &baro->pressure) != 0) {
+    if (iio_channel_attr_read_double(ch, "input", &baro->temperature) != 0) {
         HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
         return -1;
     }
@@ -84,12 +93,13 @@ static int termperature_close() {
     return 0;
 }
 
-struct sensor_device sensor_bmp388_barometer = {
+struct sensor sensor_bmp388_barometer = {
     .init = barometer_init,
     .configure = barometer_configure,
     .read = barometer_read,
     .close = barometer_close};
-struct sensor_device sensor_bmp388_temperature = {
+
+struct sensor sensor_bmp388_temperature = {
     .init = temperature_init,
     .configure = termperature_configure,
     .read = termperature_read,

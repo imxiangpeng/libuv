@@ -6,11 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-//#include "butterworth_filter.h"
 #include "hr_log.h"
+#include "barometer_motion.h"
 #include "sensor.h"
-#include "sensors/sensor.h"
-#include "stream.h"
 #include "time_utils.h"
 
 
@@ -21,11 +19,10 @@
 
 
 struct barometer_motion{
-    struct stream self;
+    struct motion self;
 
     int sampling_frequency;
-    struct sensor_device* pressure_device;
-    struct sensor_device* temperature_device;
+    struct sensor* pressure_device;
     // struct filter* filter;
     // struct butterworth_filter* bw_filter;
 
@@ -44,7 +41,7 @@ struct barometer_motion{
 };
 
 
-static int barometer_motion_read(struct stream* stream, void* data, size_t count) {
+static int barometer_motion_read(struct motion* stream, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
     double* p = (double*)data;
@@ -66,7 +63,7 @@ static int barometer_motion_read(struct stream* stream, void* data, size_t count
     return 0;
 }
 
-static int barometer_motion_calibration_enter(struct stream* stream) {
+static int barometer_motion_calibration_enter(struct motion* stream) {
     struct barometer_motion* bm = container_of(stream, struct barometer_motion, self);
     if (!stream || !bm) {
         return -1;
@@ -75,7 +72,7 @@ static int barometer_motion_calibration_enter(struct stream* stream) {
     bm->calibration = 0;
     return 0;
 }
-static int barometer_motion_calibration_completed(struct stream* stream) {
+static int barometer_motion_calibration_completed(struct motion* stream) {
      struct barometer_motion* bm = container_of(stream, struct barometer_motion, self);
     if (!stream || !bm) {
         return -1;
@@ -85,24 +82,23 @@ static int barometer_motion_calibration_completed(struct stream* stream) {
     // return bm->calibration == 1;
 }
 
-static int barometer_motion_reset(struct stream* stream) {
+static int barometer_motion_reset(struct motion* stream) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     struct barometer_motion* bm = container_of(stream, struct barometer_motion, self);
 
     return 0;
 }
-static int barometer_motion_close(struct stream* stream) {
+static int barometer_motion_close(struct motion* stream) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }
 
 
-struct stream* barometer_motion_stream_init(int sampling_frequency) {
+struct motion* barometer_motion_init(int sampling_frequency) {
     int ret = 0;
     int i = 0;
     double accel_union = 0, accel_filter = 0;
     struct sensor_data_barometer baro;
-    struct sensor_data_temperature temp;
     struct barometer_motion* bm = (struct barometer_motion*)calloc(1, sizeof(struct barometer_motion));
     if (!bm) {
         return NULL;
@@ -129,17 +125,6 @@ struct stream* barometer_motion_stream_init(int sampling_frequency) {
     bm->pressure_device->configure(bm->sampling_frequency);
 
     bm->pressure_device->read(&baro.self);
-
-#if 0    
-    bm->temperature_device = sensor_manager_get_device(SENSOR_TEMPERATURE);
-
-    if (0 != bm->temperature_device->init()) {
-        free(bm);
-        return NULL;
-    }
-
-    bm->temperature_device->read(&temp.self);
-#endif
 
     bm->calibration = 0;
 

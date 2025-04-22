@@ -132,7 +132,7 @@ static int accelerometer_close() {
     return 0;
 }
 
-struct sensor_device sensor_simulate_accelerometer = {
+struct sensor sensor_simulate_accelerometer = {
     .init = accelerometer_init,
     .configure = accelerometer_configure,
     .read = accelerometer_read,
@@ -166,7 +166,7 @@ static int barometer_close() {
     return 0;
 }
 
-struct sensor_device sensor_simulate_barometer = {
+struct sensor sensor_simulate_barometer = {
     .init = barometer_init,
     .configure = barometer_configure,
     .read = barometer_read,
