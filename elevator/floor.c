@@ -9,9 +9,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "motion.h"
 #include "file_util.h"
 #include "hr_log.h"
+#include "motion.h"
 
 #include "cjson/cJSON.h"
 
@@ -25,7 +25,7 @@ struct floor {
 
 struct building_model {
     int base_floor_num;
-    int floors_under_base;
+    int floors_below_base;
     int floor_nums;
     struct floor* model;
 } _building = {0, 0, 0, NULL};
@@ -70,7 +70,7 @@ int floor_load_model(const char* path) {
         return -1;
     }
 
-    printf("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
+    HR_LOGD("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
 
     _building.base_floor_num = base_num;
     if (!_building.model || _building.floor_nums != floors) {
@@ -93,8 +93,8 @@ int floor_load_model(const char* path) {
         const char* label = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "name"));
         double height = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "height"));
 
-        if (isnan(num) || !label || !height) {
-            printf("invalid .............\n");
+        if (isnan(num) || !label) {
+            HR_LOGE("invalid .............\n");
 
             free(_building.model);
             cJSON_Delete(root);
@@ -108,7 +108,7 @@ int floor_load_model(const char* path) {
         if (p->num == base_num) {
             base_id = i;
         }
-        printf("id:%d, base_id:%d, num:%d name:%s, height:%f\n", i, base_id, p->num, label, height);
+        HR_LOGD("id:%d, base_id:%d, num:%d name:%s, height:%f\n", i, base_id, p->num, label, height);
         i++;
     }
 
@@ -117,7 +117,7 @@ int floor_load_model(const char* path) {
     for (i = base_id - 1; i >= 0; i--) {
         _building.model[i].height_relative = _building.model[i + 1].height_relative - _building.model[i].height;
 
-        printf("id:%d, name:%s, height:%f, height_base:%f\n",
+        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
                i, _building.model[i].label,
                _building.model[i].height, _building.model[i].height_relative);
     }
@@ -125,15 +125,15 @@ int floor_load_model(const char* path) {
     for (i = base_id + 1; i < floors; i++) {
         _building.model[i].height_relative = _building.model[i - 1].height + _building.model[i - 1].height_relative;
 
-        printf("id:%d, name:%s, height:%f, height_base:%f\n",
+        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
                i, _building.model[i].label,
                _building.model[i].height, _building.model[i].height_relative);
     }
 
-    printf("=========================\n");
+    HR_LOGD("=========================\n");
 
     for (i = 0; i < floors; i++) {
-        printf("id:%d, name:%s, height:%f, height_base:%f\n",
+        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
                i, _building.model[i].label,
                _building.model[i].height, _building.model[i].height_relative);
     }
@@ -173,6 +173,7 @@ static int _replace_floor_model_config(const char* path, char* data, int size) {
     rename(tmp, path);
 
     free(tmp);
+    return 0;
 }
 static int floor_store_model() {
     int i = 0;
@@ -213,12 +214,12 @@ static int floor_store_model() {
 
     char* data = cJSON_Print(root);
     HR_LOGD("floor model:%s\n", data);
-_replace_floor_model_config("floor_model_generated.json", data, strlen(data));
+    _replace_floor_model_config("floor_model_generated.json", data, strlen(data));
     free(data);
     cJSON_Delete(root);
     return 0;
 }
-static void _observer_on_motion(struct motion_data* data) {
+static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
     if (data->state == STOPPED) {
@@ -228,10 +229,10 @@ static void _observer_on_motion(struct motion_data* data) {
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
             f->height = height;
-            if (_floor_calibration_index < _building.floors_under_base) {
-                f->num = _floor_calibration_index - _building.floors_under_base;
+            if (_floor_calibration_index < _building.floors_below_base) {
+                f->num = _floor_calibration_index - _building.floors_below_base;
             } else {
-                f->num = _floor_calibration_index - _building.floors_under_base + _building.base_floor_num;
+                f->num = _floor_calibration_index - _building.floors_below_base + _building.base_floor_num;
             }
             snprintf(f->label, sizeof(f->label), "%d", f->num);
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
@@ -239,7 +240,12 @@ static void _observer_on_motion(struct motion_data* data) {
             _floor_calibration_index++;
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d, floor_nums:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index, _building.floor_nums);
             // we can not detect the last floor
-            if (_floor_calibration_index == _building.floor_nums) {
+            if (_floor_calibration_index == _building.floor_nums - 1) {
+                // process last floor manually
+                struct floor* f = &_building.model[_floor_calibration_index];
+                snprintf(f->label, sizeof(f->label), "%d", _floor_calibration_index);
+                // use previous height as the last floor height
+                f->height = height;
                 _floor_calibration = 0;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
@@ -250,12 +256,13 @@ static void _observer_on_motion(struct motion_data* data) {
 }
 
 static struct motion_observer _floor_observer = {
-    .on_motion = _observer_on_motion,
+    .on_event = _observer_on_event,
 };
 
 int floor_init() {
     floor_load_model("floor_model.json");
     motion_register_observer(&_floor_observer);
+    return 0;
 }
 
 // return predict floor according height
@@ -310,8 +317,12 @@ int floor_relative_height(int num, double* height) {
     return -1;
 }
 
-// base_floor: 0 or 1
-int floor_enter_calibration(int floors_under_base, int base_floor, int floors_max) {
+// base_floor: base floor number
+// floors_below_base: number of floors below the base floor.
+// floors_above_base: number of floors above the base floor.
+// 通常基层可以选择 1 楼，总楼层就是 地下层数 + 地上层数（含 1 楼）
+int floor_enter_calibration(int base_floor, int floors_below_base, int floors_above_base) {
+    int floors_max = floors_below_base + floors_above_base;
     _floor_calibration = 1;
     _floor_calibration_index = 0;
 
@@ -333,9 +344,9 @@ int floor_enter_calibration(int floors_under_base, int base_floor, int floors_ma
 
     // initialize base floor
     _building.base_floor_num = base_floor;
-    _building.floors_under_base = floors_under_base;
+    _building.floors_below_base = floors_below_base;
 
-    struct floor* bf = &_building.model[floors_under_base];
+    struct floor* bf = &_building.model[floors_below_base];
     bf->height_relative = 0;
     bf->num = base_floor;
     snprintf(bf->label, sizeof(bf->label), "%d", base_floor);

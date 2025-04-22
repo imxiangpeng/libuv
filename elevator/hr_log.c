@@ -78,20 +78,22 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     }
     va_end(ap);
 
-    printf("%s", buf);
 #if 0
+    printf("%s", buf);
+#else
     // syslog(LOG_SYSLOG, "%s", buf);
     if (!persist_fp) {
         char path[256] = "./hrlog-";
-        int len = sizeof(path);
         char* ptr = path + strlen(path);
-        //strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M-%S", &tm);
+        strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M", &tm);
         strcat(path, ".log");
         printf("path:%s\n", path);
         persist_fp = fopen(path, "w");
         if (!persist_fp) {
             printf("failed create output ..\n");
         }
+
+        setbuf(persist_fp, NULL);
     }
     
     if (persist_fp) {

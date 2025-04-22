@@ -50,7 +50,7 @@ struct sensor {
     int (*close)();
 };
 
-int sensor_manager_init();
+int sensor_init();
 
-struct sensor* sensor_manager_get_device(enum sensor_type type);
+struct sensor* sensor_instance(enum sensor_type type);
 #endif

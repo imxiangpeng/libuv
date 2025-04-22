@@ -1,17 +1,49 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-#include "tui.h"
+#include "floor.h"
+#include "hr_log.h"
 #include "motion.h"
 #include "sensor.h"
-#include "floor.h"
+#include "tui.h"
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        // return -1;
-    }
-    // process_csv(argv[1]);
+    int is_calibration = 0;
+    int base_floor = 1;
+    int floors_below_base = 0;
+    int floors_above_base = 0;
 
-    sensor_manager_init();
+    argc--;
+    argv++;
+
+    while (argc > 0) {
+        printf("argv:%s\n", argv[0]);
+        if (!strcmp(argv[0], "calibration")) {
+            if (argc < 4) {
+                HR_LOGE("invalid parameter for calibration\n");
+                return -1;
+            }
+
+            is_calibration = 1;
+
+            base_floor = atoi(argv[1]);
+            floors_below_base = atoi(argv[2]);
+            floors_above_base = atoi(argv[3]);
+
+            printf("base:%d, floors below:%d, above:%d\n", base_floor, floors_below_base, floors_above_base);
+
+            argc -= 3;
+            argv += 3;
+        }
+
+        printf("argc:%d\n", argc);
+        argc--;
+        argv++;
+    }
+
+    printf("is_calibration:%d\n", is_calibration);
+    sensor_init();
 
     if (0 != motion_initalize(argc, argv)) {
         printf("error, can not initalize core ...\n");
@@ -19,12 +51,15 @@ int main(int argc, char** argv) {
     }
 
     floor_init();
+ 
+    if (is_calibration) {
+        floor_enter_calibration(base_floor, floors_below_base, floors_above_base);
+    }   
     // tui_init();
-    
+
     // return 0;;
     motion_run();
 
-    floor_enter_calibration(1, 1, 23);
     while (1) {
         sleep(2);
     }

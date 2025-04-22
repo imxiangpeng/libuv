@@ -8,8 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "accelerometer_motion.h"
-#include "barometer_motion.h"
+#include "accelerometer_stream.h"
+#include "barometer_stream.h"
 #include "floor.h"
 #include "hr_log.h"
 #include "motion.h"
@@ -59,20 +59,15 @@ static FILE* _dump_fp = NULL;
 
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
 
-static double velocity = 0;
-static double distance = 0;
-static double accel = 0;
-
-static double barometer_velocity = 0;
 static double barometer_distance = 0;
-static double barometer_pressure = 0;
 static double barometer_begin = 0;
 static double barometer_end = 0;
+static double barometer_pressure = 0;
 
 static double barometer_height_discontinuous = 0;
 
-struct accelerometer_motion {
-    struct motion* stream;
+struct accelerometer_stream {
+    struct motion_stream* stream;
     double height;    // --> physical height
     double distance;  // current running distance, maybe reset to zero when running finished
     double velocity;  // velocity, +-
@@ -80,8 +75,8 @@ struct accelerometer_motion {
     enum motion_state state;
 } _accelerometer_motion;
 
-struct barometer_motion {
-    struct motion* stream;
+struct barometer_stream {
+    struct motion_stream* stream;
     double height;
     double distance;
     double velocity;
@@ -89,8 +84,6 @@ struct barometer_motion {
     struct moving_window* mw;
     int64_t delay_stop_ts_ns;
 } _barometer_motion;
-
-static struct moving_window* _accel_moving_w = NULL;
 
 static int notify_observer(enum motion_observer_action action, void* data);
 
@@ -105,6 +98,7 @@ static const char* motion_state_str(enum motion_state state) {
         case CONSTANTING:
             return "constanting";
     }
+    return "";
 }
 
 static double calculate_height_difference(double p0, double p1, double temperature) {
@@ -113,32 +107,27 @@ static double calculate_height_difference(double p0, double p1, double temperatu
 }
 
 static void* _accelerometer_thread_routin(void* args) {
+    (void)args;
     char buf[MAX_LINE_LENGTH] = {0};
-    int over_threshold_count = 0;
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
 
     int floor_num = 0;
     char floor_label[64] = {0};
 
-    if (!_accel_moving_w) {
-        HR_LOGE("error: can not init moving avg window\n");
-        return NULL;
-    }
-
 #if DUMP_DATA_TO_FILE
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,baro_height\n");
+        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
 
-    struct motion* input = _accelerometer_motion.stream;
+    struct motion_stream* input = _accelerometer_motion.stream;
     double result[4] = {0};
     for (;;) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
 
-        int ret = input->runonce(input, (void*)result, ARRAY_SIZE(result));
+        int ret = input->read(input, (void*)result, ARRAY_SIZE(result));
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2) {
@@ -175,11 +164,11 @@ static void* _accelerometer_thread_routin(void* args) {
             if (_accelerometer_motion.state == STOPPED) {
                 HR_LOGD("mxp starting-------------------from:%d -> %s----->\n", floor_num, floor_label);
 
-                struct motion_data md = {
+                struct motion_event ev = {
                     .state = new_state,
                     .distance = distance};
 
-                notify_observer(MOTION_OBSERVER_ACTION_ON_MOTION, &md);
+                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
             }
             if (new_state == STOPPED) {
                 HR_LOGD("stopping------------------------>\n");
@@ -203,11 +192,11 @@ static void* _accelerometer_thread_routin(void* args) {
                     }
                 }
 #endif
-                struct motion_data md = {
+                struct motion_event ev = {
                     .state = new_state,
                     .distance = distance};
 
-                notify_observer(MOTION_OBSERVER_ACTION_ON_MOTION, &md);
+                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
             }
             _accelerometer_motion.state = new_state;
         }
@@ -217,12 +206,18 @@ static void* _accelerometer_thread_routin(void* args) {
                 accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_distance);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
 
-        struct motion_status stat = {.accel = accel, .speed = fabs(velocity), .distance = distance, .height = _accelerometer_motion.height + _accelerometer_motion.distance, .floor = atoi(floor_label), .running = (new_state != STOPPED)};
+        struct motion_status stat = {
+            .accel = accel,
+            .speed = fabs(velocity),
+            .distance = distance,
+            .height = _accelerometer_motion.height + _accelerometer_motion.distance,
+            .floor = atoi(floor_label),
+            .running = (new_state != STOPPED)};
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
 
     next_iteration:
@@ -246,17 +241,13 @@ static void* _accelerometer_thread_routin(void* args) {
 }
 
 static void* _barometer_thread_routin(void* args) {
-    int over_threshold_count = 0;
+    (void)args;
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
 
-    int floor_num = 0;
-    char floor_label[64] = {0};
-
-    struct motion* input = _barometer_motion.stream;
+    struct motion_stream* input = _barometer_motion.stream;
     double result[2] = {0};  // {pressure, temp}
 
     enum motion_state prev_state = STOPPED;
-    double prev_pressure = 0;
 
     if (!_barometer_motion.mw) {
         HR_LOGE("error: can not init moving avg window\n");
@@ -267,7 +258,7 @@ static void* _barometer_thread_routin(void* args) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
 
-        int ret = input->runonce(input, (void*)result, ARRAY_SIZE(result));
+        int ret = input->read(input, (void*)result, ARRAY_SIZE(result));
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2) {
@@ -278,24 +269,22 @@ static void* _barometer_thread_routin(void* args) {
 
         double pressure = result[0];
         double temp = result[1];
-        // double velocity = round(result[1] * 100) / 100;
-        // double distance = round(result[2] * 1000) / 1000;
 
         moving_window_update(_barometer_motion.mw, pressure);
 
-        if (prev_pressure == 0) {
-            prev_pressure = pressure;
+        if (barometer_pressure == 0) {
+            barometer_pressure = pressure;
         }
 
         // detect jump
-        if (fabs(pressure - prev_pressure) > 50) {
-            barometer_height_discontinuous += calculate_height_difference(prev_pressure, pressure, temp);
+        if (fabs(pressure - barometer_pressure) > BAROMETER_DISCONTINUOUS_THRESHOLD) {
+            barometer_height_discontinuous += calculate_height_difference(barometer_pressure, pressure, temp);
             HR_LOGD("%s(%d): mxp jump ... now:%ld, pressure:%f, previous:%f, height:%f\n",
                     __FUNCTION__, __LINE__,
-                    now, pressure, prev_pressure, barometer_height_discontinuous);
+                    now, pressure, barometer_pressure, barometer_height_discontinuous);
         }
 
-        prev_pressure = pressure;
+        barometer_pressure = pressure;
 
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {
             prev_state = _accelerometer_motion.state;
@@ -369,13 +358,17 @@ int dump_data_init() {
 #endif
 
 int motion_initalize(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    int ret = -1;
+
 #if DUMP_DATA_TO_FILE
     dump_data_init();
 #endif
 
     memset((void*)&_accelerometer_motion, 0, sizeof(_accelerometer_motion));
 
-    _accelerometer_motion.stream = accelerometer_motion_init(ACCELEROMETER_SAMPLE_RATE_HZ);
+    _accelerometer_motion.stream = accelerometer_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
     // simulate data, initialize floor
     // _accelerometer_motion.height = -6.1;
 
@@ -384,25 +377,31 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
+    ret = _accelerometer_motion.stream->open(_accelerometer_motion.stream);
+    if (ret != 0) {
+        // release
+        return -1;
+    }
+
     // which floor are we current stopping at?
     // should update height ?
     // or we should force wait base floor trigger
     _accelerometer_motion.stream->enter_calibration(_accelerometer_motion.stream);
 
-    _accel_moving_w = moving_window_init(ACCELEROMETER_SAMPLE_RATE_HZ / 2);
-    if (!_accel_moving_w) {
-        return -1;
-    }
-
-    _barometer_motion.stream = barometer_motion_init(BAROMETER_SAMPLE_RATE_HZ);
+    _barometer_motion.stream = barometer_stream_init(BAROMETER_SAMPLE_RATE_HZ);
     if (!_barometer_motion.stream) {
         HR_LOGE("can not find barometer ...\n");
         return -1;
     }
 
+    ret = _barometer_motion.stream->open(_barometer_motion.stream);
+    if (ret != 0) {
+        // release
+        return -1;
+    }
+
     _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ * BAROMETER_WINDOW_DELAY_SECONDS);
     if (!_barometer_motion.mw) {
-        moving_window_release(_accel_moving_w);
         return -1;
     }
 
@@ -411,7 +410,7 @@ int motion_initalize(int argc, char** argv) {
     return 0;
 }
 
-static int core_acceleration_start(void) {
+static int motion_acceleration_start(void) {
     int ret = 0;
     pthread_attr_t attr;
     struct sched_param param;
@@ -465,12 +464,9 @@ static int core_acceleration_start(void) {
     return 0;
 }
 
-static int core_barometer_start(void) {
+static int motion_barometer_start(void) {
     int ret = 0;
     pthread_attr_t attr;
-    struct sched_param param;
-    int thread_policy;
-    const int algorithm = SCHED_FIFO;  // SCHED_RR
 
     if (_barometer_tid != 0) {
         return -1;
@@ -489,18 +485,17 @@ static int core_barometer_start(void) {
 }
 
 int motion_run(void) {
-    core_barometer_start();
-    core_acceleration_start();
+    motion_barometer_start();
+    motion_acceleration_start();
     // wait device still
 
-    // core_barometer_start();
     //  HR_LOGD("now device is ready ...\n");
 
     return 0;
 }
 
 int motion_register_observer(struct motion_observer* observer) {
-    int i = 0;
+    size_t i = 0;
 
     for (i = 0; i < ARRAY_SIZE(_motion_observers); i++) {
         struct motion_observer* obs = _motion_observers[i];
@@ -519,7 +514,7 @@ int motion_register_observer(struct motion_observer* observer) {
 }
 
 static int notify_observer(enum motion_observer_action action, void* data) {
-    int i = 0;
+    size_t i = 0;
 
     for (i = 0; i < ARRAY_SIZE(_motion_observers); i++) {
         struct motion_observer* obs = _motion_observers[i];
@@ -530,9 +525,9 @@ static int notify_observer(enum motion_observer_action action, void* data) {
                         obs->on_status((struct motion_status*)data);
                     }
                     break;
-                case MOTION_OBSERVER_ACTION_ON_MOTION:
-                    if (obs->on_motion) {
-                        obs->on_motion((struct motion_data*)data);
+                case MOTION_OBSERVER_ACTION_ON_EVENT:
+                    if (obs->on_event) {
+                        obs->on_event((struct motion_event*)data);
                     }
                     break;
                 default:

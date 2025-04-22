@@ -6,10 +6,10 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 static const char* IIO_BMP388_NAME = "bmp388";
-static const char *IIO_CH_PRESSURE_NAME = "pressure";
-static const char *IIO_CH_TEMPERATURE_NAME = "temp";
+static const char* IIO_CH_PRESSURE_NAME = "pressure";
+static const char* IIO_CH_TEMPERATURE_NAME = "temp";
 
-static struct iio_device *_bmp388 = NULL;
+static struct iio_device* _bmp388 = NULL;
 
 static int bmp388_init() {
     if (!_bmp388)
@@ -24,12 +24,13 @@ static int barometer_init() {
     return bmp388_init();
 }
 static int barometer_configure(int sampling_rate) {
+    (void)sampling_rate;
     return 0;
 }
 
-static int barometer_read(struct sensor_data *data) {
-    struct iio_channel *ch = NULL;
-    struct sensor_data_barometer *baro = (struct sensor_data_barometer *)data;
+static int barometer_read(struct sensor_data* data) {
+    struct iio_channel* ch = NULL;
+    struct sensor_data_barometer* baro = (struct sensor_data_barometer*)data;
 
     if (!baro)
         return -1;
@@ -44,6 +45,7 @@ static int barometer_read(struct sensor_data *data) {
         HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
         return -1;
     }
+
     ch = iio_device_find_channel(_bmp388, IIO_CH_TEMPERATURE_NAME, false);
     if (!ch) {
         return -1;
@@ -53,7 +55,7 @@ static int barometer_read(struct sensor_data *data) {
         HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
         return -1;
     }
-       
+
     return 0;
 }
 
@@ -65,12 +67,13 @@ static int temperature_init() {
     return bmp388_init();
 }
 static int termperature_configure(int sampling_rate) {
+    (void)sampling_rate;
     return 0;
 }
 
-static int termperature_read(struct sensor_data *data) {
-    struct iio_channel *ch = NULL;
-    struct sensor_data_temperature *baro = (struct sensor_data_temperature *)data;
+static int termperature_read(struct sensor_data* data) {
+    struct iio_channel* ch = NULL;
+    struct sensor_data_temperature* baro = (struct sensor_data_temperature*)data;
 
     if (!baro)
         return -1;

@@ -6,6 +6,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "motion.h"
@@ -58,10 +59,11 @@ static volatile sig_atomic_t winch_received = 0;
 static WINDOW *_tui_panel[_PANEL_MAX] = {0};
 
 static struct tui_data _tui_data_windows[4] = {{0}};
-static double _accel_realtime = 0.0f;
-static double _speed_realtime = 0.0f;
-static double _distance_realtime = 0.0f;
-static double _height_realtime = 0.0f;
+static double _accel_realtime = 0.0;
+static double _speed_realtime = 0.0;
+static double _distance_realtime = 0.0;
+static double _distance_previous = 0.0;
+static double _height_realtime = 0.0;
 static int _floor_realtime = 0;
 static int _running_realtime = 1;
 
@@ -70,6 +72,7 @@ static double _barometer_speed_realtime = 0;
 static double _barometer_distance_realtime = 0;
 
 static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
+    (void)siginfo;
     (void)sigcontext;
 
     if (SIGWINCH == signum) {
@@ -106,7 +109,7 @@ static void tui_draw_curve_reverse(WINDOW *win, struct tui_data *data, int max_l
 
     getmaxyx(win, rows, cols);
 
-    int available_x = cols - 1;  // remove > label
+    // int available_x = cols - 1;  // remove > label
     int available_y = rows - 1;  // remove ^ label
 
     // draw axis label (max speed)
@@ -134,6 +137,7 @@ static void tui_draw_curve_reverse(WINDOW *win, struct tui_data *data, int max_l
     wrefresh(win);
 }
 static void *tui_thread_routin(void *args) {
+    (void)args;
     int rows_max, cols_max, rows, cols;
     int max_label;
     int layout_ready = 0;
@@ -141,8 +145,6 @@ static void *tui_thread_routin(void *args) {
     char label[128] = {0};
 
     while (1) {
-        struct timespec spec;
-        int64_t now = get_monotonic_nanoseconds();
         if (layout_ready == 0 || winch_received == 1) {
             // layout as following:
             // +-------------------------------------------------------------------+
@@ -225,6 +227,7 @@ static void *tui_thread_routin(void *args) {
             layout_ready = 1;
         }
 
+        clear();
         // draw top panel
         werase(_tui_panel[PANEL_TOP]);
         // Floor: %d accel: %.3f     speed: %.3f
@@ -233,7 +236,13 @@ static void *tui_thread_routin(void *args) {
         mvwprintw(_tui_panel[PANEL_TOP], 0, 20, "Accel: %.3f m/s^2", _accel_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 0, 40, "Speed: %.3f m/s", _speed_realtime);
         mvwprintw(_tui_panel[PANEL_TOP], 1, 1, "Running: %d", _running_realtime);
-        mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_realtime);
+        // display realtime distance when running
+        // but display last distance when it's stopped
+        if (_distance_realtime != 0) {
+            mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_realtime);
+        } else {
+            mvwprintw(_tui_panel[PANEL_TOP], 1, 20, "Distance: %.3f m", _distance_previous);
+        }
         mvwprintw(_tui_panel[PANEL_TOP], 1, 40, "Height: %.3f m", _height_realtime);
 
         mvwprintw(_tui_panel[PANEL_TOP], 0, 60, "Pressure: %.2f Pa", _barometer_pressure_realtime);
@@ -304,16 +313,30 @@ static void _observer_on_status(struct motion_status *st) {
     _barometer_distance_realtime = fabs(st->barometer_distance);
     _barometer_pressure_realtime = st->pressure;
 }
+static void _observer_on_event(struct motion_event* data) {
+    if (!data)
+        return;
+    if (data->state == STOPPED) {
+        _distance_previous = data->distance;
+    }
+}
 
 static struct motion_observer _tui_observer = {
-    .on_status = _observer_on_status};
+    .on_status = _observer_on_status,
+    .on_event = _observer_on_event,
+};
 
 int tui_init() {
+    struct winsize w = { 0, 0, 0, 0 };
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGWINCH, &action, NULL);
+
+    ioctl(STDERR_FILENO, TIOCGWINSZ, &w);
+    printf("t size: %d - %d -%d -%d\n", w.ws_xpixel, w.ws_ypixel, w.ws_col, w.ws_row);
+    //ioctl(STDERR_FILENO, TIOCSWINSZ, &w);
 
     // init ncurses
     initscr();

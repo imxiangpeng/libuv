@@ -43,7 +43,6 @@ static int bmi270_init() {
     return 0;
 }
 static int accelerometer_init() {
-    int ret = 0;
     if (bmi270_init() != 0) {
         HR_LOGE("%s(%d): accelerometer init failed\n", __FUNCTION__, __LINE__);
         return -1;
@@ -70,8 +69,7 @@ static int accelerometer_configure(int sampling_rate) {
 }
 
 static int accelerometer_read(struct sensor_data* data) {
-    int i = 0;
-    double* p = NULL;
+    size_t i = 0;
     struct iio_channel* ch = NULL;
     struct sensor_data_accelerometer* accel = (struct sensor_data_accelerometer*)data;
     if (!accel) {
@@ -113,12 +111,12 @@ static int gyroscope_init() {
     return bmi270_init();
 }
 static int gyroscope_configure(int sampling_rate) {
+    (void)sampling_rate;
     return 0;
 }
 
 static int gyroscope_read(struct sensor_data* data) {
-    int i = 0;
-    double* p = NULL;
+    size_t i = 0;
     struct iio_channel* ch = NULL;
     struct sensor_data_gyroscope* gyro = (struct sensor_data_gyroscope*)data;
 

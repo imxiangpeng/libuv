@@ -14,10 +14,6 @@
 static const char* SIMULATE_DATA_FILE = "simulate.csv";
 static FILE* _simulate_data_fp = NULL;
 
-static const int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
-// +-2G
-static const double ACCELEROMETER_SCALE = 0.000598;
-
 int64_t line_num = 1;
 
 // 说明：这里仅仅是测试模拟数据，数据由 加速度所在任务以 100hz 频率读取
@@ -42,7 +38,6 @@ struct simulate_record {
 
 // time,dt,accel_x,accel_y,accel_z,union_g,gyro_x,gyro_y,gyro_z,pressure,temp,ag,ag
 static int simulate_record_read(struct simulate_record* record) {
-    int i = 0;
     double accel_r, ag;
     char* p = NULL;
     char line[MAX_LINE_LENGTH] = {0};
@@ -62,7 +57,7 @@ static int simulate_record_read(struct simulate_record* record) {
     if (sscanf(p, "%lf,%lf,%lf,%lf,%lf,%lf,%*f,%*f,%*f,%lf,%lf,%lf",
                &record->now, &record->dt,
                &record->accel_x, &record->accel_y, &record->accel_z, &accel_r, &record->pressure, &record->temperature, &ag) != 9) {
-        printf("CSV 解析错误:%s\n", line);
+        HR_LOGE("cvs parse error:%s\n", line);
 
         fclose(_simulate_data_fp);
         _simulate_data_fp = NULL;
@@ -78,7 +73,6 @@ static int simulate_record_read(struct simulate_record* record) {
     return 0;
 }
 static int accelerometer_init() {
-    int ret = 0;
     if (!_simulate_data_fp) {
         const char* path = SIMULATE_DATA_FILE;
         char line[MAX_LINE_LENGTH] = {0};
@@ -94,13 +88,12 @@ static int accelerometer_init() {
     return 0;
 }
 static int accelerometer_configure(int sampling_rate) {
+    (void)sampling_rate;
     // why sampling_frequency is not device's attribute?
     return 0;
 }
 
 static int accelerometer_read(struct sensor_data* data) {
-    int i = 0;
-    //char* p = NULL;
     struct sensor_data_accelerometer* sda = (struct sensor_data_accelerometer*)data;
     if (!sda || !_simulate_data_fp) {
         return -1;
@@ -142,13 +135,12 @@ static int barometer_init() {
     return 0;
 }
 static int barometer_configure(int sampling_rate) {
+    (void)sampling_rate;
     // why sampling_frequency is not device's attribute?
     return 0;
 }
 
 static int barometer_read(struct sensor_data* data) {
-    int i = 0;
-    char* p = NULL;
     struct sensor_data_barometer* sdb = (struct sensor_data_barometer*)data;
     if (!sdb || !_simulate_data_fp) {
         return -1;
