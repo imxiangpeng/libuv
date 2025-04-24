@@ -8,28 +8,31 @@
 #include "cjson/cJSON.h"
 #include "hr_log.h"
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
 static int _on_publish(void** payload, int* len) {
     struct tm tm;
     struct timespec ts;
-    printf("liftstate publish \n");
     char tmp[256] = {0};
     cJSON *root = NULL, *param = NULL;
-    root = cJSON_CreateObject();
-    if (!root) return -1;
 
+    root = cJSON_CreateObject();
+    if (!root)
+        return -1;
+
+    // test code, please only response when needed
     snprintf(tmp, sizeof(tmp), "%d", iot_mid_generate());
     cJSON_AddStringToObject(root, "id", tmp);
     cJSON_AddStringToObject(root, "version", "1.0");
-    // cJSON_AddStringToObject(root, "method", "thing.event.property.post");
-    
+
     param = cJSON_AddObjectToObject(root, "params");
     cJSON_AddNumberToObject(param, "pressure", 97.973);
     cJSON_AddNumberToObject(param, "temperature", 28.33);
-    //cJSON_AddNumberToObject(param, "door", 0);
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!*payload) return -1;
+    if (!*payload)
+        return -1;
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
@@ -41,49 +44,46 @@ static int _on_publish(void** payload, int* len) {
 }
 
 static int _on_reply_message(void* payload, int len) {
-    printf("reply command message %d -> %s\n", len, (char*)payload);
+    printf("reply message %d -> %s\n", len, (char*)payload);
     return 0;
 }
 
 static int _on_property_set_message(void* payload, int len) {
-    printf("command message %d -> %s\n", len, (char*)payload);
+    printf("set message %d -> %s\n", len, (char*)payload);
     return 0;
 }
 
-static struct dm_topic iot_event_property_post = {
-    .name = "event/property/post",
-    .topic = {0},
-    // loop every second, only report when data have been changed
-    // or we should disable period and use trigger only
-    .period = 1000 * 10,
-    .type = TOPIC_TYPE_PUBLISH,
-    .callback.on_publish = _on_publish,
-};
-
-struct dm_topic iot_event_property_post_reply = {
-    .name = "event/property/post_reply",
-    .topic = {0},
-    .type = TOPIC_TYPE_SUBSCRIBE,
-    .callback.on_message = _on_reply_message,
-};
-
-
-struct dm_topic iot_service_property_set = {
-    .name = "service/property/set",
-    .topic = {0},
-    .type = TOPIC_TYPE_SUBSCRIBE,
-    .callback.on_message = _on_property_set_message,
-};
+static struct dm_topic _iot_property_topics[] = {
+    {
+        .name = "event/property/post",
+        .topic = {0},
+        .period = 0,
+        .type = TOPIC_TYPE_PUBLISH,
+        .callback.on_publish = _on_publish,
+    },
+    /*{
+        .name = "event/property/post_reply",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_reply_message,
+    },*/
+    {
+        .name = "service/property/set",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_property_set_message,
+    }};
 
 int iot_topic_property_init(const char* public_key, const char* device_name) {
-    
-    snprintf(iot_event_property_post.topic, sizeof(iot_event_property_post.topic), "/sys/%s/%s/thing/event/property/post", public_key, device_name);
-    snprintf(iot_event_property_post_reply.topic, sizeof(iot_event_property_post_reply.topic), "/sys/%s/%s/thing/event/property/post_reply", public_key, device_name);
-    snprintf(iot_service_property_set.topic, sizeof(iot_service_property_set.topic), "/sys/%s/%s/thing/service/property/set", public_key, device_name);
-    
-    dm_topic_register(&iot_event_property_post);
-    dm_topic_register(&iot_event_property_post_reply);
-    dm_topic_register(&iot_service_property_set);
+    if (!public_key || !device_name) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
+        struct dm_topic* t = &_iot_property_topics[i];
+        snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
+        dm_topic_register(t);
+    }
 
     return 0;
 }

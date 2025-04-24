@@ -22,7 +22,8 @@ INCLUDE_DIRECTORIES(.)
 ADD_EXECUTABLE(iot_mosquitto iot_mosquitto.c hr_log.c 
                 board_platform
                 dm_topic
-                dm_topic_property)
+                dm_topic_property
+                dm_topic_calibration)
 
 TARGET_LINK_LIBRARIES(iot_mosquitto ${cjson_library})
 TARGET_LINK_LIBRARIES(iot_mosquitto ${mosquitto_library})
