@@ -243,7 +243,8 @@ static void _observer_on_event(struct motion_event* data) {
             if (_floor_calibration_index == _building.floor_nums - 1) {
                 // process last floor manually
                 struct floor* f = &_building.model[_floor_calibration_index];
-                snprintf(f->label, sizeof(f->label), "%d", _floor_calibration_index);
+                f->num = _floor_calibration_index - _building.floors_below_base + _building.base_floor_num;
+                snprintf(f->label, sizeof(f->label), "%d", f->num);
                 // use previous height as the last floor height
                 f->height = height;
                 _floor_calibration = 0;

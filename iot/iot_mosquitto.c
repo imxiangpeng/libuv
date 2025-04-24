@@ -58,38 +58,43 @@
 #define DM_DEFAULT_PRODUCT_KEY "XXXX-XXXX"
 #define DM_DEFAULT_PRODUCT_SECRET "XXXX-XXXX"
 
-#define BROKER_DEFAULT_SERVER "127.0.0.1"
-#define BROKER_DEFAULT_PORT 1883
-#define BROKER_DEFAULT_ALIVETIME 60                       // 60s
+#define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
+#define BROKER_DEFAULT_PORT 8883 //1883
+#define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
+// https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
+#define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
+#define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
+#define TIHUIYAN_DEVICE_NAME "LC123456789"
+
 #define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
 struct iot_mosquitto;
 
 struct iot_config {
     struct {
-        char *server;
+        char* server;
         int port;
     } broker;
     struct {
-        char *product_key;
-        char *name;
-        char *secret;
+        char* product_key;
+        char* name;
+        char* secret;
     } device;
 };
 
 struct dm__topic {
-    struct iot_mosquitto *iot;
+    struct iot_mosquitto* iot;
     int mid;
-    const struct dm_topic *self;
+    const struct dm_topic* self;
     struct hr_list_head entry;
     // period topic, auto publish
-    uv_timer_t *timer;
+    uv_timer_t* timer;
 };
 
 struct iot_mosquitto {
     bool is_dynamic_register;
     bool auto_reconnect;
     int sock;  // mosquitto socket
-    struct mosquitto *mosq;
+    struct mosquitto* mosq;
 
     uv_timer_t timer;
     uv_poll_t poll;
@@ -116,10 +121,10 @@ struct dm_platform {
     char STBID[256];
 
     // struct mosquitto *mosq;
-    struct iot_mosquitto *iot;
+    struct iot_mosquitto* iot;
     // int sock;  // mosquitto socket
     int mosq_have_connected;
-    uv_loop_t *loop;
+    uv_loop_t* loop;
     // uv_poll_t mosq_poll;
     // int mosq_pevents;
     // uv_timer_t timer;
@@ -131,50 +136,53 @@ struct dm_platform {
 };
 static struct dm_platform _plat = {0};
 
-static struct iot_mosquitto *mosquitto_iot_new(const char *id);
-static int mosquitto_iot_reinitialize(struct iot_mosquitto *iot, const char *id);
-static int mosquitto_iot_free(struct iot_mosquitto *iot);
+static struct iot_mosquitto* mosquitto_iot_new(const char* id);
+static int mosquitto_iot_reinitialize(struct iot_mosquitto* iot, const char* id);
+static int mosquitto_iot_free(struct iot_mosquitto* iot);
 
-static int _load_config(struct iot_config *conf);
-static int _store_config(struct iot_config *conf);
+static int _load_config(struct iot_config* conf);
+static int _store_config(struct iot_config* conf);
 
-static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle);
-static void _topic_period_timer_cb(uv_timer_t *handle) {
-    if (!handle || !handle->data) return;
-    struct dm__topic *t = (struct dm__topic *)handle->data;
+static void _mosquitto_reconnect_timer_cb(uv_timer_t* handle);
+static void _topic_period_timer_cb(uv_timer_t* handle) {
+    if (!handle || !handle->data)
+        return;
+    struct dm__topic* t = (struct dm__topic*)handle->data;
 
     HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
 
     // public topics
-    void *payload = NULL;
+    void* payload = NULL;
     int len = 0;
     t->self->callback.on_publish(&payload, &len);
     if (payload != NULL && len > 0) {
         int ret = mosquitto_publish(_plat.iot->mosq, &t->mid, t->self->topic,
-                                    len, (const void *)payload,
+                                    len, (const void*)payload,
                                     0, false);
         free(payload);
     }
 }
 
-static void dm__topic_timer_start(struct dm__topic *t) {
-    if (!t || !t->self) return;
+static void dm__topic_timer_start(struct dm__topic* t) {
+    if (!t || !t->self)
+        return;
     if (t->timer != NULL) {
         uv_timer_start(t->timer, _topic_period_timer_cb, t->self->period, t->self->period);
     }
 }
-static void dm__topic_timer_stop(struct dm__topic *t) {
-    if (!t || !t->self) return;
+static void dm__topic_timer_stop(struct dm__topic* t) {
+    if (!t || !t->self)
+        return;
     if (t->timer != NULL) {
         uv_timer_stop(t->timer);
     }
 }
-static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
-    struct dm__topic *t = NULL;
+static struct dm__topic* dm__topic_new(const struct dm_topic* topic) {
+    struct dm__topic* t = NULL;
     if (!topic)
         return NULL;
 
-    t = (struct dm__topic *)calloc(1, sizeof(struct dm__topic));
+    t = (struct dm__topic*)calloc(1, sizeof(struct dm__topic));
     if (!t) {
         return NULL;
     }
@@ -182,7 +190,7 @@ static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
     t->self = topic;
 
     if (t->self->type == TOPIC_TYPE_PUBLISH && t->self->period > 0) {
-        t->timer = (uv_timer_t *)calloc(1, sizeof(uv_timer_t));
+        t->timer = (uv_timer_t*)calloc(1, sizeof(uv_timer_t));
         uv_timer_init(_plat.loop, t->timer);
         t->timer->data = t;
     }
@@ -193,12 +201,12 @@ static struct dm__topic *dm__topic_new(const struct dm_topic *topic) {
     return t;
 }
 
-void _close_uv_dynamic_handle(uv_handle_t *handle) {
+void _close_uv_dynamic_handle(uv_handle_t* handle) {
     HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, handle);
     free(handle);
 }
 
-static void dm__topic_free(struct dm__topic *t) {
+static void dm__topic_free(struct dm__topic* t) {
     if (!t) {
         return;
     }
@@ -210,14 +218,14 @@ static void dm__topic_free(struct dm__topic *t) {
 
     if (t->timer != NULL) {
         HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, t->timer);
-        uv_close((uv_handle_t *)t->timer, _close_uv_dynamic_handle);
+        uv_close((uv_handle_t*)t->timer, _close_uv_dynamic_handle);
     }
-    memset((void *)t, 0, sizeof(struct dm__topic));
+    memset((void*)t, 0, sizeof(struct dm__topic));
     free(t);
 }
 
 // you must free the pointer
-static size_t _read_file(const char *path, char **buf) {
+static size_t _read_file(const char* path, char** buf) {
     int fd = -1;
     struct stat sb;
     char *data = NULL, *ptr = NULL;
@@ -230,12 +238,12 @@ static size_t _read_file(const char *path, char **buf) {
         return -1;
     }
 
-    data = (char *)malloc(sb.st_size);
+    data = (char*)malloc(sb.st_size);
     if (!data) {
         close(fd);
         return -1;
     }
-    memset((void *)data, 0, sb.st_size);
+    memset((void*)data, 0, sb.st_size);
 
     ptr = data;
 
@@ -255,11 +263,12 @@ static size_t _read_file(const char *path, char **buf) {
     return sb.st_size;
 }
 
-static ssize_t _write_file_fd(int fd, char *data, size_t size) {
+static ssize_t _write_file_fd(int fd, char* data, size_t size) {
     ssize_t left = size;
-    char *ptr = data;
+    char* ptr = data;
 
-    if (fd < 0 || !data || size == 0) return -1;
+    if (fd < 0 || !data || size == 0)
+        return -1;
 
     while (left > 0) {
         ssize_t n = TEMP_FAILURE_RETRY(write(fd, ptr, left));
@@ -273,7 +282,7 @@ static ssize_t _write_file_fd(int fd, char *data, size_t size) {
     return size;
 }
 
-static ssize_t _write_file(const char *path, char *data, size_t size) {
+static ssize_t _write_file(const char* path, char* data, size_t size) {
     int fd = -1;
 
     if (!data || !path || size <= 0) {
@@ -297,9 +306,10 @@ static void _update_connection_status(int sock) {
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
 
-    if (sock < 0) return;
+    if (sock < 0)
+        return;
 
-    if (0 != getsockname(sock, (struct sockaddr *)&addr, &addr_len)) {
+    if (0 != getsockname(sock, (struct sockaddr*)&addr, &addr_len)) {
         return;
     }
 
@@ -320,7 +330,7 @@ static void _update_connection_status(int sock) {
         return;
     }
 
-    unsigned char *mac = (unsigned char *)ifr.ifr_hwaddr.sa_data;
+    unsigned char* mac = (unsigned char*)ifr.ifr_hwaddr.sa_data;
 
     snprintf(_plat.status.mac, sizeof(_plat.status.mac), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -328,8 +338,7 @@ static void _update_connection_status(int sock) {
     HR_LOGD("now %s -> %s\n", _plat.status.mac, _plat.status.ipv4);
 }
 
-static void _on_log(struct mosquitto *mosq, void *obj, int level,
-                    const char *str) {
+static void _on_log(struct mosquitto* mosq, void* obj, int level, const char* str) {
     (void)mosq;
     (void)obj;
     (void)level;
@@ -337,16 +346,17 @@ static void _on_log(struct mosquitto *mosq, void *obj, int level,
 }
 
 // https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html#_Table_3.1_-
-static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
-    struct iot_mosquitto *iot = (struct iot_mosquitto *)obj;
+static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
+    HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)obj;
     if (!mosq || !iot)
         return;
 
     HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
-    if (iot->is_dynamic_register) {
+    /*if (iot->is_dynamic_register) {
         HR_LOGD("%s(%d): register connect reason :%d\n", __FUNCTION__, __LINE__, reason);
         return;
-    }
+    }*/
 
     if (CONNACK_ACCEPTED == reason) {
         HR_LOGD("%s(%d): connected, ...\n", __FUNCTION__, __LINE__);
@@ -358,12 +368,12 @@ static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
                 HR_LOGD("%s(%d): connected, auto subscribe:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
             } else {
                 // public topics
-                void *payload = NULL;
+                void* payload = NULL;
                 int len = 0;
                 p->self->callback.on_publish(&payload, &len);
                 if (payload != NULL && len > 0) {
                     int ret = mosquitto_publish(mosq, &p->mid, p->self->topic,
-                                                len, (const void *)payload,
+                                                len, (const void*)payload,
                                                 0, false);
                     HR_LOGD("%s(%d): connected, auto publish:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
                     free(payload);
@@ -381,24 +391,23 @@ static void _on_connect(struct mosquitto *mosq, void *obj, int reason) {
     }
 }
 
-static void _on_disconnect(struct mosquitto *mosq, void *userdata, int rc) {
+static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
     (void)mosq;
     (void)userdata;
     (void)rc;
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 
-    struct iot_mosquitto *iot = (struct iot_mosquitto *)userdata;
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)userdata;
     if (!mosq || !iot)
         return;
 }
 
-static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
-                          int qos_count, const int *granted_qos) {
+static void _on_subscribe(struct mosquitto* mosq, void* obj, int mid, int qos_count, const int* granted_qos) {
     int i;
     bool some_sub_allowed = (granted_qos[0] < 128);
     bool should_print = 1;
 
-    struct iot_mosquitto *iot = (struct iot_mosquitto *)obj;
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)obj;
     if (!mosq || !iot)
         return;
 
@@ -423,13 +432,14 @@ static void _on_subscribe(struct mosquitto *mosq, void *obj, int mid,
 //   "deviceName": "INSJ24999901",
 //   "deviceSecret": "2d216a1abae442ae9207ffaa1b7db2fa"
 // }
-static int _parse_register_response(const char *data, unsigned int length) {
-    const char *product_key = NULL;
-    const char *device_name = NULL;
-    const char *device_secret = NULL;
+static int _parse_register_response(const char* data, unsigned int length) {
+    const char* product_key = NULL;
+    const char* device_name = NULL;
+    const char* device_secret = NULL;
 
-    cJSON *root = cJSON_ParseWithLength(data, length);
-    if (!root) return -1;
+    cJSON* root = cJSON_ParseWithLength(data, length);
+    if (!root)
+        return -1;
 
     product_key = cJSON_GetStringValue(cJSON_GetObjectItem(root, "productKey"));
     device_name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "deviceName"));
@@ -460,13 +470,12 @@ static int _parse_register_response(const char *data, unsigned int length) {
     _store_config(&_plat.conf);
     return 0;
 }
-static void _on_message(struct mosquitto *mosq, void *obj,
-                        const struct mosquitto_message *message) {
+static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitto_message* message) {
     (void)mosq;
-    const char *method = NULL;
+    const char* method = NULL;
     uint32_t id = 1;
 
-    struct iot_mosquitto *iot = (struct iot_mosquitto *)obj;
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)obj;
     if (!mosq || !iot)
         return;
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
@@ -476,26 +485,12 @@ static void _on_message(struct mosquitto *mosq, void *obj,
                 __LINE__, message->topic, message->payloadlen, message->payload);
     }
 
-    HR_LOGD("is_dynamic_register:%d\n", iot->is_dynamic_register);
-
-    if (iot->is_dynamic_register) {
-        if (0 == strcmp("/ext/register", message->topic)) {
-            HR_LOGD("%s(%d): register success, we will restart ...\n", __FUNCTION__, __LINE__);
-
-            // store config and restart
-            _parse_register_response(message->payload, message->payloadlen);
-
-            mosquitto_disconnect(mosq);
-            usleep(1000);
-            // force
-            exit(1);
-        }
-    }
+    // HR_LOGD("is_dynamic_register:%d\n", iot->is_dynamic_register);
 
     if (!message->payload)
         return;
 
-    struct dm__topic *p = NULL;
+    struct dm__topic* p = NULL;
     hr_list_for_each_entry(p, &_topic_list, entry) {
         // ignore publish response message
         if (p->self->type != TOPIC_TYPE_SUBSCRIBE) {
@@ -513,11 +508,11 @@ static void _on_message(struct mosquitto *mosq, void *obj,
     }
 }
 
-static void _on_publish(struct mosquitto *mosq, void *userdata, int mid) {
+static void _on_publish(struct mosquitto* mosq, void* userdata, int mid) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }
 
-static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
+static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     (void)sigcontext;
 
     HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
@@ -534,13 +529,14 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
 // 	"server": "127.0.0.1",
 // 	"port": 1883
 // }
-static int _load_config(struct iot_config *conf) {
+static int _load_config(struct iot_config* conf) {
     size_t len = 0;
-    char *data = NULL;
-    cJSON *root = NULL;
+    char* data = NULL;
+    cJSON* root = NULL;
 
-    const char *path = DM_DEFAULT_CONFIG_DIR "/" DM_DEFAULT_CONFIG_NAME;
-    if (!conf) return -1;
+    const char* path = DM_DEFAULT_CONFIG_DIR "/" DM_DEFAULT_CONFIG_NAME;
+    if (!conf)
+        return -1;
 
     len = _read_file(path, &data);
     if (!data) {
@@ -553,11 +549,12 @@ static int _load_config(struct iot_config *conf) {
     free(data);
     data = NULL;
 
-    if (!root) return -1;
+    if (!root)
+        return -1;
 
-    cJSON *broker = cJSON_GetObjectItem(root, "broker");
+    cJSON* broker = cJSON_GetObjectItem(root, "broker");
     if (broker) {
-        const char *server = cJSON_GetStringValue(cJSON_GetObjectItem(root, "server"));
+        const char* server = cJSON_GetStringValue(cJSON_GetObjectItem(root, "server"));
         double port = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "port"));
         if (server) {
             conf->broker.server = strdup(server);
@@ -570,19 +567,19 @@ static int _load_config(struct iot_config *conf) {
         conf->broker.port = port;
     }
 
-    cJSON *device = cJSON_GetObjectItem(root, "device");
+    cJSON* device = cJSON_GetObjectItem(root, "device");
     if (device) {
-        const char *pkey = cJSON_GetStringValue(cJSON_GetObjectItem(root, "product_key"));
+        const char* pkey = cJSON_GetStringValue(cJSON_GetObjectItem(root, "product_key"));
         if (pkey) {
             conf->device.product_key = strdup(pkey);
         }
 
-        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
         if (name) {
             conf->device.name = strdup(name);
         }
 
-        const char *secret = cJSON_GetStringValue(cJSON_GetObjectItem(root, "secret"));
+        const char* secret = cJSON_GetStringValue(cJSON_GetObjectItem(root, "secret"));
         if (secret) {
             conf->device.secret = strdup(secret);
         }
@@ -593,17 +590,18 @@ static int _load_config(struct iot_config *conf) {
     return 0;
 }
 
-static int _replace_config(const char *path, char *data, unsigned int size) {
+static int _replace_config(const char* path, char* data, unsigned int size) {
     int fd = -1;
-    char *tmp = NULL;
+    char* tmp = NULL;
     int tmp_len = 0;
 
-    const char *TMPFILE_TEMPLATE = "tmp_XXXXXX";
+    const char* TMPFILE_TEMPLATE = "tmp_XXXXXX";
 
     tmp_len = strlen(path) + strlen(TMPFILE_TEMPLATE) + 1;  // + '\0'
 
-    tmp = (char *)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
-    if (!tmp) return -1;
+    tmp = (char*)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
+    if (!tmp)
+        return -1;
 
     snprintf(tmp, tmp_len, "%s%s", path, TMPFILE_TEMPLATE);
     fd = mkostemp(tmp, O_RDWR | O_TRUNC | O_CREAT);
@@ -625,24 +623,26 @@ static int _replace_config(const char *path, char *data, unsigned int size) {
     return 0;
 }
 
-static int _store_config(struct iot_config *conf) {
+static int _store_config(struct iot_config* conf) {
     size_t len = 0;
-    char *data = NULL;
-    cJSON *root = NULL;
+    char* data = NULL;
+    cJSON* root = NULL;
 
-    const char *path = DM_DEFAULT_CONFIG_DIR "/" DM_DEFAULT_CONFIG_NAME;
-    if (!conf) return -1;
+    const char* path = DM_DEFAULT_CONFIG_DIR "/" DM_DEFAULT_CONFIG_NAME;
+    if (!conf)
+        return -1;
 
     root = cJSON_CreateObject();
-    if (!root) return -1;
+    if (!root)
+        return -1;
 
-    cJSON *broker = cJSON_AddObjectToObject(root, "broker");
+    cJSON* broker = cJSON_AddObjectToObject(root, "broker");
     if (broker) {
         cJSON_AddStringToObject(broker, "server", conf->broker.server);
         cJSON_AddNumberToObject(broker, "port", conf->broker.port);
     }
 
-    cJSON *device = cJSON_AddObjectToObject(root, "device");
+    cJSON* device = cJSON_AddObjectToObject(root, "device");
     if (device) {
         cJSON_AddStringToObject(device, "product_key", conf->device.product_key);
         cJSON_AddStringToObject(device, "name", conf->device.name);
@@ -652,14 +652,14 @@ static int _store_config(struct iot_config *conf) {
     data = cJSON_Print(root);
     if (data) {
         int fd = -1;
-        char *tmp = NULL;
+        char* tmp = NULL;
         int tmp_len = 0;
 
-        const char *TMPFILE_TEMPLATE = "tmp_XXXXXX";
+        const char* TMPFILE_TEMPLATE = "tmp_XXXXXX";
 
         tmp_len = strlen(path) + strlen(TMPFILE_TEMPLATE) + 1;  // + '\0'
 
-        tmp = (char *)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
+        tmp = (char*)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
         if (!tmp) {
             cJSON_Delete(root);
             return -1;
@@ -683,26 +683,26 @@ static int _store_config(struct iot_config *conf) {
         rename(tmp, path);
 
         free(tmp);
-        
+
         free(data);
     }
     cJSON_Delete(root);
     return 0;
 }
 
-static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
+static void _mosquitto_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     HR_LOGD("%s(%d): come in .....status:%d, event:0x%X..\n", __FUNCTION__, __LINE__, status, events);
 
     int new_events = DEFAULT_POLL_EVENTS;
 
     // struct dm_platform *plat = (struct dm_platform *)handle->data;
-    struct iot_mosquitto *iot = NULL;
-    struct mosquitto *mosq = NULL;
+    struct iot_mosquitto* iot = NULL;
+    struct mosquitto* mosq = NULL;
 
     if (!handle || !handle->data)
         return;
 
-    iot = (struct iot_mosquitto *)handle->data;
+    iot = (struct iot_mosquitto*)handle->data;
 
     mosq = iot->mosq;
 
@@ -730,6 +730,7 @@ static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
         }
     }
 
+#if 1
     if (events & UV_DISCONNECT) {
         HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
         // stop current poll, we should reconnect and using new socket
@@ -743,6 +744,7 @@ static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
 
         return;
     }
+#endif
 
     if (pevents != iot->pevents) {
         iot->pevents = pevents;
@@ -750,28 +752,31 @@ static void _mosquitto_loop_poll_cb(uv_poll_t *handle, int status, int events) {
     }
 }
 
-static void _mosquitto_loop_misc_timer_cb(uv_timer_t *handle) {
-    struct iot_mosquitto *wrapper = (struct iot_mosquitto *)handle->data;
+static void _mosquitto_loop_misc_timer_cb(uv_timer_t* handle) {
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)handle->data;
 
-    // mosquitto_loop_misc(plat->mosq);
+    // check is connected?
+    mosquitto_loop_misc(iot->mosq);
 }
 
-static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle) {
-    struct iot_mosquitto *iot = NULL;
-    struct mosquitto *mosq = NULL;
+static void _mosquitto_reconnect_timer_cb(uv_timer_t* handle) {
+    struct iot_mosquitto* iot = NULL;
+    struct mosquitto* mosq = NULL;
 
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     if (!handle || !handle->data)
         return;
 
-    iot = (struct iot_mosquitto *)handle->data;
+    iot = (struct iot_mosquitto*)handle->data;
 
     mosq = iot->mosq;
 
     if (!mosq)
         return;
 
+    printf("%s(%d): mosq:%p\n", __FUNCTION__, __LINE__, (void*)mosq);
     if (MOSQ_ERR_SUCCESS != mosquitto_reconnect_async(mosq)) {
-        // HR_LOGD("%s(%d): failed reconnect:%s:%d\n", __FUNCTION__, __LINE__, _plat.host, _plat.port);
+        HR_LOGD("%s(%d): failed reconnect:%s:%d\n", __FUNCTION__, __LINE__, _plat.host, _plat.port);
         return;
     }
 
@@ -781,7 +786,7 @@ static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle) {
     // using uv_poll_init update socket
     // any memory leak ?
     uv_poll_init(_plat.loop, &iot->poll, iot->sock);
-    iot->poll.data = &_plat;
+    iot->poll.data = iot;
     iot->pevents = DEFAULT_POLL_EVENTS;
     uv_poll_start(&iot->poll, iot->pevents, _mosquitto_loop_poll_cb);
 
@@ -790,12 +795,12 @@ static void _mosquitto_reconnect_timer_cb(uv_timer_t *handle) {
 }
 
 /* Fully close a loop */
-static void close_walk_cb(uv_handle_t *handle, void *arg) {
+static void close_walk_cb(uv_handle_t* handle, void* arg) {
     if (!uv_is_closing(handle))
         uv_close(handle, NULL);
 }
 
-static void close_loop(uv_loop_t *loop) {
+static void close_loop(uv_loop_t* loop) {
     uv_walk(loop, close_walk_cb, NULL);
     uv_run(loop, UV_RUN_DEFAULT);
 }
@@ -815,10 +820,11 @@ static long long time_ms() {
     return (ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL);
 }
 
-static struct iot_mosquitto *mosquitto_iot_new(const char *id) {
-    struct mosquitto *mosq = NULL;
-    struct iot_mosquitto *iot = (struct iot_mosquitto *)calloc(1, sizeof(struct iot_mosquitto));
+static struct iot_mosquitto* mosquitto_iot_new(const char* id) {
+    struct mosquitto* mosq = NULL;
+    struct iot_mosquitto* iot = (struct iot_mosquitto*)calloc(1, sizeof(struct iot_mosquitto));
     if (!iot) {
+        printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return NULL;
     }
 
@@ -826,7 +832,7 @@ static struct iot_mosquitto *mosquitto_iot_new(const char *id) {
 
     iot->sock = -1;
 
-    mosq = mosquitto_new(id, false, iot);
+    mosq = mosquitto_new(id, true, iot);
     if (!mosq) {
         free(iot);
         HR_LOGD("%s(%d): error can not instance mosquitto\n", __FUNCTION__,
@@ -834,6 +840,9 @@ static struct iot_mosquitto *mosquitto_iot_new(const char *id) {
         return NULL;
     }
 
+    iot->mosq = mosq;
+
+    iot->auto_reconnect = 1;
     mosquitto_log_callback_set(mosq, _on_log);
 
     mosquitto_subscribe_callback_set(mosq, _on_subscribe);
@@ -845,15 +854,15 @@ static struct iot_mosquitto *mosquitto_iot_new(const char *id) {
     mosquitto_publish_callback_set(mosq, _on_publish);
     mosquitto_tls_opts_set(mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
 
-    // const char *cafile = "/home/alex/workspace/workspace/libuv/mqtt_cacert.pem";
-    // mosquitto_tls_set(_data.mosq, cafile, NULL, NULL, NULL, NULL);
-    mosquitto_tls_insecure_set(mosq, 0);
+    const char *cafile = "/home/alex/workspace/workspace/libuv/libuv/iot/ali_iot_ca.crt";
+    mosquitto_tls_set(mosq, cafile, NULL, NULL, NULL, NULL);
+    mosquitto_tls_insecure_set(mosq, false);
     // mosquitto_tls_opts_set(mosq, 0, NULL, NULL);
 
-    return 0;
+    return iot;
 }
-static int mosquitto_iot_reinitialize(struct iot_mosquitto *iot, const char *id) {
-    struct mosquitto *mosq = NULL;
+static int mosquitto_iot_reinitialize(struct iot_mosquitto* iot, const char* id) {
+    struct mosquitto* mosq = NULL;
 
     if (!iot || !iot->mosq)
         return -1;
@@ -884,7 +893,7 @@ static int mosquitto_iot_reinitialize(struct iot_mosquitto *iot, const char *id)
 
     // const char *cafile = "/home/alex/workspace/workspace/libuv/mqtt_cacert.pem";
     // mosquitto_tls_set(_data.mosq, cafile, NULL, NULL, NULL, NULL);
-    mosquitto_tls_insecure_set(mosq, 0);
+    // mosquitto_tls_insecure_set(mosq, 0);
     // mosquitto_tls_opts_set(mosq, 0, NULL, NULL);
 
     return 0;
@@ -918,7 +927,7 @@ static int mosquitto_wrapper_regiter(struct mosquitto_iot *wrapper, const struct
 }
 #endif
 
-static int mosquitto_iot_free(struct iot_mosquitto *iot) {
+static int mosquitto_iot_free(struct iot_mosquitto* iot) {
     // struct dm__topic *n, *p;
     if (!iot || !iot->mosq) {
         return -1;
@@ -927,8 +936,8 @@ static int mosquitto_iot_free(struct iot_mosquitto *iot) {
     uv_poll_stop(&iot->poll);
     uv_timer_stop(&iot->timer);
 
-    uv_close((uv_handle_t *)&iot->poll, NULL);
-    uv_close((uv_handle_t *)&iot->timer, NULL);
+    uv_close((uv_handle_t*)&iot->poll, NULL);
+    uv_close((uv_handle_t*)&iot->timer, NULL);
 
     mosquitto_destroy(iot->mosq);
 
@@ -936,45 +945,27 @@ static int mosquitto_iot_free(struct iot_mosquitto *iot) {
     //     dm__topic_free(p);
     // }
 
-    memset((void *)iot, 0, sizeof(*iot));
+    memset((void*)iot, 0, sizeof(*iot));
     free(iot);
     return 0;
 }
 
-static int _dynamic_register_on_message(void *payload, int len) {
-    printf("command message %d -> %s\n", len, (char *)payload);
-    return 0;
-}
-static struct dm_topic dm_topic_liftstate = {
-    .name = "/ext/register",
-    .topic = "/ext/register",
-    .period = 0,
-    .type = TOPIC_TYPE_SUBSCRIBE,
-    .callback.on_message = _dynamic_register_on_message,
-};
-
-int iot_mosquitto_dynamic_setup(struct iot_mosquitto *iot) {
-    return 0;
-}
-
-// 为了简化，我们一次只进行一个功能
-// 当需要动态注册时，我们仅仅进行动态注册
-// 注册成功后，保存配置文件，然后自动重启
+// 因为费用问题禁止使用动态注册
 // 重启后，检测到已经注册过，那么就是正常进行连接
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
     int rc = 0;
     int retries = 0;
-    struct iot_mosquitto *iot = NULL;
+    struct iot_mosquitto* iot = NULL;
     bool is_dynamic_register = 0;
 
-    char *iot_client_id = NULL;
-    char *iot_username = NULL;
-    char *iot_content = NULL;
+    char* iot_client_id = NULL;
+    char* iot_username = NULL;
+    char* iot_content = NULL;
     char iot_password[EVP_MAX_MD_SIZE * 2 + 1] = {0};
-    char *hmac_secret = NULL;
+    char* hmac_secret = NULL;
 
     unsigned char result[EVP_MAX_MD_SIZE] = {0};
     unsigned int len = EVP_MAX_MD_SIZE;
@@ -985,26 +976,40 @@ int main(int argc, char **argv) {
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
 
-    memset((void *)&_plat, 0, sizeof(_plat));
+    memset((void*)&_plat, 0, sizeof(_plat));
 
     _plat.qos = 0;
     _plat.alive_time = BROKER_DEFAULT_ALIVETIME;
     _plat.port = BROKER_DEFAULT_PORT;
 
-    _load_config(&_plat.conf);
+    // _load_config(&_plat.conf);
+    _plat.conf.broker.server = strdup(BROKER_DEFAULT_SERVER);
+    _plat.conf.broker.port = BROKER_DEFAULT_PORT;
 
+    _plat.conf.device.product_key = strdup(TIHUIYAN_PRODUCT_KEY);
+    _plat.conf.device.name = strdup(TIHUIYAN_DEVICE_NAME);
+    _plat.conf.device.secret = strdup(TIHUIYAN_DEVICE_SECRET);
+
+#if 0
     board_system_unifykey_read("usid", _plat.serialno, sizeof(_plat.serialno));
     board_system_unifykey_read("mac", _plat.mac, sizeof(_plat.mac));
     board_system_unifykey_read("deviceid", _plat.mac, sizeof(_plat.mac));
+#endif
+
+    snprintf(_plat.serialno, sizeof(_plat.serialno), "%s.%s", TIHUIYAN_PRODUCT_KEY, TIHUIYAN_DEVICE_NAME);
 
     _plat.loop = uv_default_loop();
 
-    dm_topic_init();
+    // dm_topic_init();
 
     mosquitto_lib_init();
 
     long long ts = time_ms();
+    printf("ts:%lld vs %ld\n", ts, 1745406478068);
+    // ts = 1745406478068;
+    // ts =    1745406478068;
 
+#if 0
     if (!_plat.conf.device.product_key || !_plat.conf.device.name || !_plat.conf.device.secret) {
         char *client_id = _plat.serialno;
         char *name = _plat.serialno;
@@ -1020,35 +1025,56 @@ int main(int argc, char **argv) {
         asprintf(&iot_content, "deviceName%sproductKey%stimestamp%lld", name, DM_DEFAULT_PRODUCT_KEY, ts);
 
     } else {
-        char *name = _plat.conf.device.name;
-        char *client_id = _plat.serialno;
-        char *product_key = _plat.conf.device.product_key;
-        hmac_secret = _plat.conf.device.secret;
-        // {clientId}|timestamp={timestamp}|
-        asprintf(&iot_client_id, "%s|timestamp=%lld|", client_id, ts);
-        // {deviceName}&{productKey}
-        asprintf(&iot_username, "%s&%s", name, product_key);
-        // "clientId" + {ClientId}+ "deviceName" + {deviceName }+ "productKey" + {productKey }+ "timestamp" + {timestamp}
-        asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, ts);
-    }
+#endif
+    char* name = _plat.conf.device.name;
+    char* client_id = _plat.serialno;
+    char* product_key = _plat.conf.device.product_key;
+    hmac_secret = _plat.conf.device.secret;
+    // mqttClientId: clientId+"|securemode=3,signmethod=hmacsha1,timestamp=132323232|"
+    // mqttUsername: deviceName+"&"+productKey
+    // mqttPassword: sign_hmac(deviceSecret,content)
+    asprintf(&iot_client_id, "%s|securemode=2,signmethod=hmacsha256,timestamp=%lld|", client_id, ts);
+    // {deviceName}&{productKey}
+    asprintf(&iot_username, "%s&%s", name, product_key);
+    // "clientId" + {ClientId}+ "deviceName" + {deviceName }+ "productKey" + {productKey }+ "timestamp" + {timestamp}
+    asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, ts);
+    //}
 
+    HR_LOGD("iot_client_id:%s\n", iot_client_id);
+    HR_LOGD("iot_username:%s\n", iot_username);
+    HR_LOGD("iot_content:%s\n", iot_content);
+    HR_LOGD("iot_content:%s\n", iot_content);
+
+    // iot_username = "LC123456789&a1z1g0btxvW";
+    // iot_client_id = "a1z1g0btxvW.LC123456789|securemode=2,signmethod=hmacsha256,timestamp=1745406478068|";
+
+    printf("%s(%d): ............client id:%s\n", __FUNCTION__, __LINE__, iot_client_id);
     iot = mosquitto_iot_new(iot_client_id);
 
+    printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
+
     if (!iot) {
+        printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
-    iot->is_dynamic_register = is_dynamic_register;
+    printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
 
-    HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char *)iot_content, strlen(iot_content), result, &len);
+    HR_LOGD("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
+    HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
 
+    printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
     for (unsigned int i = 0; i < len; i++) {
-        sprintf(iot_password + i * 2, "%02X", result[i]);
+        sprintf(iot_password + i * 2, "%02x", result[i]);
     }
+    printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
     iot_password[len * 2] = '\0';
     HR_LOGD("iot password:%s\n", iot_password);
-    mosquitto_username_pw_set(iot->mosq, iot_username /*_plat.username*/, iot_password /*_plat.password*/);
 
+    // mosquitto_username_pw_set(iot->mosq, "LC123456789&a1z1g0btxvW" /*iot_username*/ /*_plat.username*/, "d4197fbe38373dc37278aa2be9a86a8431102132d777227f51598bedccebe5d1" /*iot_password*/ /*_plat.password*/);
+    mosquitto_username_pw_set(iot->mosq, iot_username, iot_password);
+
+    printf("%s(%d): mosq:%p\n", __FUNCTION__, __LINE__, (void*)iot->mosq);
     // free memory
     free(iot_client_id);
     iot_client_id = NULL;
@@ -1059,8 +1085,10 @@ int main(int argc, char **argv) {
 
     do {
         HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _plat.conf.broker.server, _plat.conf.broker.port);
-        rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
-                                          _plat.alive_time, NULL);
+        //rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
+        //                                  _plat.alive_time, NULL);
+
+        rc = mosquitto_connect(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port, _plat.alive_time);
         if (rc != MOSQ_ERR_SUCCESS)
             usleep(1000 * 1000);
     } while (rc != MOSQ_ERR_SUCCESS);
@@ -1074,7 +1102,7 @@ int main(int argc, char **argv) {
     uv_poll_start(&iot->poll, iot->pevents, _mosquitto_loop_poll_cb);
 
     uv_timer_init(_plat.loop, &iot->timer);
-    iot->timer.data = &_plat;
+    iot->timer.data = iot;
     uv_timer_start(&iot->timer, _mosquitto_loop_misc_timer_cb, 1000, 1000);
 
     _plat.mosq_have_connected = 1;
@@ -1096,7 +1124,7 @@ int main(int argc, char **argv) {
     }
 
     // free config
-     if (_plat.conf.device.product_key) {
+    if (_plat.conf.device.product_key) {
         free(_plat.conf.device.product_key);
         _plat.conf.device.product_key = NULL;
     }
@@ -1117,8 +1145,8 @@ int main(int argc, char **argv) {
 }
 
 // implement dm_topic.h
-int dm_topic_register(const struct dm_topic *topic) {
-    struct dm__topic *t = dm__topic_new(topic);
+int dm_topic_register(const struct dm_topic* topic) {
+    struct dm__topic* t = dm__topic_new(topic);
 
     return (t != NULL) ? 0 : -1;
 }
