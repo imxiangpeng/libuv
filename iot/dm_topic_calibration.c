@@ -40,19 +40,26 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static int _on_reply_message(void* payload, int len) {
-    printf("reply command message %d -> %s\n", len, (char*)payload);
+static int _on_post_replay_message(void* payload, int len) {
+    printf("post reply command message %d -> %s\n", len, (char*)payload);
     return 0;
 }
 
-static int _on_property_set_message(void* payload, int len) {
+static int _on_message(void* payload, int len) {
     printf("command message %d -> %s\n", len, (char*)payload);
     return 0;
 }
 
+struct dm_topic iot_service_property_set = {
+    .name = "service/property/set",
+    .topic = NULL,
+    .type = TOPIC_TYPE_SUBSCRIBE,
+    .callback.on_message = _on_message,
+};
+
 static struct dm_topic iot_event_property_post = {
     .name = "event/property/post",
-    .topic = {0},
+    .topic = NULL,
     // loop every second, only report when data have been changed
     // or we should disable period and use trigger only
     .period = 1000 * 10,
@@ -62,25 +69,30 @@ static struct dm_topic iot_event_property_post = {
 
 struct dm_topic iot_event_property_post_reply = {
     .name = "event/property/post_reply",
-    .topic = {0},
+    .topic = NULL,
     .type = TOPIC_TYPE_SUBSCRIBE,
-    .callback.on_message = _on_reply_message,
+    .callback.on_message = _on_message,
 };
 
 
-struct dm_topic iot_service_property_set = {
-    .name = "service/property/set",
-    .topic = {0},
-    .type = TOPIC_TYPE_SUBSCRIBE,
-    .callback.on_message = _on_property_set_message,
-};
+
+static char event_property_post[256] = {0};
+static char event_property_post_reply[256] = {0};
+static char service_property_set[256] = {0};
 
 int iot_topic_property_init(const char* public_key, const char* device_name) {
     
-    snprintf(iot_event_property_post.topic, sizeof(iot_event_property_post.topic), "/sys/%s/%s/thing/event/property/post", public_key, device_name);
-    snprintf(iot_event_property_post_reply.topic, sizeof(iot_event_property_post_reply.topic), "/sys/%s/%s/thing/event/property/post_reply", public_key, device_name);
-    snprintf(iot_service_property_set.topic, sizeof(iot_service_property_set.topic), "/sys/%s/%s/thing/service/property/set", public_key, device_name);
+    iot_event_property_post.name = "event/property/post";
+    iot_event_property_post_reply.name = "event/property/post_reply";
+    iot_service_property_set.name = "service/property/set";
+    snprintf(event_property_post, sizeof(event_property_post), "/sys/%s/%s/thing/event/property/post", public_key, device_name);
+    snprintf(event_property_post_reply, sizeof(event_property_post_reply), "/sys/%s/%s/thing/event/property/post_reply", public_key, device_name);
+    snprintf(service_property_set, sizeof(service_property_set), "/sys/%s/%s/thing/service/property/set", public_key, device_name);
     
+    iot_event_property_post.topic = event_property_post;
+    iot_event_property_post_reply.topic = event_property_post_reply;
+    iot_service_property_set.topic = service_property_set;
+
     dm_topic_register(&iot_event_property_post);
     dm_topic_register(&iot_event_property_post_reply);
     dm_topic_register(&iot_service_property_set);

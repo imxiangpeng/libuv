@@ -2,8 +2,8 @@
 #define DM_TOPIC_H
 
 struct dm_topic {
-    const char *name;
-    const char *topic;
+    char name[128];
+    char topic[256];
     int period;
     enum topic_type {
         TOPIC_TYPE_PUBLISH = 0,
