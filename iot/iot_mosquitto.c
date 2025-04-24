@@ -59,7 +59,7 @@
 #define DM_DEFAULT_PRODUCT_SECRET "XXXX-XXXX"
 
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
-#define BROKER_DEFAULT_PORT 8883 //1883
+#define BROKER_DEFAULT_PORT 1883     // 8883 //1883
 #define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
 #define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
@@ -385,6 +385,11 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
             }
         }
         _update_connection_status(iot->sock);
+
+        // const char* tp = "/sys/a1z1g0btxvW/LC123456789/thing/event/property/post";
+        // const char *payload = "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{\"pressure\":100}}";
+        // mosquitto_publish(mosq, &p->mid, tp, strlen(payload), (const void*)payload, 0, false);
+
     } else {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
         mosquitto_disconnect(mosq);
@@ -854,10 +859,10 @@ static struct iot_mosquitto* mosquitto_iot_new(const char* id) {
     mosquitto_publish_callback_set(mosq, _on_publish);
     mosquitto_tls_opts_set(mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
 
-    const char *cafile = "/home/alex/workspace/workspace/libuv/libuv/iot/ali_iot_ca.crt";
-    mosquitto_tls_set(mosq, cafile, NULL, NULL, NULL, NULL);
-    mosquitto_tls_insecure_set(mosq, false);
-    // mosquitto_tls_opts_set(mosq, 0, NULL, NULL);
+    // const char *cafile = "/home/alex/workspace/workspace/libuv/libuv/iot/ali_iot_ca.crt";
+    // mosquitto_tls_set(mosq, cafile, NULL, NULL, NULL, NULL);
+    // mosquitto_tls_insecure_set(mosq, false);
+    //  mosquitto_tls_opts_set(mosq, 0, NULL, NULL);
 
     return iot;
 }
@@ -1085,8 +1090,10 @@ int main(int argc, char** argv) {
 
     do {
         HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, _plat.conf.broker.server, _plat.conf.broker.port);
-        //rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
-        //                                  _plat.alive_time, NULL);
+        // 我们发现我电脑 apt 安装的 mosquitto 使用异步连接阿里 iot 的时候总是连接不上,但是 sync 接口测试正常
+        // 后来使用自己编译的 mosquitto 测试正常
+        // rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
+        //_plat.alive_time, NULL);
 
         rc = mosquitto_connect(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port, _plat.alive_time);
         if (rc != MOSQ_ERR_SUCCESS)
