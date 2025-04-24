@@ -167,6 +167,7 @@ static void dm__topic_timer_start(struct dm__topic* t) {
     if (!t || !t->self)
         return;
     if (t->timer != NULL) {
+        printf("%s(%d): period:%d\n", __FUNCTION__, __LINE__, t->self->period);
         uv_timer_start(t->timer, _topic_period_timer_cb, t->self->period, t->self->period);
     }
 }
@@ -385,10 +386,6 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
             }
         }
         _update_connection_status(iot->sock);
-
-        // const char* tp = "/sys/a1z1g0btxvW/LC123456789/thing/event/property/post";
-        // const char *payload = "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{\"pressure\":100}}";
-        // mosquitto_publish(mosq, &p->mid, tp, strlen(payload), (const void*)payload, 0, false);
 
     } else {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
@@ -1005,7 +1002,7 @@ int main(int argc, char** argv) {
 
     _plat.loop = uv_default_loop();
 
-    // dm_topic_init();
+    dm_topic_init(_plat.conf.device.product_key, _plat.conf.device.name);
 
     mosquitto_lib_init();
 

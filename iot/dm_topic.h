@@ -18,8 +18,12 @@ struct dm_topic {
         int (*on_publish)(void **payload, int *len);
     } callback;
 };
+
+
+int iot_mid_generate();
+
 // pub
-int dm_topic_init(void);
+int dm_topic_init(const char* public_key, const char* device_name);
 
 // impl
 int dm_topic_register(const struct dm_topic *topic);
