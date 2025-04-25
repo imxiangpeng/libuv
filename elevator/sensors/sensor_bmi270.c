@@ -21,7 +21,10 @@ static struct iio_device* _bmi270 = NULL;
 static int bmi270_init() {
     struct iio_channel* ch = NULL;
     if (!_bmi270) {
-        _bmi270 = iio_context_find_device(iio_create_default_context(), IIO_BMI270_NAME);
+        struct iio_context* ctx = iio_create_default_context();
+        if (ctx) {
+            _bmi270 = iio_context_find_device(ctx, IIO_BMI270_NAME);
+        }
     }
 
     if (!_bmi270) {
@@ -72,7 +75,7 @@ static int accelerometer_read(struct sensor_data* data) {
     size_t i = 0;
     struct iio_channel* ch = NULL;
     struct sensor_data_accelerometer* accel = (struct sensor_data_accelerometer*)data;
-    if (!accel) {
+    if (!accel || !_bmi270) {
         return -1;
     }
 
@@ -120,7 +123,7 @@ static int gyroscope_read(struct sensor_data* data) {
     struct iio_channel* ch = NULL;
     struct sensor_data_gyroscope* gyro = (struct sensor_data_gyroscope*)data;
 
-    if (!gyro) {
+    if (!gyro || !_bmi270) {
         return -1;
     }
 

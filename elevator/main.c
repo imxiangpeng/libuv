@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <uv.h>
 #include "floor.h"
 #include "hr_log.h"
+#include "iot/iot.h"
 #include "motion.h"
 #include "sensor.h"
 #include "tui.h"
@@ -57,11 +59,14 @@ int main(int argc, char** argv) {
     }   
     // tui_init();
 
-    // return 0;;
-    motion_run();
+    iot_init();
 
-    while (1) {
-        sleep(2);
-    }
+    //motion_run();
+
+    iot_run(uv_default_loop());
+    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+
+    iot_finally();
+    uv_loop_close(uv_default_loop());
     return 0;
 }

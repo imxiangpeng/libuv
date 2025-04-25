@@ -12,8 +12,12 @@ static const char* IIO_CH_TEMPERATURE_NAME = "temp";
 static struct iio_device* _bmp388 = NULL;
 
 static int bmp388_init() {
-    if (!_bmp388)
-        _bmp388 = iio_context_find_device(iio_create_default_context(), IIO_BMP388_NAME);
+    if (!_bmp388) {
+        struct iio_context* ctx = iio_create_default_context();
+        if (ctx) {
+            _bmp388 = iio_context_find_device(ctx, IIO_BMP388_NAME);
+        }
+    }
 
     if (!_bmp388)
         return -1;

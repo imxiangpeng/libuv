@@ -324,6 +324,12 @@ int floor_relative_height(int num, double* height) {
 // 通常基层可以选择 1 楼，总楼层就是 地下层数 + 地上层数（含 1 楼）
 int floor_enter_calibration(int base_floor, int floors_below_base, int floors_above_base) {
     int floors_max = floors_below_base + floors_above_base;
+    
+    if (_floor_calibration == 1) {
+        HR_LOGE("it's in floor calibration, please wait finished ...\n");
+        return -1;
+    }
+
     _floor_calibration = 1;
     _floor_calibration_index = 0;
 
