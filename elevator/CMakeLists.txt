@@ -37,6 +37,7 @@ set(SOURCES main.c
     iot/iot_mosquitto.c
     iot/iot_topic.c
     iot/iot_topic_property.c
+    iot/iot_topic_calibration.c
     butterworth_filter.c
     moving_window.c)
 
