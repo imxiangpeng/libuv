@@ -22,13 +22,14 @@ struct iot_topic {
     } callback;
 };
 
-
-int iot_mid_generate();
+int iot_generate_mid();
 
 // pub
-int iot_topic_init(struct iot* iot, const char* public_key, const char* device_name);
+int iot_topic_init(const char* public_key, const char* device_name);
 
 // impl
-int iot_topic_register(struct iot* iot, const struct iot_topic *topic);
+int iot_topic_register(const struct iot_topic *topic);
+
+int iot_topic_public_async(const struct iot_topic* topic);
 
 #endif

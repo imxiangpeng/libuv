@@ -513,6 +513,23 @@ int motion_register_observer(struct motion_observer* observer) {
     return -1;
 }
 
+// should use lock?
+int motion_unregister_observer(struct motion_observer* observer) {
+    size_t i = 0;
+
+    for (i = 0; i < ARRAY_SIZE(_motion_observers); i++) {
+        struct motion_observer* obs = _motion_observers[i];
+        if (obs == observer) {
+            _motion_observers[i] = 0;
+            // already exists!
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+
 static int notify_observer(enum motion_observer_action action, void* data) {
     size_t i = 0;
 

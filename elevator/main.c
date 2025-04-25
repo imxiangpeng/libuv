@@ -57,11 +57,11 @@ int main(int argc, char** argv) {
     if (is_calibration) {
         floor_enter_calibration(base_floor, floors_below_base, floors_above_base);
     }   
-    // tui_init();
+    tui_init();
 
     iot_init();
 
-    //motion_run();
+    motion_run();
 
     iot_run(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

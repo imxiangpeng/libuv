@@ -93,7 +93,7 @@ int iot_run(uv_loop_t* loop) {
     char* product_key = TIHUIYAN_PRODUCT_KEY;
 
     HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
-    iot_topic_init(_iot, product_key, device_name);
+    iot_topic_init(product_key, device_name);
     iot_mosquitto_prepare(_iot);
 
     iot_mosquitto_run(_iot, loop);
@@ -105,6 +105,11 @@ int iot_finally(void) {
 }
 
 // impl
-int iot_topic_register(struct iot* iot, const struct iot_topic* topic) {
-    return iot_mosquitto_topic_register(iot, topic);
+int iot_topic_register(const struct iot_topic* topic) {
+    return iot_mosquitto_topic_register(_iot, topic);
+}
+
+int iot_topic_public_async(const struct iot_topic* topic) {
+
+    return iot_mosquitto_public_async(_iot,topic);
 }

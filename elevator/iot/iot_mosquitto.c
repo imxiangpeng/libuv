@@ -13,6 +13,21 @@
 
 #define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
 
+struct iot_mosquitto {
+    struct iot self;
+    bool auto_reconnect;
+    int sock;  // mosquitto socket
+    struct mosquitto* mosq;
+
+    uv_loop_t* loop;
+    uv_timer_t timer;
+    uv_poll_t poll;
+
+    int pevents;
+
+    struct hr_list_head topic_head;
+};
+
 struct iot__topic {
     struct iot_mosquitto* iot;  // current iot
     int mid;
@@ -20,6 +35,7 @@ struct iot__topic {
     struct hr_list_head entry;
     // period topic, auto publish
     uv_timer_t* timer;
+    uv_async_t* async;
 };
 
 static void iot_mosquitto_loop_misc_timer_cb(uv_timer_t* handle);
@@ -61,6 +77,25 @@ static void iot__topic_timer_stop(struct iot__topic* t) {
     }
 }
 
+static void iot__topic_async_cb(uv_async_t* handle) {
+     if (!handle || !handle->data)
+        return;
+    struct iot__topic* t = (struct iot__topic*)handle->data;
+
+    HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
+
+    // public topics
+    void* payload = NULL;
+    int len = 0;
+    t->self->callback.on_publish(&payload, &len);
+    if (payload != NULL && len > 0) {
+        mosquitto_publish(t->iot->mosq, &t->mid, t->self->topic,
+                          len, (const void*)payload,
+                          0, false);
+        free(payload);
+    }
+}
+
 static void _on_log(struct mosquitto* mosq, void* obj, int level, const char* str) {
     (void)mosq;
     (void)obj;
@@ -86,7 +121,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
         // auto subscribe all topics
         struct iot__topic* p = NULL;
         hr_list_for_each_entry(p, &iot->topic_head, entry) {
-        HR_LOGD("%s(%d): topic %s...\n", __FUNCTION__, __LINE__, p->self->topic);
+            HR_LOGD("%s(%d): topic %s...\n", __FUNCTION__, __LINE__, p->self->topic);
             if (p->self->type == TOPIC_TYPE_SUBSCRIBE) {
                 int ret = mosquitto_subscribe(mosq, &p->mid, p->self->topic, 0);
                 HR_LOGD("%s(%d): connected, auto subscribe:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
@@ -109,6 +144,11 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                     p->timer = (uv_timer_t*)calloc(1, sizeof(uv_timer_t));
                     uv_timer_init(iot->poll.loop, p->timer);
                     p->timer->data = p;
+                }
+                if (p->self->type == TOPIC_TYPE_PUBLISH && !p->async) {
+                    p->async = (uv_async_t*)calloc(1, sizeof(uv_timer_t));
+                    p->async->data = p;
+                    uv_async_init(iot->poll.loop, p->async, iot__topic_async_cb);
                 }
                 if (p->timer != NULL) {
                     iot__topic_timer_start(p);
@@ -343,16 +383,14 @@ static void dm__topic_free(struct iot__topic* t) {
     free(t);
 }
 
-
-
 struct iot* iot_mosquitto_new() {
     struct iot_mosquitto* iot = (struct iot_mosquitto*)calloc(1, sizeof(struct iot_mosquitto));
     if (!iot) {
         printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return NULL;
     }
-    
-    HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n",  __FUNCTION__, __LINE__, &iot->self, iot);
+
+    HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n", __FUNCTION__, __LINE__, &iot->self, iot);
     HR_INIT_LIST_HEAD(&iot->topic_head);
 
     return &iot->self;
@@ -361,11 +399,11 @@ struct iot* iot_mosquitto_new() {
 int iot_mosquitto_prepare(struct iot* self) {
     int rc = -1;
     struct mosquitto* mosq = NULL;
-    struct iot_mosquitto *iot = container_of(self, struct iot_mosquitto, self);
+    struct iot_mosquitto* iot = container_of(self, struct iot_mosquitto, self);
 
-    HR_LOGE("%s(%d): id:%s\n",  __FUNCTION__, __LINE__, self->id);
+    HR_LOGE("%s(%d): id:%s\n", __FUNCTION__, __LINE__, self->id);
     if (!self || !iot || !self->id) {
-    HR_LOGE("%s(%d): \n",  __FUNCTION__, __LINE__);
+        HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
         return -1;
     }
     if (!iot->mosq) {
@@ -380,8 +418,8 @@ int iot_mosquitto_prepare(struct iot* self) {
     }
 
     mosq = iot->mosq;
-    
-    HR_LOGE("%s(%d): \n",  __FUNCTION__, __LINE__);
+
+    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     iot->sock = -1;
 
     iot->auto_reconnect = 1;
@@ -404,7 +442,7 @@ int iot_mosquitto_prepare(struct iot* self) {
 
     mosquitto_username_pw_set(iot->mosq, self->username, self->password);
 
-    HR_LOGE("%s(%d): \n",  __FUNCTION__, __LINE__);
+    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     do {
         HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, self->server, self->port);
         // 我们发现我电脑 apt 安装的 mosquitto 使用异步连接阿里 iot 的时候总是连接不上,但是 sync 接口测试正常
@@ -417,17 +455,16 @@ int iot_mosquitto_prepare(struct iot* self) {
             usleep(1000 * 1000);
     } while (rc != MOSQ_ERR_SUCCESS);
 
-    HR_LOGE("%s(%d): \n",  __FUNCTION__, __LINE__);
+    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     iot->sock = mosquitto_socket(iot->mosq);
 
-    HR_LOGE("%s(%d): \n",  __FUNCTION__, __LINE__);
+    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }
 int iot_mosquitto_run(struct iot* self, uv_loop_t* loop) {
-
-    struct iot_mosquitto *iot = container_of(self, struct iot_mosquitto, self);
-    HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n",  __FUNCTION__, __LINE__, self, iot);
-    if (!self|| !iot || !loop)
+    struct iot_mosquitto* iot = container_of(self, struct iot_mosquitto, self);
+    HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n", __FUNCTION__, __LINE__, self, iot);
+    if (!self || !iot || !loop)
         return -1;
     // using uv_poll_init update socket
     // any memory leak ?
@@ -443,8 +480,7 @@ int iot_mosquitto_run(struct iot* self, uv_loop_t* loop) {
 }
 
 int iot_mosquitto_topic_register(struct iot* self, const struct iot_topic* topic) {
-
-    struct iot_mosquitto *iot = container_of(self, struct iot_mosquitto, self);
+    struct iot_mosquitto* iot = container_of(self, struct iot_mosquitto, self);
     HR_LOGE("%s(%d): iot:%p topic:%s\n", __FUNCTION__, __LINE__, self, topic->topic);
     struct iot__topic* t = NULL;
     if (!self || !iot || !topic) {
@@ -460,5 +496,32 @@ int iot_mosquitto_topic_register(struct iot* self, const struct iot_topic* topic
     t->iot = iot;
     // attach topic to iot
     hr_list_add_tail(&t->entry, &iot->topic_head);
+    return 0;
+}
+
+int iot_mosquitto_public_async(struct iot* self, const struct iot_topic* topic) {
+    struct iot_mosquitto* iot = container_of(self, struct iot_mosquitto, self);
+
+    if (!self || !iot || !topic) {
+        return -1;
+    }
+
+    if (topic->type != TOPIC_TYPE_PUBLISH) {
+        HR_LOGE("%s(%d): topic is not publish: %s\n", __FUNCTION__, __LINE__, topic->name);
+        return -1;
+    }
+    struct iot__topic* p = NULL;
+    hr_list_for_each_entry(p, &iot->topic_head, entry) {
+        // ignore publish response message
+        if (p->self->type != TOPIC_TYPE_PUBLISH) {
+            continue;
+        }
+
+        if (p->self == topic) {
+            uv_async_send(p->async);
+            break;
+        }
+    }
+
     return 0;
 }

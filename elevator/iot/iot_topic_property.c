@@ -19,7 +19,7 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     // test code, please only response when needed
-    snprintf(tmp, sizeof(tmp), "%d", iot_mid_generate());
+    snprintf(tmp, sizeof(tmp), "%d", iot_generate_mid());
     cJSON_AddStringToObject(root, "id", tmp);
     cJSON_AddStringToObject(root, "version", "1.0");
 
@@ -73,7 +73,7 @@ static struct iot_topic _iot_property_topics[] = {
         .callback.on_message = _on_property_set_message,
     }};
 
-int iot_topic_property_init(struct iot* iot, const char* public_key, const char* device_name) {
+int iot_topic_property_init(const char* public_key, const char* device_name) {
     if (!public_key || !device_name) {
         return -1;
     }
@@ -81,7 +81,7 @@ int iot_topic_property_init(struct iot* iot, const char* public_key, const char*
     for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
         struct iot_topic* t = &_iot_property_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
-        iot_topic_register(iot, t);
+        iot_topic_register(t);
     }
 
     return 0;
