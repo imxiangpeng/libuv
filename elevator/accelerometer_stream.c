@@ -40,6 +40,7 @@ struct accelerometer_stream {
     double high;
 
     double G;
+    int inverted;
 
     int calibration;
     int calibration_retries;
@@ -128,7 +129,14 @@ static int accelerometer_stream_open(struct motion_stream* self) {
 
     s->sensor->read(&accel.self);
 
+    if (accel.x[2] < 0) {
+        s->inverted = 1;
+    }
+
     s->G = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    if (s->inverted) {
+        s->G *= -1.0;
+    }
     
     // update ekf status
     s->ekf.x[3] = s->G;
@@ -150,7 +158,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         return -1;
     }
 
-    assert(count == 4);
+    assert(count >= 5);
 
     if (s->now == 0) {
         dt = 0;
@@ -176,13 +184,11 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #endif
 
     HR_LOGD("dt:%f\n", dt);
-    accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
-
     // it indicates that the camera is inverted, when z < 0
-    if (accel.x[2] < 0) {
+    accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    if (s->inverted) {
         accel_union *= -1.0;
     }
-
     accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
 
     _ekf_run_model(s, accel_union, dt);
@@ -192,7 +198,8 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     p[0] = s->ekf.x[2];
     p[1] = s->velocity;
     p[2] = s->distance;
-    p[3] = fabs(s->ekf.x[2]);
+    p[3] = s->ekf.x[2];
+    p[4] = s->ekf.x[3];
 
     calibration(s, s->ekf.x[3]);
     HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",

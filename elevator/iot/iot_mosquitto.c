@@ -78,9 +78,11 @@ static void iot__topic_timer_stop(struct iot__topic* t) {
 }
 
 static void iot__topic_async_cb(uv_async_t* handle) {
-     if (!handle || !handle->data)
+    struct iot__topic* t = NULL;
+    if (!handle || !handle->data)
         return;
-    struct iot__topic* t = (struct iot__topic*)handle->data;
+
+    t = (struct iot__topic*)handle->data;
 
     HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
 
@@ -139,7 +141,8 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                         free(payload);
                     }
                 }
-                // create topic timer delay when it's connected
+#if 0  // move to iot_mosquitto_run
+       // create topic timer delay when it's connected
                 if (p->self->type == TOPIC_TYPE_PUBLISH && p->self->period > 0 && !p->timer) {
                     p->timer = (uv_timer_t*)calloc(1, sizeof(uv_timer_t));
                     uv_timer_init(iot->poll.loop, p->timer);
@@ -150,6 +153,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                     p->async->data = p;
                     uv_async_init(iot->poll.loop, p->async, iot__topic_async_cb);
                 }
+#endif
                 if (p->timer != NULL) {
                     iot__topic_timer_start(p);
                 }
@@ -223,8 +227,9 @@ static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitt
             continue;
         }
 
-        if (p->self->callback.on_message)
+        if (p->self->callback.on_message) {
             p->self->callback.on_message(message->payload, message->payloadlen);
+        }
 
         break;
     }
@@ -462,6 +467,7 @@ int iot_mosquitto_prepare(struct iot* self) {
     return 0;
 }
 int iot_mosquitto_run(struct iot* self, uv_loop_t* loop) {
+    struct iot__topic* p = NULL;
     struct iot_mosquitto* iot = container_of(self, struct iot_mosquitto, self);
     HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n", __FUNCTION__, __LINE__, self, iot);
     if (!self || !iot || !loop)
@@ -476,6 +482,22 @@ int iot_mosquitto_run(struct iot* self, uv_loop_t* loop) {
     uv_timer_init(loop, &iot->timer);
     iot->timer.data = iot;
     uv_timer_start(&iot->timer, iot_mosquitto_loop_misc_timer_cb, 1000, 1000);
+
+    // init topics
+    hr_list_for_each_entry(p, &iot->topic_head, entry) {
+        // create topic timer delay when it's connected
+        if (p->self->type == TOPIC_TYPE_PUBLISH && p->self->period > 0 /*&& !p->timer*/) {
+            p->timer = (uv_timer_t*)calloc(1, sizeof(uv_timer_t));
+            uv_timer_init(iot->poll.loop, p->timer);
+            p->timer->data = p;
+        }
+        if (p->self->type == TOPIC_TYPE_PUBLISH /*&& !p->async*/) {
+            p->async = (uv_async_t*)calloc(1, sizeof(uv_timer_t));
+            p->async->data = p;
+            uv_async_init(iot->poll.loop, p->async, iot__topic_async_cb);
+        }
+    }
+
     return 0;
 }
 
@@ -518,6 +540,10 @@ int iot_mosquitto_public_async(struct iot* self, const struct iot_topic* topic) 
         }
 
         if (p->self == topic) {
+            if (!p->async) {
+                // connection is not finish, ignore it
+                continue;
+            }
             uv_async_send(p->async);
             break;
         }

@@ -14,6 +14,7 @@
 #include "hr_log.h"
 #include "motion.h"
 #include "moving_window.h"
+#include "sensor.h"
 #include "time_utils.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -72,6 +73,8 @@ struct accelerometer_stream {
     double distance;  // current running distance, maybe reset to zero when running finished
     double velocity;  // velocity, +-
 
+    int is_calibration;
+
     enum motion_state state;
 } _accelerometer_motion;
 
@@ -80,6 +83,8 @@ struct barometer_stream {
     double height;
     double distance;
     double velocity;
+
+    int is_calibration;
 
     struct moving_window* mw;
     int64_t delay_stop_ts_ns;
@@ -121,8 +126,9 @@ static void* _accelerometer_thread_routin(void* args) {
     }
 #endif
 
+    _accelerometer_motion.is_calibration = -1;
     struct motion_stream* input = _accelerometer_motion.stream;
-    double result[4] = {0};
+    double result[8] = {0};
     for (;;) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
@@ -130,13 +136,34 @@ static void* _accelerometer_thread_routin(void* args) {
         int ret = input->read(input, (void*)result, ARRAY_SIZE(result));
         if (ret != 0) {
             // error or calibration not complete
-            if (ret == -2) {
+            if (ret == -2 || 1 != input->calibration_completed(input)) {
                 HR_LOGD("accelerometer is under calibration\n");
+                if (_accelerometer_motion.is_calibration != 1) {
+                    _accelerometer_motion.is_calibration = 1;
+
+                    struct motion_sensor_calibration_event ev;
+
+                    ev.type = SENSOR_ACCELEROMETER;
+                    ev.is_calibration = 1;
+                    notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
+                }
             }
             goto next_iteration;
         }
 
-        double accel = result[0];
+        // read success it mean calibration is finished
+        if (_accelerometer_motion.is_calibration != 0) {
+            struct motion_sensor_calibration_event ev;
+
+            _accelerometer_motion.is_calibration = 0;
+
+            ev.type = SENSOR_ACCELEROMETER;
+            ev.is_calibration = 0;
+            ev.value[0] = result[4];  // id 4 --> local G
+            notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
+        }
+
+        double accel = fabs(result[0]);
         double velocity = round(result[1] * 100) / 100;
         double distance = round(result[2] * 1000) / 1000;
 
@@ -529,7 +556,39 @@ int motion_unregister_observer(struct motion_observer* observer) {
     return -1;
 }
 
+int motion_enter_sensor_calibration() {
+    // not only support accelerometer
+    if (_accelerometer_motion.stream) {
+        _accelerometer_motion.stream->enter_calibration(_accelerometer_motion.stream);
+    }
 
+    return 0;
+}
+int motion_calibrate_at_floor(int floor) {
+    double height = 0;
+    if (floor_relative_height(floor, &height) != 0) {
+        HR_LOGD("%s(%d): calibrate at floor %d failed\n", __FUNCTION__, __LINE__, floor);
+        return -1;
+    }
+
+    _accelerometer_motion.height = height;
+
+    HR_LOGD("%s(%d): calibrate at floor %d -> height: %f success\n", __FUNCTION__, __LINE__, floor, height);
+    return 0;
+}
+
+int motion_calibrate_at_height(double height) {
+    int floor;
+    char label[64] = {0};
+    _accelerometer_motion.height = height;
+
+    if (0 != floor_predict(height, &floor, label, sizeof(label))) {
+        HR_LOGD("%s(%d): calibrate at height %d failed\n", __FUNCTION__, __LINE__, floor);
+        return -1;
+    }
+    HR_LOGD("%s(%d): calibrate at height %f -> floor: %d(%s) success\n", __FUNCTION__, __LINE__, height, floor, label);
+    return 0;
+}
 static int notify_observer(enum motion_observer_action action, void* data) {
     size_t i = 0;
 
@@ -545,6 +604,11 @@ static int notify_observer(enum motion_observer_action action, void* data) {
                 case MOTION_OBSERVER_ACTION_ON_EVENT:
                     if (obs->on_event) {
                         obs->on_event((struct motion_event*)data);
+                    }
+                    break;
+                case MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION:
+                    if (obs->on_sensor_calibration) {
+                        obs->on_sensor_calibration((struct motion_sensor_calibration_event*)data);
                     }
                     break;
                 default:
