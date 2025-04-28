@@ -46,13 +46,6 @@ static pthread_mutex_t _queue_mutex;
 
 static struct iot_topic _iot_calibration_topics[];
 
-static int _floor_calibration = 0;
-static int _floor_calibration_index = 0;
-static int _floors_below_base = 0;
-static int _floors_above_base = 0;
-static int _floor_base = 1;
-
-static void _iot_floor_calibration_observer_on_event(struct motion_event* data);
 static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
@@ -61,10 +54,6 @@ static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY, _CalibrateAtFloorManually},
     {SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY, _CalibrateAtHeightManually},
     {NULL, NULL},  // keep it
-};
-
-static struct motion_observer _calibration_observer = {
-    .on_event = _iot_floor_calibration_observer_on_event,
 };
 
 static struct calibration_event* calibration_event_alloc() {
@@ -107,7 +96,6 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
         return -1;
     }
 
-
     hr_list_for_each_entry(e, &_auto_floor_calibration_message_queue, entry) {
         HR_LOGE("%s(%d): mxp id:%d, floor:%d, label:%s, height:%f\n", __FUNCTION__, __LINE__, e->id, e->floor, e->label, e->height);
     }
@@ -140,7 +128,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
-#if 1 
+#if 1
     if (!hr_list_empty(&_auto_floor_calibration_message_queue)) {
         // when queue is not empty, we should trigger again
         // because uv_async merges multiple requests and triggers the callback only once
@@ -154,50 +142,6 @@ static int _on_reply_message(void* payload, int len) {
     printf("reply message %d -> %s\n", len, (char*)payload);
     return 0;
 }
-
-static void _iot_floor_calibration_observer_on_event(struct motion_event* data) {
-    if (!data)
-        return;
-    if (data->state == STOPPED) {
-        double height = data->distance;
-        HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f, _floor_calibration:%d\n", __FUNCTION__, __LINE__, height, data->pressure, _floor_calibration);
-
-        if (_floor_calibration) {
-            struct calibration_event* e = calibration_event_alloc();
-            e->id = _floor_calibration_index;
-            e->height = height;
-            if (_floor_calibration_index < _floors_below_base) {
-                e->floor = _floor_calibration_index - _floors_below_base;
-            } else {
-                e->floor = _floor_calibration_index - _floors_below_base + _floor_base;
-            }
-            snprintf(e->label, sizeof(e->label), "%d", e->floor);
-            HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, e->floor, e->height, _floor_calibration_index);
-
-            send_calibration_event(e);
-
-            _floor_calibration_index++;
-            // we can not detect the last floor
-            if (_floor_calibration_index == _floors_below_base + _floors_above_base - 1) {
-                // process last floor manually
-                //
-                struct calibration_event* e = calibration_event_alloc();
-                e->id = _floor_calibration_index;
-                e->floor = _floor_calibration_index - _floors_below_base + _floor_base;
-                snprintf(e->label, sizeof(e->label), "%d", e->floor);
-                // use previous height as the last floor height
-                e->height = height;
-                _floor_calibration = 0;
-
-                send_calibration_event(e);
-                HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
-
-                motion_unregister_observer(&_calibration_observer);
-            }
-        }
-    }
-}
-
 // {"BaseFloor":1,"FloorsBelow":2,"FloorsAbove":22}
 static int _on_svc_message(void* payload, int len) {
     char* method = NULL;
@@ -230,7 +174,7 @@ static int _on_svc_message(void* payload, int len) {
     for (act = &_svc_action_tbl[0]; act != NULL; act++) {
         // thing.service.StartAutoFloorCalibration
         if (!strcmp(act->name, method)) {
-            /*int rc =*/ act->method(params);
+            /*int rc =*/act->method(params);
             break;
         }
     }
@@ -239,6 +183,30 @@ static int _on_svc_message(void* payload, int len) {
 
     return 0;
 }
+
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height) {
+    struct calibration_event* e = NULL;
+    if (!label) {
+        return;
+    }
+    HR_LOGD("%s(%d): auto calibration event:%d %d %s %f\n", __FUNCTION__, __LINE__, id, floor, label, height);
+
+    e = calibration_event_alloc();
+    if (!e) {
+        return;
+    }
+    e->id = id;
+    e->floor = floor;
+    e->height = height;
+
+    if (label) {
+        snprintf(e->label, sizeof(e->label), "%s", label);
+    } else {
+        snprintf(e->label, sizeof(e->label), "%d", floor);
+    }
+    send_calibration_event(e);
+}
+
 // {"BaseFloor":1,"FloorsBelow":2,"FloorsAbove":22}
 static int _StartAutoFloorCalibration(cJSON* params) {
     int floor_base = 1;
@@ -269,14 +237,8 @@ static int _StartAutoFloorCalibration(cJSON* params) {
 
     HR_LOGD("%s(%d): enter calibration: base: %d below: %d above: %d\n", __FUNCTION__, __LINE__, floor_base, floors_below_base, floors_above_base);
 
-    motion_register_observer(&_calibration_observer);
-    _floor_base = floor_base;
-    _floors_below_base = floors_below_base;
-    _floors_above_base = floors_above_base;
-    _floor_calibration = 1;
-    _floor_calibration_index = 0;
     // also  notify floor model
-    floor_enter_calibration(floor_base, floors_below_base, floors_above_base);
+    floor_enter_calibration_with_callback(floor_base, floors_below_base, floors_above_base, _on_floor_calibration_event);
 
     return 0;
 }
@@ -289,7 +251,7 @@ static int _CalibrateAtFloorManually(cJSON* params) {
     HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "Floor"));
     if (isnan(val)) {
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
+        HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -302,7 +264,7 @@ static int _CalibrateAtHeightManually(cJSON* params) {
     HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "Height"));
     if (isnan(val)) {
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
+        HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
