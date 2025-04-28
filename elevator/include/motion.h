@@ -47,6 +47,8 @@ struct motion_observer{
 
 
 int motion_initalize(int argc, char** argv);
+int motion_deinitalize(void);
+
 int motion_register_observer(struct motion_observer *observer);
 int motion_unregister_observer(struct motion_observer* observer);
 int motion_run(void);

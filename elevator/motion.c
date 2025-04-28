@@ -143,6 +143,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
                     struct motion_sensor_calibration_event ev;
 
+                    memset((void*)&ev, 0, sizeof(ev));
                     ev.type = SENSOR_ACCELEROMETER;
                     ev.is_calibration = 1;
                     notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
@@ -157,6 +158,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
             _accelerometer_motion.is_calibration = 0;
 
+            memset((void*)&ev, 0, sizeof(ev));
             ev.type = SENSOR_ACCELEROMETER;
             ev.is_calibration = 0;
             ev.value[0] = result[4];  // id 4 --> local G
@@ -466,11 +468,11 @@ static int motion_acceleration_start(void) {
     }
 
     HR_LOGD("max level:%d\n", param.sched_priority);
-    ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    /*ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_attr_setdetachstate\n", __FUNCTION__, __LINE__);
         return -1;
-    }
+    }*/
 
     ret = pthread_create(&_accel_tid, &attr, _accelerometer_thread_routin, NULL);
     if (0 != ret) {
@@ -521,6 +523,38 @@ int motion_run(void) {
     return 0;
 }
 
+int motion_deinitalize(void) {
+    if (_barometer_tid != 0) {
+        pthread_cancel(_barometer_tid);
+        pthread_join(_barometer_tid, NULL);
+        _barometer_tid = 0;
+    }
+
+    if (_accel_tid != 0) {
+        pthread_cancel(_accel_tid);
+        pthread_join(_accel_tid, NULL);
+        _accel_tid = 0;
+    }
+
+    _accelerometer_motion.stream->close(_accelerometer_motion.stream);
+    accelerometer_stream_deinit(_accelerometer_motion.stream);
+    _accelerometer_motion.stream = NULL;
+    _barometer_motion.stream->close(_barometer_motion.stream);
+    barometer_stream_deinit(_barometer_motion.stream);
+    _barometer_motion.stream = NULL;
+    if (_barometer_motion.mw) {
+        moving_window_release(_barometer_motion.mw);
+        _barometer_motion.mw = NULL;
+    }
+
+#if DUMP_DATA_TO_FILE
+    if (_dump_fp) {
+        fclose(_dump_fp);
+        _dump_fp = NULL;
+    }
+#endif
+    return 0;
+}
 int motion_register_observer(struct motion_observer* observer) {
     size_t i = 0;
 
@@ -583,7 +617,7 @@ int motion_calibrate_at_height(double height) {
     _accelerometer_motion.height = height;
 
     if (0 != floor_predict(height, &floor, label, sizeof(label))) {
-        HR_LOGD("%s(%d): calibrate at height %d failed\n", __FUNCTION__, __LINE__, floor);
+        HR_LOGD("%s(%d): calibrate at height %f failed\n", __FUNCTION__, __LINE__, height);
         return -1;
     }
     HR_LOGD("%s(%d): calibrate at height %f -> floor: %d(%s) success\n", __FUNCTION__, __LINE__, height, floor, label);

@@ -95,7 +95,6 @@ int floor_load_model(const char* path) {
 
         if (isnan(num) || !label) {
             HR_LOGE("invalid .............\n");
-
             free(_building.model);
             cJSON_Delete(root);
             return -1;
@@ -118,24 +117,24 @@ int floor_load_model(const char* path) {
         _building.model[i].height_relative = _building.model[i + 1].height_relative - _building.model[i].height;
 
         HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
-               i, _building.model[i].label,
-               _building.model[i].height, _building.model[i].height_relative);
+                i, _building.model[i].label,
+                _building.model[i].height, _building.model[i].height_relative);
     }
 
     for (i = base_id + 1; i < floors; i++) {
         _building.model[i].height_relative = _building.model[i - 1].height + _building.model[i - 1].height_relative;
 
         HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
-               i, _building.model[i].label,
-               _building.model[i].height, _building.model[i].height_relative);
+                i, _building.model[i].label,
+                _building.model[i].height, _building.model[i].height_relative);
     }
 
     HR_LOGD("=========================\n");
 
     for (i = 0; i < floors; i++) {
         HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
-               i, _building.model[i].label,
-               _building.model[i].height, _building.model[i].height_relative);
+                i, _building.model[i].label,
+                _building.model[i].height, _building.model[i].height_relative);
     }
     cJSON_Delete(root);
 
@@ -219,6 +218,7 @@ static int floor_store_model() {
     cJSON_Delete(root);
     return 0;
 }
+
 static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
@@ -263,6 +263,15 @@ static struct motion_observer _floor_observer = {
 int floor_init() {
     floor_load_model("floor_model.json");
     motion_register_observer(&_floor_observer);
+    return 0;
+}
+
+int floor_deinit() {
+    if (_building.model) {
+        free(_building.model);
+        _building.model = NULL;
+    }
+    memset((void*)&_building, 0, sizeof(_building));
     return 0;
 }
 
@@ -324,7 +333,7 @@ int floor_relative_height(int num, double* height) {
 // 通常基层可以选择 1 楼，总楼层就是 地下层数 + 地上层数（含 1 楼）
 int floor_enter_calibration(int base_floor, int floors_below_base, int floors_above_base) {
     int floors_max = floors_below_base + floors_above_base;
-    
+
     if (_floor_calibration == 1) {
         HR_LOGE("it's in floor calibration, please wait finished ...\n");
         return -1;

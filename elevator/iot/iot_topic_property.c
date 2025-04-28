@@ -40,7 +40,7 @@ static int _on_publish(void** payload, int* len) {
     // test code, please only response when needed
     snprintf(tmp, sizeof(tmp), "%d", iot_generate_mid());
     cJSON_AddStringToObject(root, "id", tmp);
-    cJSON_AddStringToObject(root, "version", "1.0");
+    cJSON_AddStringToObject(root, "version", "1.0.0");
 
     param = cJSON_AddObjectToObject(root, "params");
     cJSON_AddNumberToObject(param, "pressure", 97.973);

@@ -9,9 +9,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include "hr_log.h"
 #include "motion.h"
 #include "time_utils.h"
-#include "hr_log.h"
 
 #define PERIOD_MS 50
 #define SPEED_DEFAULT_AXIS_MAX 1  // 4 m/s
@@ -36,7 +36,7 @@ struct tui_data {
     double values[TUI_DATA_CACHED_SIZE];
 };
 
-static int tui_data_update(struct tui_data *w, double val) {
+static int tui_data_update(struct tui_data* w, double val) {
     w->values[w->index] = val;
 
     w->index = (w->index + 1) % TUI_DATA_CACHED_SIZE;  // circle buffer
@@ -48,7 +48,7 @@ static int tui_data_update(struct tui_data *w, double val) {
     }
     return 0;
 }
-static pthread_t _tui_tid = -1;
+static pthread_t _tui_tid = 0;
 static volatile sig_atomic_t winch_received = 0;
 
 // top: 4 line, max width
@@ -56,7 +56,7 @@ static volatile sig_atomic_t winch_received = 0;
 // distance:  left
 // |--------------------------------------|
 
-static WINDOW *_tui_panel[_PANEL_MAX] = {0};
+static WINDOW* _tui_panel[_PANEL_MAX] = {0};
 
 static struct tui_data _tui_data_windows[4] = {{0}};
 static double _accel_realtime = 0.0;
@@ -71,7 +71,7 @@ static double _barometer_pressure_realtime = 0;
 static double _barometer_speed_realtime = 0;
 static double _barometer_distance_realtime = 0;
 
-static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
+static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     (void)siginfo;
     (void)sigcontext;
 
@@ -80,7 +80,7 @@ static void _signal_action(int signum, siginfo_t *siginfo, void *sigcontext) {
     }
 }
 
-void tui_draw_axes(WINDOW *win, int x, int y, int w, int h) {
+void tui_draw_axes(WINDOW* win, int x, int y, int w, int h) {
     // draw x axis
     for (int i = x; i < x + w; i++) {
         mvwaddch(win, y, i, '-');
@@ -100,7 +100,7 @@ void tui_draw_axes(WINDOW *win, int x, int y, int w, int h) {
     wrefresh(win);
 }
 
-static void tui_draw_curve_reverse(WINDOW *win, struct tui_data *data, int max_label, const char *label) {
+static void tui_draw_curve_reverse(WINDOW* win, struct tui_data* data, int max_label, const char* label) {
     int i = 0, x = 0;
     int rows, cols;
 
@@ -136,7 +136,7 @@ static void tui_draw_curve_reverse(WINDOW *win, struct tui_data *data, int max_l
     }
     wrefresh(win);
 }
-static void *tui_thread_routin(void *args) {
+static void* tui_thread_routin(void* args) {
     (void)args;
     int rows_max, cols_max, rows, cols;
     int max_label;
@@ -298,8 +298,9 @@ static void tui_thread_start(void) {
     pthread_attr_destroy(&attr);
 }
 
-static void _observer_on_status(struct motion_status *st) {
-    if (!st) return;
+static void _observer_on_status(struct motion_status* st) {
+    if (!st)
+        return;
     _accel_realtime = fabs(st->accel);
     _speed_realtime = fabs(st->speed);
     _distance_realtime = fabs(st->distance);
@@ -327,7 +328,7 @@ static struct motion_observer _tui_observer = {
 };
 
 int tui_init() {
-    struct winsize w = { 0, 0, 0, 0 };
+    struct winsize w = {0, 0, 0, 0};
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -336,7 +337,7 @@ int tui_init() {
 
     ioctl(STDERR_FILENO, TIOCGWINSZ, &w);
     printf("t size: %d - %d -%d -%d\n", w.ws_xpixel, w.ws_ypixel, w.ws_col, w.ws_row);
-    //ioctl(STDERR_FILENO, TIOCSWINSZ, &w);
+    // ioctl(STDERR_FILENO, TIOCSWINSZ, &w);
 
     // init ncurses
     initscr();
@@ -356,8 +357,38 @@ int tui_init() {
     return 0;
 }
 
+// not work well with valgrind
 int tui_deinit() {
-    pthread_join(_tui_tid, NULL);
+    if (_tui_tid != 0) {
+        pthread_cancel(_tui_tid);
+        pthread_join(_tui_tid, NULL);
+        _tui_tid = 0;
+    }
+
+    if (_tui_panel[PANEL_TOP]) {
+        delwin(_tui_panel[PANEL_TOP]);
+        _tui_panel[PANEL_TOP] = NULL;
+    }
+
+    if (_tui_panel[PANEL_SPEED]) {
+        delwin(_tui_panel[PANEL_SPEED]);
+        _tui_panel[PANEL_SPEED] = NULL;
+    }
+
+    if (_tui_panel[PANEL_DISTANCE]) {
+        delwin(_tui_panel[PANEL_DISTANCE]);
+        _tui_panel[PANEL_DISTANCE] = NULL;
+    }
+
+    if (_tui_panel[PANEL_BAROMETER_SPEED]) {
+        delwin(_tui_panel[PANEL_BAROMETER_SPEED]);
+        _tui_panel[PANEL_BAROMETER_SPEED] = NULL;
+    }
+
+    if (_tui_panel[PANEL_BAROMETER_DISTANCE]) {
+        delwin(_tui_panel[PANEL_BAROMETER_DISTANCE]);
+        _tui_panel[PANEL_BAROMETER_DISTANCE] = NULL;
+    }
     endwin();
     return 0;
 }

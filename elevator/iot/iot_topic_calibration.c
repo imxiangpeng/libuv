@@ -1,5 +1,6 @@
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +42,7 @@ struct calibration_event {
 };
 
 static HR_LIST_HEAD(_auto_floor_calibration_message_queue);
+static pthread_mutex_t _queue_mutex;
 
 static struct iot_topic _iot_calibration_topics[];
 
@@ -81,13 +83,17 @@ static void calibration_event_free(struct calibration_event* e) {
         return;
     }
 
+    pthread_mutex_lock(&_queue_mutex);
     hr_list_del(&e->entry);
+    pthread_mutex_unlock(&_queue_mutex);
 
     HR_INIT_LIST_HEAD(&e->entry);
 }
 
 static int send_calibration_event(struct calibration_event* m) {
+    pthread_mutex_lock(&_queue_mutex);
     hr_list_add_tail(&m->entry, &_auto_floor_calibration_message_queue);
+    pthread_mutex_unlock(&_queue_mutex);
     return iot_topic_public_async(&_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
 }
 
@@ -101,6 +107,11 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
         return -1;
     }
 
+
+    hr_list_for_each_entry(e, &_auto_floor_calibration_message_queue, entry) {
+        HR_LOGE("%s(%d): mxp id:%d, floor:%d, label:%s, height:%f\n", __FUNCTION__, __LINE__, e->id, e->floor, e->label, e->height);
+    }
+
     e = hr_list_first_entry(&_auto_floor_calibration_message_queue, struct calibration_event, entry);
 
     root = cJSON_CreateObject();
@@ -111,7 +122,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
 
     snprintf(tmp, sizeof(tmp), "%d", iot_generate_mid());
     cJSON_AddStringToObject(root, "id", tmp);
-    cJSON_AddStringToObject(root, "version", "1.0");
+    cJSON_AddStringToObject(root, "version", "1.0.0");
 
     param = cJSON_AddObjectToObject(root, "params");
     cJSON_AddNumberToObject(param, "Id", e->id);
@@ -129,12 +140,13 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
-    
+#if 1 
     if (!hr_list_empty(&_auto_floor_calibration_message_queue)) {
         // when queue is not empty, we should trigger again
         // because uv_async merges multiple requests and triggers the callback only once
         return iot_topic_public_async(&_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
     }
+#endif
     return 0;
 }
 
@@ -191,7 +203,7 @@ static int _on_svc_message(void* payload, int len) {
     char* method = NULL;
     struct svc_action* act = NULL;
     cJSON *root = NULL, *params = NULL;
-    printf("%s(%d): .......\n", __FUNCTION__, __LINE__);
+
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
         return -1;
@@ -217,10 +229,8 @@ static int _on_svc_message(void* payload, int len) {
 
     for (act = &_svc_action_tbl[0]; act != NULL; act++) {
         // thing.service.StartAutoFloorCalibration
-        HR_LOGE("name:%s vs method:%s\n", act->name, method);
         if (!strcmp(act->name, method)) {
-            int rc = act->method(params);
-            HR_LOGD("call method failed: %d\n", rc);
+            /*int rc =*/ act->method(params);
             break;
         }
     }
@@ -340,6 +350,7 @@ int iot_topic_calibration_init(const char* public_key, const char* device_name) 
         return -1;
     }
 
+    pthread_mutex_init(&_queue_mutex, NULL);
     for (size_t i = 0; i < ARRAY_SIZE(_iot_calibration_topics); i++) {
         struct iot_topic* t = &_iot_calibration_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);

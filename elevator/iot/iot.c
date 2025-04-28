@@ -46,7 +46,7 @@ int iot_init() {
 
     mosquitto_lib_init();
 
-    _iot = iot_mosquitto_new();
+    _iot = iot_mosquitto_alloc();
     if (!_iot)
         return -1;
 
@@ -99,7 +99,10 @@ int iot_run(uv_loop_t* loop) {
     return 0;
 }
 
-int iot_finally(void) {
+int iot_deinit(void) {
+    iot_mosquitto_release(_iot);
+    _iot = NULL;
+    mosquitto_lib_cleanup();
     return 0;
 }
 

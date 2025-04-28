@@ -15,5 +15,5 @@ int iot_init();
 
 int iot_run(uv_loop_t* loop);
 
-int iot_finally();
+int iot_deinit();
 #endif

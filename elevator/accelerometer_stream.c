@@ -32,7 +32,7 @@ struct accelerometer_stream {
 
     int sampling_frequency;
     struct sensor* sensor;
-    struct butterworth_filter* bw_filter;
+    // struct butterworth_filter* bw_filter;
 
     double distance;
     double velocity;
@@ -189,7 +189,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     if (s->inverted) {
         accel_union *= -1.0;
     }
-    accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
+    // accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
 
     _ekf_run_model(s, accel_union, dt);
 
@@ -252,8 +252,13 @@ static int accelerometer_stream_reset(struct motion_stream* self) {
 }
 
 static int accelerometer_stream_close(struct motion_stream* self) {
-    (void)self;
+    struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
+    if (!self || !s) {
+        return -1;
+    }
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    s->sensor->close();
+    s->sensor = NULL;
     return 0;
 }
 
@@ -272,7 +277,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     s->self.reset = accelerometer_stream_reset;
     s->self.close = accelerometer_stream_close;
 
-    s->bw_filter = butterworth_filter_init(5, sampling_frequency);
+    // s->bw_filter = butterworth_filter_init(5, sampling_frequency);
 
     s->mw = moving_window_init(sampling_frequency / 2);
 
@@ -284,6 +289,17 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
     if (!self || !s) {
         return -1;
+    }
+    
+
+    if (s->mw) {
+        moving_window_release(s->mw);
+        s->mw = NULL;
+    }
+    
+    if (s->calibration_data) {
+        free(s->calibration_data);
+        s->calibration_data = NULL;
     }
     free(s);
     return 0;
