@@ -78,6 +78,7 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
     return UBUS_STATUS_INVALID_ARGUMENT;
 }
 
+// ubus -s /tmp/ubus.sock subscribe elevatord
 static void _on_floor_calibration_event(int id, int floor, const char* label, double height) {
     struct ubus_context* ctx = uelevatord_get_ubus_ctx();
     if (!ctx) {
@@ -88,7 +89,6 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
 
     memset((void*)&b, 0, sizeof(b));
 
-    HR_LOGD("%s(%d): auto calibration event:%d %d %s %f\n", __FUNCTION__, __LINE__, id, floor, label, height);
     blob_buf_init(&b, 0);
     blobmsg_add_u32(&b, "Id", id);
     blobmsg_add_u32(&b, "Floor", floor);

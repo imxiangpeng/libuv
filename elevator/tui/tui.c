@@ -302,7 +302,7 @@ static void _observer_on_status(struct motion_status* st) {
     if (!st)
         return;
     _accel_realtime = fabs(st->accel);
-    _speed_realtime = fabs(st->speed);
+    _speed_realtime = fabs(st->velocity);
     _distance_realtime = fabs(st->distance);
     _height_realtime = st->height;
     _floor_realtime = st->floor;

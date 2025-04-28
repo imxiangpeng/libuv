@@ -14,9 +14,15 @@ enum motion_observer_action {
     MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION
 };
 
+enum motion_direction {
+    DIRECTION_NONE = 0,
+    DIRECTION_UP,
+    DIRECTION_DOWN,
+};
+
 struct motion_status{
     double accel;
-    double speed;
+    double velocity;
     double distance;
     double height;
     int floor;
@@ -28,6 +34,7 @@ struct motion_status{
 
 struct motion_event {
     enum motion_state state;
+    enum motion_direction direction;
     double distance;
     double pressure;
 };

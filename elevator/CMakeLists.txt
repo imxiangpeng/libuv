@@ -42,6 +42,7 @@ set(SOURCES main.c
     uobject/uelevatord.c
     uobject/uobject_elevatord.c
     butterworth_filter.c
+    hr_buffer.c
     moving_window.c)
 
 if(USE_LOCAL_SIMULATE_DATA)

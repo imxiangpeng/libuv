@@ -195,7 +195,9 @@ static void* _accelerometer_thread_routin(void* args) {
 
                 struct motion_event ev = {
                     .state = new_state,
-                    .distance = distance};
+                    .direction = _accelerometer_motion.velocity > 0 ? DIRECTION_UP : DIRECTION_DOWN,
+                    .distance = distance,
+                };
 
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
             }
@@ -223,7 +225,9 @@ static void* _accelerometer_thread_routin(void* args) {
 #endif
                 struct motion_event ev = {
                     .state = new_state,
-                    .distance = distance};
+                    .direction = DIRECTION_NONE,
+                    .distance = distance,
+                };
 
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
             }
@@ -233,6 +237,7 @@ static void* _accelerometer_thread_routin(void* args) {
         floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
         HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n",
                 accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
+
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
             snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance);
@@ -242,11 +247,13 @@ static void* _accelerometer_thread_routin(void* args) {
 
         struct motion_status stat = {
             .accel = accel,
-            .speed = fabs(velocity),
+            .velocity = velocity,
             .distance = distance,
             .height = _accelerometer_motion.height + _accelerometer_motion.distance,
             .floor = atoi(floor_label),
-            .running = (new_state != STOPPED)};
+            .running = (new_state != STOPPED),
+        };
+
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
 
     next_iteration:

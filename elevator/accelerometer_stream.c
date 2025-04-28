@@ -369,7 +369,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
     // HR_LOGD("x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
     ekf_predict(ekf, fx, F, Q);
 
-    if (fabs(linear_accel) < 0.03) {
+    if (fabs(linear_accel) < 0.05) {
         linear_accel = 0;
     }
 
