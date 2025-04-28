@@ -60,7 +60,7 @@ double Q[EKF_N * EKF_N] = {
     0, 0, 1e-1, 0,
     0, 0, 0, 1e-3};
 
-static const double R[EKF_M * EKF_M] = {1e-1, 0,                                        0, 1e-3};
+static const double R[EKF_M * EKF_M] = {1e-1, 0, 0, 1e-3};
 
 static const double ACCEL_JITTER_STD_THRESHOLD = 0.03;
 static const double G = 9.81;
@@ -121,7 +121,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
     s->sensor = sensor_instance(SENSOR_ACCELEROMETER);
 
     if (0 != s->sensor->init()) {
-        HR_LOGE("%s(%d): can open open accelerometer ...\n");
+        HR_LOGE("%s(%d): can open open accelerometer ...\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -137,7 +137,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
     if (s->inverted) {
         s->G *= -1.0;
     }
-    
+
     // update ekf status
     s->ekf.x[3] = s->G;
 
@@ -162,9 +162,9 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     if (s->now == 0) {
         dt = 0;
-		s->now = get_monotonic_nanoseconds();
+        s->now = get_monotonic_nanoseconds();
     } else {
-	    int64_t prev = s->now;
+        int64_t prev = s->now;
 
         s->now = get_monotonic_nanoseconds();
         dt = (s->now - prev) / 1000000000.0;
@@ -284,19 +284,17 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     return &s->self;
 }
 
-
 int accelerometer_stream_deinit(struct motion_stream* self) {
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
     if (!self || !s) {
         return -1;
     }
-    
 
     if (s->mw) {
         moving_window_release(s->mw);
         s->mw = NULL;
     }
-    
+
     if (s->calibration_data) {
         free(s->calibration_data);
         s->calibration_data = NULL;

@@ -11,6 +11,7 @@ FIND_LIBRARY(libmosquitto_library NAMES mosquitto)
 
 #find_package(LibXml2 REQUIRED)
 
+add_subdirectory(uobject)
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 
@@ -38,6 +39,8 @@ set(SOURCES main.c
     iot/iot_topic.c
     iot/iot_topic_property.c
     iot/iot_topic_calibration.c
+    uobject/uelevatord.c
+    uobject/uobject_elevatord.c
     butterworth_filter.c
     moving_window.c)
 
@@ -62,5 +65,6 @@ TARGET_LINK_LIBRARIES(elevatord m)
 TARGET_LINK_LIBRARIES(elevatord pthread)
 TARGET_LINK_LIBRARIES(elevatord ncurses)
 TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
+TARGET_LINK_LIBRARIES(elevatord uobject)
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

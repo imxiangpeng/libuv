@@ -1,3 +1,4 @@
+#include "floor.h"
 
 #define _GNU_SOURCE
 #include <fcntl.h>
@@ -30,8 +31,10 @@ struct building_model {
     struct floor* model;
 } _building = {0, 0, 0, NULL};
 
+// only support one caller
 static int _floor_calibration = 0;
 static int _floor_calibration_index = 0;
+static floor_calibration_cb _floor_calibration_cb = NULL;
 int floor_load_model(const char* path) {
     int ret = -1;
     ssize_t len = 0;
@@ -237,6 +240,9 @@ static void _observer_on_event(struct motion_event* data) {
             snprintf(f->label, sizeof(f->label), "%d", f->num);
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
 
+            if (_floor_calibration_cb) {
+                _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height);
+            }
             _floor_calibration_index++;
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d, floor_nums:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index, _building.floor_nums);
             // we can not detect the last floor
@@ -247,10 +253,15 @@ static void _observer_on_event(struct motion_event* data) {
                 snprintf(f->label, sizeof(f->label), "%d", f->num);
                 // use previous height as the last floor height
                 f->height = height;
-                _floor_calibration = 0;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
                 floor_store_model();
+
+                if (_floor_calibration_cb) {
+                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height);
+                    _floor_calibration_cb = NULL;
+                }
+                _floor_calibration = 0;
             }
         }
     }
@@ -367,5 +378,13 @@ int floor_enter_calibration(int base_floor, int floors_below_base, int floors_ab
     bf->num = base_floor;
     snprintf(bf->label, sizeof(bf->label), "%d", base_floor);
 
+    return 0;
+}
+
+int floor_enter_calibration_with_callback(int base_floor, int floors_below_base, int floors_above_base, floor_calibration_cb cb) {
+    if (0 != floor_enter_calibration(base_floor, floors_below_base, floors_above_base)) {
+        return -1;
+    }
+    _floor_calibration_cb = cb;
     return 0;
 }
