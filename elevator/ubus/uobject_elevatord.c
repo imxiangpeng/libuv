@@ -88,7 +88,7 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     blobmsg_add_string(&b, "Label", label);
     blobmsg_add_double(&b, "Height", height);
 
-    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, 1000);
+    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1/*no block*/);
 }
 
 // ubus call elevatord startAutoFloorCalibration '{"BaseFloor":1, "FloorsBelow":1, "FloorsAbove":22}'

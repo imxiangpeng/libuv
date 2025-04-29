@@ -28,7 +28,10 @@ extern struct ubus_object _elevatord_object;
 
 static int64_t _now = 0;
 static struct blob_buf _b;
+static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
+static struct hrbuffer _jitter_accel_buffer;
+static struct hrbuffer _jitter_freq_buffer;
 // static struct blob_buf _velocity_array;
 //  static void* _velocity_array_handle;
 //  static struct blob_buf _accel_array;
@@ -128,7 +131,10 @@ int uobject_elevatord_init(void) {
     blob_buf_grow(&_b, 4096);
     // blob_buf_init(&_velocity_array, 0);
     // blob_buf_grow(&_b, 4096);
-    hrbuffer_alloc(&_velocity_buffer, 1024 * sizeof(double));  // 1s -> 5 elements
+    hrbuffer_alloc(&_accel_buffer, 1024 * sizeof(double));         // 1s -> 5 elements
+    hrbuffer_alloc(&_velocity_buffer, 1024 * sizeof(double));      // 1s -> 5 elements
+    hrbuffer_alloc(&_jitter_freq_buffer, 1024 * sizeof(double));   // 1s -> 5 elements
+    hrbuffer_alloc(&_jitter_accel_buffer, 1024 * sizeof(double));  // 1s -> 5 elements
     motion_register_observer(&_ubus_observer);
     return 0;
 }
@@ -147,6 +153,7 @@ int uobject_elevatord_deinit(void) {
 }
 
 static void _observer_on_status(struct motion_status* st) {
+    double accel, velocity, jitter_accel, jitter_frequency;
     if (!st)
         return;
     // HR_LOGD("speed : %f\n", _speed_realtime);
@@ -169,9 +176,15 @@ static void _observer_on_status(struct motion_status* st) {
 
     // blobmsg_add_double(&_velocity_array, NULL, st->accel);
 
-    st->accel = round(st->accel * 100) / 100;
+    accel = round(st->accel * 100) / 100;
+    velocity = fabs(round(st->velocity * 100) / 100);
+    jitter_accel = round(st->jitter_accel * 100) / 100;
+    jitter_frequency = round(st->jitter_frequency * 100) / 100;
     // double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
-    hrbuffer_append(&_velocity_buffer, &st->accel, sizeof(st->accel));
+    hrbuffer_append(&_accel_buffer, &accel, sizeof(accel));
+    hrbuffer_append(&_velocity_buffer, &velocity, sizeof(velocity));
+    hrbuffer_append(&_jitter_freq_buffer, &jitter_frequency, sizeof(jitter_frequency));
+    hrbuffer_append(&_jitter_accel_buffer, &jitter_accel, sizeof(jitter_accel));
     // HR_LOGD("acc:%f, prev:%f, %p\n", st->accel, *v, v);
     //     blobmsg_add_field(&b, BLOBMSG_TYPE_ARRAY, "array1", arr1.head, blob_raw_len(arr1.head));
 }
@@ -198,18 +211,42 @@ static void _observer_on_event(struct motion_event* data) {
 
         void* root = blobmsg_open_array(&_b, "acceleration");
 
-        for (size_t i = 0; i < _velocity_buffer.offset;) {
-            double *v = (double*)(_velocity_buffer.data + i);
-            //double v = *((double*)(_velocity_buffer.data + i));
-            // HR_LOGD("acc2v....i:%d......mxp :%f %p, offset:%d\n", i, *v, v, _velocity_buffer.offset);
+        for (size_t i = 0; i < _accel_buffer.offset;) {
+            double* v = (double*)(_accel_buffer.data + i);
             blobmsg_add_double(&_b, NULL, *v);
             i += sizeof(double);
         }
         blobmsg_close_array(&_b, root);
+        root = blobmsg_open_array(&_b, "runSpeed");
+
+        for (size_t i = 0; i < _velocity_buffer.offset;) {
+            double* v = (double*)(_velocity_buffer.data + i);
+            blobmsg_add_double(&_b, NULL, *v);
+            i += sizeof(double);
+        }
+        blobmsg_close_array(&_b, root);
+
+        root = blobmsg_open_array(&_b, "jitterFrequency");
+
+        for (size_t i = 0; i < _jitter_freq_buffer.offset;) {
+            double* v = (double*)(_jitter_freq_buffer.data + i);
+            blobmsg_add_double(&_b, NULL, *v);
+            i += sizeof(double);
+        }
+        blobmsg_close_array(&_b, root);
+        root = blobmsg_open_array(&_b, "jitterAcceleration");
+
+        for (size_t i = 0; i < _jitter_accel_buffer.offset;) {
+            double* v = (double*)(_jitter_accel_buffer.data + i);
+            blobmsg_add_double(&_b, NULL, *v);
+            i += sizeof(double);
+        }
+        blobmsg_close_array(&_b, root);
+
         char* str = blobmsg_format_json(_b.head, true);
         HR_LOGD("%s\n", str);
 
-        ubus_notify(_ubus_ctx, &_elevatord_object, "AutoFloorCalibrationEvent", _b.head, 1000);
+        ubus_notify(_ubus_ctx, &_elevatord_object, "AutoFloorCalibrationEvent", _b.head, -1/*no block*/);
         free(str);
     }
 

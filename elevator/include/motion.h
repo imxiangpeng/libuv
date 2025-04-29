@@ -25,6 +25,8 @@ struct motion_status{
     double velocity;
     double distance;
     double height;
+    double jitter_accel;
+    double jitter_frequency;
     int floor;
     int running;
     double pressure;

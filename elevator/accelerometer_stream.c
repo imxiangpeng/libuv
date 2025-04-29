@@ -40,6 +40,8 @@ struct fft_stream {
     // struct moving_window* mw;  // size 256, sampling
     double* in;
     fftw_complex* out;
+    double jitter_frequency;
+    double jitter_accel;
 };
 
 struct accelerometer_stream {
@@ -184,7 +186,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
 static int accelerometer_stream_read(struct motion_stream* self, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
-    double* p = (double*)data;
+    struct accelerometer_stream_data *p = (struct accelerometer_stream_data*)data;
     double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
@@ -192,7 +194,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         return -1;
     }
 
-    assert(count >= 5);
+    assert(sizeof(struct accelerometer_stream_data) == count);
 
     if (s->now == 0) {
         dt = 0;
@@ -239,11 +241,35 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     s->distance = s->ekf.x[0];
     s->velocity = s->ekf.x[1];
+#if 0    
     p[0] = s->ekf.x[2];
     p[1] = s->velocity;
     p[2] = s->distance;
     p[3] = s->ekf.x[2];
     p[4] = s->ekf.x[3];
+    // add jitter freq & accel, using max magnitude's axis data
+    p[5] = 0; // freq
+    p[6] = 0; // accel
+    for(size_t i = 0; i < ARRAY_SIZE(s->fft);i++) {
+        if (s->fft[i].jitter_accel > p[6]) {
+            p[6] = s->fft[i].jitter_accel;
+            p[5] = s->fft[i].jitter_frequency;
+        }
+    }
+#endif
+    p->accel = s->ekf.x[2];
+    p->velocity = s->ekf.x[1];
+    p->distance = s->ekf.x[0];
+    p->G = s->G;
+    p->jitter_accel = s->fft[0].jitter_accel;
+    p->jitter_frequency = s->fft[0].jitter_frequency;
+    
+    for(size_t i = 1; i < ARRAY_SIZE(s->fft);i++) {
+        if (s->fft[i].jitter_accel > p->jitter_accel) {
+            p->jitter_accel = s->fft[i].jitter_accel;
+            p->jitter_frequency = s->fft[i].jitter_frequency;
+        }
+    }
 
     calibration(s, s->ekf.x[3]);
     HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
@@ -496,7 +522,8 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
             double accel_value = (2.0 * max_magnitude) /  window_sum;//f->sampling_size;
             HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
-            
+            f->jitter_frequency = frequency;
+            f->jitter_accel = accel_value;
             /*if (frequency == 0) {
                 for (size_t j = 0; j < f->sampling_size; j++) {
                     HR_LOGD("%s(%d): %d -> %f\n", __FUNCTION__, __LINE__, j, f->in[j]);

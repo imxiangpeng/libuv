@@ -128,12 +128,13 @@ static void* _accelerometer_thread_routin(void* args) {
 
     _accelerometer_motion.is_calibration = -1;
     struct motion_stream* input = _accelerometer_motion.stream;
-    double result[8] = {0};
+    // double result[8] = {0};
+    struct accelerometer_stream_data result;
     for (;;) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
 
-        int ret = input->read(input, (void*)result, ARRAY_SIZE(result));
+        int ret = input->read(input, (void*)&result, sizeof(result));
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2 || 1 != input->calibration_completed(input)) {
@@ -161,13 +162,13 @@ static void* _accelerometer_thread_routin(void* args) {
             memset((void*)&ev, 0, sizeof(ev));
             ev.type = SENSOR_ACCELEROMETER;
             ev.is_calibration = 0;
-            ev.value[0] = result[4];  // id 4 --> local G
+            ev.value[0] = result.G;  // id 4 --> local G
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 
-        double accel = fabs(result[0]);
-        double velocity = round(result[1] * 100) / 100;
-        double distance = round(result[2] * 1000) / 1000;
+        double accel = fabs(result.accel);
+        double velocity = round(result.velocity * 100) / 100;
+        double distance = round(result.distance * 1000) / 1000;
 
         enum motion_state new_state = _accelerometer_motion.state;
 
@@ -185,8 +186,8 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 
         // use high precision value, not round!
-        _accelerometer_motion.velocity = result[1];  // velocity;
-        _accelerometer_motion.distance = result[2];  // distance;
+        _accelerometer_motion.velocity = result.velocity;  // velocity;
+        _accelerometer_motion.distance = result.distance;  // distance;
 
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
@@ -250,6 +251,8 @@ static void* _accelerometer_thread_routin(void* args) {
             .velocity = velocity,
             .distance = distance,
             .height = _accelerometer_motion.height + _accelerometer_motion.distance,
+            .jitter_accel = result.jitter_accel,
+            .jitter_frequency = result.jitter_frequency,
             .floor = atoi(floor_label),
             .running = (new_state != STOPPED),
         };
