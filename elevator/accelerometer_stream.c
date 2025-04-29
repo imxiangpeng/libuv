@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stddef.h>
 
+#include <fftw3.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,12 +28,20 @@
     (type*)((char*)__mptr - offsetof(type, member));  \
 })
 
+struct fft_stream {
+    int sampling_size;
+    int count;                 // moving window
+    struct moving_window* mw;  // size 256, sampling
+    double* in;
+    fftw_complex* out;
+};
+
 struct accelerometer_stream {
     struct motion_stream self;
 
     int sampling_frequency;
     struct sensor* sensor;
-    // struct butterworth_filter* bw_filter;
+    struct butterworth_filter* bw_filter;
 
     double distance;
     double velocity;
@@ -50,6 +59,10 @@ struct accelerometer_stream {
     struct moving_window* mw;
 
     int64_t now;
+
+    struct fft_stream x;
+    struct fft_stream y;
+    struct fft_stream z;
 };
 
 static const _float_t pdiag[EKF_N] = {1.0, 1.0, 1.0, 1.0};
@@ -73,6 +86,16 @@ static const double G = 9.81;
 
 static void _ekf_run_model(struct accelerometer_stream* self, double input, double dt);
 
+static void apply_hanning_window(struct fft_stream* f) {
+    if (f->sampling_size <= 1) {
+        return;
+    }
+
+    for (int i = 0; i < f->sampling_size; i++) {
+        double multiplier = 0.5 * (1.0 - cos(2.0 * M_PI * i / (f->sampling_size - 1)));
+        f->in[i] *= multiplier;
+    }
+}
 static double calculate_veritical_acceleration(double x, double y, double z) {
     return sqrt(x * x + y * y + z * z) * (z < 0 ? -1 : 1);
 }
@@ -191,6 +214,52 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     }
     // accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
 
+    moving_window_update(s->x.mw, butterworth_filter_process(s->bw_filter,accel.x[0]));
+    if (s->x.mw->size == s->x.mw->capability) {
+        s->x.count++;
+    }
+    if (s->x.count == s->x.sampling_size / 2) {
+        s->x.count = 0;  // reset
+        int i = 0;
+        for (int l = s->x.mw->index; l < s->x.mw->size; l++) {
+            s->x.in[i] = s->x.mw->data[l] - s->x.mw->mean;
+            i++;
+        }
+
+        for (int l = 0; l < s->x.mw->index; l++) {
+            s->x.in[i] = s->x.mw->data[l] - s->x.mw->mean;
+            i++;
+        }
+
+        apply_hanning_window(&s->x);
+
+        fftw_plan plan = fftw_plan_dft_r2c_1d(s->x.sampling_size, s->x.in, s->x.out, FFTW_ESTIMATE);
+        fftw_execute(plan);
+
+        fftw_destroy_plan(plan);
+
+        int max_index = -1;
+        double max_magnitude = 0.0;
+        double* magnitudes = (double*)malloc(sizeof(double) * (s->x.sampling_size / 2 + 1));
+
+        int N_fft_out = s->x.sampling_size / 2 + 1;
+        for (int i = 0; i < N_fft_out; i++) {
+            double real = s->x.out[i][0];
+            double imag = s->x.out[i][1];
+            double magnitude = sqrt(real * real + imag * imag);
+            magnitudes[i] = magnitude;
+
+            if (magnitude > max_magnitude) {
+                max_magnitude = magnitude;
+                max_index = i;
+            }
+        }
+
+        double frequency = (double)max_index * s->sampling_frequency / s->x.sampling_size;
+        double accel_value = (2.0 * max_magnitude) / s->x.sampling_size;  // 归一化，加速度近似
+        HR_LOGE("frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", frequency, accel_value, max_magnitude, s->x.mw->mean);
+    }
+
     _ekf_run_model(s, accel_union, dt);
 
     s->distance = s->ekf.x[0];
@@ -277,9 +346,14 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     s->self.reset = accelerometer_stream_reset;
     s->self.close = accelerometer_stream_close;
 
-    // s->bw_filter = butterworth_filter_init(5, sampling_frequency);
+    s->bw_filter = butterworth_filter_init(10, sampling_frequency);
 
     s->mw = moving_window_init(sampling_frequency / 2);
+
+    s->x.sampling_size = sampling_frequency * 2;
+    s->x.in = (double*)fftw_malloc(sizeof(double) * s->x.sampling_size);
+    s->x.out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->x.sampling_size / 2 + 1));
+    s->x.mw = moving_window_init(s->x.sampling_size);
 
     return &s->self;
 }

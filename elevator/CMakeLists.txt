@@ -66,6 +66,7 @@ TARGET_LINK_LIBRARIES(elevatord m)
 TARGET_LINK_LIBRARIES(elevatord pthread)
 TARGET_LINK_LIBRARIES(elevatord ncurses)
 TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
+TARGET_LINK_LIBRARIES(elevatord -lfftw3)
 TARGET_LINK_LIBRARIES(elevatord uobject)
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
