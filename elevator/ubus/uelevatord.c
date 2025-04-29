@@ -170,9 +170,9 @@ static void _observer_on_status(struct motion_status* st) {
     // blobmsg_add_double(&_velocity_array, NULL, st->accel);
 
     st->accel = round(st->accel * 100) / 100;
-    double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
+    // double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
     hrbuffer_append(&_velocity_buffer, &st->accel, sizeof(st->accel));
-    HR_LOGD("acc:%f, prev:%f, %p\n", st->accel, *v, v);
+    // HR_LOGD("acc:%f, prev:%f, %p\n", st->accel, *v, v);
     //     blobmsg_add_field(&b, BLOBMSG_TYPE_ARRAY, "array1", arr1.head, blob_raw_len(arr1.head));
 }
 static void _observer_on_event(struct motion_event* data) {
@@ -201,7 +201,7 @@ static void _observer_on_event(struct motion_event* data) {
         for (size_t i = 0; i < _velocity_buffer.offset;) {
             double *v = (double*)(_velocity_buffer.data + i);
             //double v = *((double*)(_velocity_buffer.data + i));
-            HR_LOGD("acc2v....i:%d......mxp :%f %p, offset:%d\n", i, *v, v, _velocity_buffer.offset);
+            // HR_LOGD("acc2v....i:%d......mxp :%f %p, offset:%d\n", i, *v, v, _velocity_buffer.offset);
             blobmsg_add_double(&_b, NULL, *v);
             i += sizeof(double);
         }

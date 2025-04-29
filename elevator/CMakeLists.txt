@@ -7,11 +7,16 @@ FIND_LIBRARY(cjson_library NAMES cjson)
 FIND_LIBRARY(libiio_library NAMES iio)
 FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(libmosquitto_library NAMES mosquitto)
+FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
+FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
+FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
+
+
+
 
 
 #find_package(LibXml2 REQUIRED)
 
-add_subdirectory(uobject)
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 
@@ -39,8 +44,8 @@ set(SOURCES main.c
     iot/iot_topic.c
     iot/iot_topic_property.c
     iot/iot_topic_calibration.c
-    uobject/uelevatord.c
-    uobject/uobject_elevatord.c
+    ubus/uelevatord.c
+    ubus/uobject_elevatord.c
     butterworth_filter.c
     hr_buffer.c
     moving_window.c)
@@ -57,8 +62,11 @@ endif()
 
 TARGET_COMPILE_OPTIONS(elevatord PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 
+# only on my pc
+target_include_directories(elevatord PUBLIC /opt/3rdparty/include)
+
 TARGET_LINK_LIBRARIES(elevatord ${cjson_library})
-TARGET_LINK_LIBRARIES(elevatord ${mosquitto_library})
+TARGET_LINK_LIBRARIES(elevatord ${libmosquitto_library})
 TARGET_LINK_LIBRARIES(elevatord ${libuv_library})
 TARGET_LINK_LIBRARIES(elevatord ${libiio_library})
 
@@ -67,6 +75,7 @@ TARGET_LINK_LIBRARIES(elevatord pthread)
 TARGET_LINK_LIBRARIES(elevatord ncurses)
 TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(elevatord -lfftw3)
-TARGET_LINK_LIBRARIES(elevatord uobject)
+TARGET_LINK_LIBRARIES(elevatord ${ubox_library} ${ubus_library} ${blob_library})
+
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

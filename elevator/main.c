@@ -11,7 +11,7 @@
 #include "motion.h"
 #include "sensor.h"
 #include "tui.h"
-#include "uelevatord.h"
+#include "ubus/uelevatord.h"
 
 /* Fully close a loop */
 static void close_walk_cb(uv_handle_t* handle, void* arg) {

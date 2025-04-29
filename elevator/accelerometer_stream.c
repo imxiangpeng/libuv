@@ -27,6 +27,7 @@
 #include "tinyekf.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
 #define container_of(ptr, type, member) ({            \
     const typeof(((type*)0)->member)* __mptr = (ptr); \
     (type*)((char*)__mptr - offsetof(type, member));  \
@@ -34,7 +35,7 @@
 
 struct fft_stream {
     size_t sampling_size;
-    size_t count;  // moving window
+    size_t count;
     double sum;
     // struct moving_window* mw;  // size 256, sampling
     double* in;
@@ -456,11 +457,11 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             double mean = f->sum / f->sampling_size;
             
 
-            double window_sum = 0.0; // 用于后续幅值校正
+            double window_sum = 0.0;
             for ( size_t j = 0; j < f->sampling_size; j++) {
                 double window_val = hanning_window(j, f->sampling_size);
-                f->in[j] = (f->in[j] - mean) * window_val; // 去均值并加窗
-                window_sum += window_val; // 计算窗口值的和
+                f->in[j] = (f->in[j] - mean) * window_val;
+                window_sum += window_val;
             }
             // apply_hanning_window(f);
             f->count = 0;

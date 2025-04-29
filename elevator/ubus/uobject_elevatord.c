@@ -1,11 +1,9 @@
 #include "libubox/blobmsg.h"
-#include "uobject.h"
 
 #include <json-c/json.h>
 #include <libubox/blobmsg_json.h>
 
 #include "libubus.h"
-#include "uobject.h"
 
 #include "floor.h"
 #include "hr_log.h"
@@ -16,11 +14,6 @@ extern struct ubus_context* uelevatord_get_ubus_ctx();
 
 struct ubus_object _elevatord_object;
 
-typedef struct {
-    UOBJECT_DECLARE_OBJECT;
-
-    // your private data
-} uobject_elevatord_t;
 enum {
     FC_FLOOR_BASE,
     FC_FLOORS_BELOW,
