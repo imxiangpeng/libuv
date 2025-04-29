@@ -26,7 +26,7 @@
 
 #define LOG_BUF_SIZE 1024 * 2
 
-static FILE* persist_fp = NULL;
+//static FILE* persist_fp = NULL;
 
 int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     int ret = -1;
@@ -78,7 +78,7 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     }
     va_end(ap);
 
-#if 0
+#if 1
     printf("%s", buf);
 #else
     // syslog(LOG_SYSLOG, "%s", buf);

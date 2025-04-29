@@ -25,7 +25,7 @@ set(SOURCES main.c
     iot_topic.c
     iot_topic_property.c
     iot_topic_calibration.c
-    uelevatord.c)
+    uelevator.c)
 
 ADD_EXECUTABLE(hqlift ${SOURCES})
 

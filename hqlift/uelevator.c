@@ -22,12 +22,10 @@ static struct ubus_context* _ubus_ctx = NULL;
 
 static pthread_t _uobject_tid = 0;
 
-// static int64_t _now = 0;
+static struct ubus_subscriber _elevatord_subscriber;
+static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
 
-// static struct blob_buf _velocity_array;
-//  static void* _velocity_array_handle;
-//  static struct blob_buf _accel_array;
 static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
     (void)ctx;
     (void)obj;
@@ -42,6 +40,80 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
     free(str);
 
     return 0;
+}
+
+static int subscriber_elevatord_event() {
+    if (_elevatord_object_id != 0) {
+        // have subscribed
+        return 0;
+    }
+    if (0 == ubus_lookup_id(_ubus_ctx, "elevatord", &_elevatord_object_id)) {
+        if (0 == ubus_subscribe(_ubus_ctx, &_elevatord_subscriber, _elevatord_object_id)) {
+            return 0;
+        }
+    }
+    
+    // reset id when failed
+    _elevatord_object_id = 0;
+
+    return -1;
+}
+
+enum {
+    OE_ID,
+    OE_PATH,
+    __OE_MAX
+};
+
+static const struct blobmsg_policy object_event_policy[__OE_MAX] = {
+    [OE_ID] = {.name = "id", .type = BLOBMSG_TYPE_INT32},
+    [OE_PATH] = {.name = "path", .type = BLOBMSG_TYPE_STRING},
+};
+
+static void ubus_object_event_handler(struct ubus_context* ctx,
+                                      struct ubus_event_handler* ev,
+                                      const char* type,
+                                      struct blob_attr* msg) {
+    (void)ev;
+
+    struct blob_attr* tb[__OE_MAX] = {NULL};
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    free(str);
+
+    if (strcmp(type, "ubus.object.add") == 0) {
+        blobmsg_parse(object_event_policy, __OE_MAX, tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+
+        if (!tb[OE_ID] || !tb[OE_PATH]) {
+            HR_LOGE("can not parse event\n");
+            return;
+        }
+
+        if (0 == strcmp("elevatord", blobmsg_data(tb[OE_PATH]))) {
+            HR_LOGD("elevatord connected, subcribe it!\n");
+            _elevatord_object_id = blobmsg_get_u32(tb[OE_ID]);
+            subscriber_elevatord_event();
+        }
+
+    } else if (strcmp(type, "ubus.object.remove") == 0) {
+        blobmsg_parse(object_event_policy, __OE_MAX, tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+
+        if (!tb[OE_ID] || !tb[OE_PATH]) {
+            HR_LOGE("can not parse event\n");
+            return;
+        }
+
+        if (0 == strcmp("elevatord", blobmsg_data(tb[OE_PATH]))) {
+            uint32_t id = _elevatord_object_id;
+            _elevatord_object_id = 0;
+            HR_LOGD("elevatord disconnected, unsubcribe it!\n");
+            if (id != 0) {
+                ubus_unsubscribe(ctx, &_elevatord_subscriber, id);
+            }
+        }
+    }
 }
 static void _reconnect_timer(struct uloop_timeout* timeout) {
     (void)timeout;
@@ -73,10 +145,14 @@ static void _connection_lost(struct ubus_context* ctx) {
     _reconnect_timer(NULL);
 }
 
+static struct ubus_event_handler _object_event = {
+    .cb = ubus_object_event_handler,
+};
+
 void* uobject_elevator_thread_routin(void* args) {
     (void)args;
-    uint32_t id;
     // int rc = -1;
+
     //  adjust output line buffered mode
     setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -98,25 +174,15 @@ void* uobject_elevator_thread_routin(void* args) {
 
     usleep(1000);
 #endif
-    struct ubus_subscriber sub;
-    memset(&sub, 0, sizeof(sub));
-    sub.cb = elevatord_subscriber_callback;
 
-    ubus_register_subscriber(_ubus_ctx, &sub);
+    memset(&_elevatord_subscriber, 0, sizeof(_elevatord_subscriber));
+    _elevatord_subscriber.cb = elevatord_subscriber_callback;
 
-    do {
-        if (0 == ubus_lookup_id(_ubus_ctx, "elevatord", &id)) {
-            if (0 == ubus_subscribe(_ubus_ctx, &sub, id)) {
-                break;
-            }
-            fprintf(stderr, "Subscribe failed.\n");
-        }
-        HR_LOGE("Object not found... wait ...\n");
+    ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
-        usleep(1000 * 1000);
+    ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
 
-    } while (1);
-
+    subscriber_elevatord_event();
     // rc = ubus_add_object(_ubus_ctx, &_elevatord_object);
     // if (0 != rc) {
     // HR_LOGE("can not add object %s -> %s\n", _elevatord_object.name, ubus_strerror(rc));
