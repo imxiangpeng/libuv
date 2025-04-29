@@ -17,21 +17,26 @@
 #include "sensor.h"
 #include "time_utils.h"
 
+// force cut 10Hz
+#define BUTTERWORTH_CUTOFF_FREQUENCY 10
+
 #define EKF_N 4  // only accel
 #define EKF_M 2  // only accel
 
 #define _float_t double
 #include "tinyekf.h"
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define container_of(ptr, type, member) ({            \
     const typeof(((type*)0)->member)* __mptr = (ptr); \
     (type*)((char*)__mptr - offsetof(type, member));  \
 })
 
 struct fft_stream {
-    int sampling_size;
-    int count;                 // moving window
-    struct moving_window* mw;  // size 256, sampling
+    size_t sampling_size;
+    size_t count;  // moving window
+    double sum;
+    // struct moving_window* mw;  // size 256, sampling
     double* in;
     fftw_complex* out;
 };
@@ -41,7 +46,7 @@ struct accelerometer_stream {
 
     int sampling_frequency;
     struct sensor* sensor;
-    struct butterworth_filter* bw_filter;
+    struct butterworth_filter* filter[3];
 
     double distance;
     double velocity;
@@ -60,9 +65,7 @@ struct accelerometer_stream {
 
     int64_t now;
 
-    struct fft_stream x;
-    struct fft_stream y;
-    struct fft_stream z;
+    struct fft_stream fft[3];
 };
 
 static const _float_t pdiag[EKF_N] = {1.0, 1.0, 1.0, 1.0};
@@ -85,14 +88,21 @@ static const double G = 9.81;
 // static double _bw_distance = 0;
 
 static void _ekf_run_model(struct accelerometer_stream* self, double input, double dt);
+static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
+double hanning_window(int i, int N) {
+    if (N <= 1) return 1.0;
+    return 0.5 * (1.0 - cos(2.0 * M_PI * i / (N - 1)));
+}
 static void apply_hanning_window(struct fft_stream* f) {
+    double mean = f->sum / f->sampling_size;
     if (f->sampling_size <= 1) {
         return;
     }
 
-    for (int i = 0; i < f->sampling_size; i++) {
+    for (size_t i = 0; i < f->sampling_size; i++) {
         double multiplier = 0.5 * (1.0 - cos(2.0 * M_PI * i / (f->sampling_size - 1)));
+        f->in[i] -= mean;
         f->in[i] *= multiplier;
     }
 }
@@ -207,57 +217,21 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #endif
 
     HR_LOGD("dt:%f\n", dt);
+        // accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
+    double accel_filtered[3] = {0};
+
+    // butter worth filter cutoff 10hz
+    for (size_t i = 0; i < ARRAY_SIZE(accel_filtered); i++) {
+        accel_filtered[i] = butterworth_filter_process(s->filter[i], accel.x[i]);
+    }
+
+    _fft_process(s, accel_filtered, 3);
+
     // it indicates that the camera is inverted, when z < 0
-    accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    // accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    accel_union = calculate_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
     if (s->inverted) {
         accel_union *= -1.0;
-    }
-    // accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
-
-    moving_window_update(s->x.mw, butterworth_filter_process(s->bw_filter,accel.x[0]));
-    if (s->x.mw->size == s->x.mw->capability) {
-        s->x.count++;
-    }
-    if (s->x.count == s->x.sampling_size / 2) {
-        s->x.count = 0;  // reset
-        int i = 0;
-        for (int l = s->x.mw->index; l < s->x.mw->size; l++) {
-            s->x.in[i] = s->x.mw->data[l] - s->x.mw->mean;
-            i++;
-        }
-
-        for (int l = 0; l < s->x.mw->index; l++) {
-            s->x.in[i] = s->x.mw->data[l] - s->x.mw->mean;
-            i++;
-        }
-
-        apply_hanning_window(&s->x);
-
-        fftw_plan plan = fftw_plan_dft_r2c_1d(s->x.sampling_size, s->x.in, s->x.out, FFTW_ESTIMATE);
-        fftw_execute(plan);
-
-        fftw_destroy_plan(plan);
-
-        int max_index = -1;
-        double max_magnitude = 0.0;
-        double* magnitudes = (double*)malloc(sizeof(double) * (s->x.sampling_size / 2 + 1));
-
-        int N_fft_out = s->x.sampling_size / 2 + 1;
-        for (int i = 0; i < N_fft_out; i++) {
-            double real = s->x.out[i][0];
-            double imag = s->x.out[i][1];
-            double magnitude = sqrt(real * real + imag * imag);
-            magnitudes[i] = magnitude;
-
-            if (magnitude > max_magnitude) {
-                max_magnitude = magnitude;
-                max_index = i;
-            }
-        }
-
-        double frequency = (double)max_index * s->sampling_frequency / s->x.sampling_size;
-        double accel_value = (2.0 * max_magnitude) / s->x.sampling_size;  // 归一化，加速度近似
-        HR_LOGE("frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", frequency, accel_value, max_magnitude, s->x.mw->mean);
     }
 
     _ekf_run_model(s, accel_union, dt);
@@ -346,15 +320,21 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     s->self.reset = accelerometer_stream_reset;
     s->self.close = accelerometer_stream_close;
 
-    s->bw_filter = butterworth_filter_init(10, sampling_frequency);
+    for (size_t i = 0; i < ARRAY_SIZE(s->filter); i++) {
+        s->filter[i] = butterworth_filter_init(BUTTERWORTH_CUTOFF_FREQUENCY, sampling_frequency);
+        if (!s->filter[i]) {
+        }
+    }
 
     s->mw = moving_window_init(sampling_frequency / 2);
 
-    s->x.sampling_size = sampling_frequency * 2;
-    s->x.in = (double*)fftw_malloc(sizeof(double) * s->x.sampling_size);
-    s->x.out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->x.sampling_size / 2 + 1));
-    s->x.mw = moving_window_init(s->x.sampling_size);
-
+    for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
+        s->fft[i].count = 0;
+        s->fft[i].sum = 0;
+        s->fft[i].sampling_size = sampling_frequency;
+        s->fft[i].in = (double*)fftw_malloc(sizeof(double) * s->fft[i].sampling_size);
+        s->fft[i].out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->fft[i].sampling_size / 2 + 1));
+    }
     return &s->self;
 }
 
@@ -459,4 +439,70 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
     //_distance += dt * _velocity + 0.5 * linear_accel * dt *dt;
     //_velocity += dt * linear_accel;
     // HR_LOGD("manual distance & velocity: [%f, %f]\n", _distance, _velocity);
+}
+
+static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
+    if (!self || !a || len != 3) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(self->fft); i++) {
+        struct fft_stream* f = &self->fft[i];
+        f->in[f->count] = a[i];
+        f->sum += a[i];
+        f->count++;
+
+        if (f->count == f->sampling_size) {
+            double mean = f->sum / f->sampling_size;
+            
+
+            double window_sum = 0.0; // 用于后续幅值校正
+            for ( size_t j = 0; j < f->sampling_size; j++) {
+                double window_val = hanning_window(j, f->sampling_size);
+                f->in[j] = (f->in[j] - mean) * window_val; // 去均值并加窗
+                window_sum += window_val; // 计算窗口值的和
+            }
+            // apply_hanning_window(f);
+            f->count = 0;
+            f->sum = 0;
+
+
+            fftw_plan plan = fftw_plan_dft_r2c_1d(f->sampling_size, f->in, f->out, FFTW_ESTIMATE);
+            fftw_execute(plan);
+            fftw_destroy_plan(plan);
+
+            int max_index = -1;
+            double max_magnitude = 0.0;
+            // reuse in buffer
+            double* magnitudes = (double*)malloc(sizeof(double) * (f->sampling_size / 2 + 1));
+
+            int N_fft_out = f->sampling_size / 2 + 1;
+            for (int j = 0; j < N_fft_out; j++) {
+                double real = f->out[j][0];
+                double imag = f->out[j][1];
+                double magnitude = sqrt(real * real + imag * imag);
+                magnitudes[j] = magnitude;
+
+                if (magnitude > max_magnitude) {
+                    max_magnitude = magnitude;
+                    max_index = j;
+                }
+            }
+
+            free(magnitudes);
+            magnitudes = NULL;
+
+            double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
+            double accel_value = (2.0 * max_magnitude) /  window_sum;//f->sampling_size;
+            HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
+            
+            /*if (frequency == 0) {
+                for (size_t j = 0; j < f->sampling_size; j++) {
+                    HR_LOGD("%s(%d): %d -> %f\n", __FUNCTION__, __LINE__, j, f->in[j]);
+                }
+            }*/
+        }
+    }
+
+    return 0;
 }
