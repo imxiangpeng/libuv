@@ -151,6 +151,9 @@ static void _observer_on_status(struct motion_status* st) {
         return;
     // HR_LOGD("speed : %f\n", _speed_realtime);
 
+    if (_running_state == STOPPED) {
+        return;
+    }
     // ms
     int64_t now = get_monotonic_nanoseconds() / 1000000;
 
@@ -167,8 +170,9 @@ static void _observer_on_status(struct motion_status* st) {
     // blobmsg_add_double(&_velocity_array, NULL, st->accel);
 
     st->accel = round(st->accel * 100) / 100;
-    HR_LOGD("acc:%f\n", st->accel);
+    double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
     hrbuffer_append(&_velocity_buffer, &st->accel, sizeof(st->accel));
+    HR_LOGD("acc:%f, prev:%f, %p\n", st->accel, *v, v);
     //     blobmsg_add_field(&b, BLOBMSG_TYPE_ARRAY, "array1", arr1.head, blob_raw_len(arr1.head));
 }
 static void _observer_on_event(struct motion_event* data) {
@@ -195,14 +199,17 @@ static void _observer_on_event(struct motion_event* data) {
         void* root = blobmsg_open_array(&_b, "acceleration");
 
         for (size_t i = 0; i < _velocity_buffer.offset;) {
-            double v = *((double*)(_velocity_buffer.data + i));
-    HR_LOGD("acc2v..........mxp :%f, offset:%d\n", v, _velocity_buffer.offset);
-            blobmsg_add_double(&_b, NULL, v);
+            double *v = (double*)(_velocity_buffer.data + i);
+            //double v = *((double*)(_velocity_buffer.data + i));
+            HR_LOGD("acc2v....i:%d......mxp :%f %p, offset:%d\n", i, *v, v, _velocity_buffer.offset);
+            blobmsg_add_double(&_b, NULL, *v);
             i += sizeof(double);
         }
         blobmsg_close_array(&_b, root);
         char* str = blobmsg_format_json(_b.head, true);
         HR_LOGD("%s\n", str);
+
+        ubus_notify(_ubus_ctx, &_elevatord_object, "AutoFloorCalibrationEvent", _b.head, 1000);
         free(str);
     }
 
