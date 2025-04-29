@@ -23,6 +23,7 @@ add_subdirectory(unicom_router)
 add_subdirectory(mosquitto)
 add_subdirectory(iot)
 add_subdirectory(elevator)
+add_subdirectory(hqlift)
 
 
 set(CMAKE_C_VISIBILITY_PRESET hidden)
