@@ -54,12 +54,12 @@ int main(int argc, char** argv) {
 
     iot_init();
 
-    uobject_elevatord_init();
+    elevator_ubus_init();
     
     iot_run(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
     
-    uobject_elevatord_deinit();
+    elevator_ubus_deinit();
 
     iot_deinit();
 

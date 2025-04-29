@@ -1,3 +1,5 @@
+#include "uelevator.h"
+
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,6 +12,7 @@
 #include "libubus.h"
 #include "time_utils.h"
 
+#define ELEVATORD_NAME "elevatord"
 #define UBUS_SOCK "/tmp/ubus.sock"
 
 #define _UBUS_RETRY_TIMEOUT (2)
@@ -47,7 +50,7 @@ static int subscriber_elevatord_event() {
         // have subscribed
         return 0;
     }
-    if (0 == ubus_lookup_id(_ubus_ctx, "elevatord", &_elevatord_object_id)) {
+    if (0 == ubus_lookup_id(_ubus_ctx, ELEVATORD_NAME, &_elevatord_object_id)) {
         if (0 == ubus_subscribe(_ubus_ctx, &_elevatord_subscriber, _elevatord_object_id)) {
             return 0;
         }
@@ -90,7 +93,7 @@ static void ubus_object_event_handler(struct ubus_context* ctx,
             return;
         }
 
-        if (0 == strcmp("elevatord", blobmsg_data(tb[OE_PATH]))) {
+        if (0 == strcmp(ELEVATORD_NAME, blobmsg_data(tb[OE_PATH]))) {
             HR_LOGD("elevatord connected, subcribe it!\n");
             _elevatord_object_id = blobmsg_get_u32(tb[OE_ID]);
             subscriber_elevatord_event();
@@ -105,7 +108,7 @@ static void ubus_object_event_handler(struct ubus_context* ctx,
             return;
         }
 
-        if (0 == strcmp("elevatord", blobmsg_data(tb[OE_PATH]))) {
+        if (0 == strcmp(ELEVATORD_NAME, blobmsg_data(tb[OE_PATH]))) {
             uint32_t id = _elevatord_object_id;
             _elevatord_object_id = 0;
             HR_LOGD("elevatord disconnected, unsubcribe it!\n");
@@ -136,7 +139,7 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(g_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 }
 
@@ -183,10 +186,6 @@ void* uobject_elevator_thread_routin(void* args) {
     ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
 
     subscriber_elevatord_event();
-    // rc = ubus_add_object(_ubus_ctx, &_elevatord_object);
-    // if (0 != rc) {
-    // HR_LOGE("can not add object %s -> %s\n", _elevatord_object.name, ubus_strerror(rc));
-    //}
 
     uloop_run();
 
@@ -194,7 +193,7 @@ void* uobject_elevator_thread_routin(void* args) {
 
     return NULL;
 }
-int uobject_elevatord_init(void) {
+int elevator_ubus_init(void) {
     int ret = -1;
     pthread_attr_t attr;
 
@@ -218,10 +217,10 @@ int uobject_elevatord_init(void) {
     return 0;
 }
 
-struct ubus_context* uelevatord_get_ubus_ctx() {
+struct ubus_context* uelevator_get_ubus_ctx() {
     return _ubus_ctx;
 }
-int uobject_elevatord_deinit(void) {
+int elevator_ubus_deinit(void) {
     if (_uobject_tid != 0) {
         pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
