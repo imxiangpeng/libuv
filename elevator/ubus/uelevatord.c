@@ -8,6 +8,7 @@
 #include "libubox/blob.h"
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
+#include "libubox/uloop.h"
 #include "libubus.h"
 #include "motion.h"
 #include "time_utils.h"
@@ -20,14 +21,21 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+enum {
+    MSG_NOTIFY
+};
 static struct ubus_context* _ubus_ctx = NULL;
 
+struct uloop_timeout _loop_thread_notify_timer;
+
+static int _pipefd[2];  // [0]=read, [1]=write
 static pthread_t _uobject_tid = 0;
 
 extern struct ubus_object _elevatord_object;
 
 static int64_t _now = 0;
 static struct blob_buf _b;
+static int _b_is_busy = 0;
 static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
 static struct hrbuffer _jitter_accel_buffer;
@@ -77,11 +85,36 @@ static void _connection_lost(struct ubus_context* ctx) {
     _reconnect_timer(NULL);
 }
 
+static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
+    (void)u;
+    (void)events;
+    int which = -1;
+    read(_pipefd[0], &which, sizeof(which));
+
+    HR_LOGD("haha receive message:%d \n", which);
+    switch (which) {
+        case MSG_NOTIFY:
+            HR_LOGD("haha receive notify message \n");
+            _b_is_busy = 1;
+            ubus_notify(_ubus_ctx, &_elevatord_object, "RunEvent", _b.head, -1 /*no block*/);
+            _b_is_busy = 0;
+            break;
+    }
+}
+
+static void post_message(int which) {
+    write(_pipefd[1], &which, sizeof(which));
+}
 void* uobject_elevator_thread_routin(void* args) {
     (void)args;
     int rc = -1;
     // adjust output line buffered mode
     setvbuf(stdout, NULL, _IOLBF, 0);
+
+    struct uloop_fd pipe_fd = {
+        .fd = _pipefd[0],
+        .cb = _pipe_uloop_main_thread_handler,
+    };
 
     uloop_init();
 
@@ -104,6 +137,7 @@ void* uobject_elevator_thread_routin(void* args) {
         HR_LOGE("can not add object %s -> %s\n", _elevatord_object.name, ubus_strerror(rc));
     }
 
+    uloop_fd_add(&pipe_fd, ULOOP_READ);
     uloop_run();
 
     uloop_done();
@@ -115,6 +149,11 @@ int uobject_elevatord_init(void) {
     pthread_attr_t attr;
 
     if (_uobject_tid != 0) {
+        return -1;
+    }
+
+    if (pipe(_pipefd) < 0) {
+        perror("pipe");
         return -1;
     }
 
@@ -207,6 +246,11 @@ static void _observer_on_event(struct motion_event* data) {
         HR_LOGD("stopped --> running, direction:%d, distance:%f\n", data->direction, data->distance);
     } else if (data->state == STOPPED) {
         HR_LOGD("running --> stopped, direction:%d, distance:%f\n", data->direction, data->distance);
+
+        if (_b_is_busy) {
+            HR_LOGE("_b is busy maybe we should drop or wait.........\n");
+        }
+
         blob_buf_init(&_b, 0);
 
         void* root = blobmsg_open_array(&_b, "acceleration");
@@ -245,9 +289,9 @@ static void _observer_on_event(struct motion_event* data) {
 
         char* str = blobmsg_format_json(_b.head, true);
         HR_LOGD("%s\n", str);
-
-        ubus_notify(_ubus_ctx, &_elevatord_object, "AutoFloorCalibrationEvent", _b.head, -1/*no block*/);
         free(str);
+
+        post_message(MSG_NOTIFY);
     }
 
     _running_state = data->state;
