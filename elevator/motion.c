@@ -76,6 +76,8 @@ struct accelerometer_stream {
     int is_calibration;
 
     enum motion_state state;
+
+    struct motion_event ev;
 } _accelerometer_motion;
 
 struct barometer_stream {
@@ -189,19 +191,24 @@ static void* _accelerometer_thread_routin(void* args) {
         _accelerometer_motion.velocity = result.velocity;  // velocity;
         _accelerometer_motion.distance = result.distance;  // distance;
 
+        floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
+        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n",
+                accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
+
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
             if (_accelerometer_motion.state == STOPPED) {
                 HR_LOGD("mxp starting-------------------from:%d -> %s----->\n", floor_num, floor_label);
+                _accelerometer_motion.ev.state = new_state;
+                // accroding velocity
+                _accelerometer_motion.ev.direction = _accelerometer_motion.velocity > 0 ? DIRECTION_UP : DIRECTION_DOWN;
+                _accelerometer_motion.ev.distance = distance;
+                _accelerometer_motion.ev.floor = floor_num;
+                _accelerometer_motion.ev.timestamp_begin = get_realtime_ms() / 1000;
 
-                struct motion_event ev = {
-                    .state = new_state,
-                    .direction = _accelerometer_motion.velocity > 0 ? DIRECTION_UP : DIRECTION_DOWN,
-                    .distance = distance,
-                };
-
-                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
+                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
             }
+
             if (new_state == STOPPED) {
                 HR_LOGD("stopping------------------------>\n");
                 // 推测当前楼层，然后更正高度信息
@@ -224,20 +231,19 @@ static void* _accelerometer_thread_routin(void* args) {
                     }
                 }
 #endif
-                struct motion_event ev = {
-                    .state = new_state,
-                    .direction = DIRECTION_NONE,
-                    .distance = distance,
-                };
 
-                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &ev);
+                _accelerometer_motion.ev.state = new_state;
+                // according distance
+                _accelerometer_motion.ev.direction = distance > 0 ? DIRECTION_UP : DIRECTION_DOWN;
+                _accelerometer_motion.ev.distance = distance;
+                _accelerometer_motion.ev.floor_begin = _accelerometer_motion.ev.floor;
+                _accelerometer_motion.ev.floor = floor_num;
+                _accelerometer_motion.ev.timestamp_end = get_realtime_ms() / 1000;
+
+                notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
             }
             _accelerometer_motion.state = new_state;
         }
-
-        floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
-        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n",
-                accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {

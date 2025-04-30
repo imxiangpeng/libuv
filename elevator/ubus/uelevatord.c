@@ -15,6 +15,8 @@
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 
+#define DATA_SAMPLE_INTERVAL_MS 200  // houqi data array elements interval 200ms
+#define DATA_SAMPLE_SIZE_MAX 7200    // limit 3min, too much data: 8*5*60*3
 #define ELEVATORD_EVENT_REALTIME "RealTime"
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
 
@@ -56,6 +58,7 @@ static const int _realtime_report_fac = 100;  // 10 * sampling_rate = 100 * 1/10
 
 static enum motion_state _running_state = STOPPED;
 static enum motion_direction _running_direction = DIRECTION_NONE;
+static int _begin_floor = 0;
 
 static void _observer_on_status(struct motion_status* st);
 static void _observer_on_event(struct motion_event* data);
@@ -242,14 +245,14 @@ static void _observer_on_status(struct motion_status* st) {
     // ms
     int64_t now = get_monotonic_nanoseconds() / 1000000;
 
-    if (now - _now < 2000) {
+    // report every 200ms
+    if (now - _now < DATA_SAMPLE_INTERVAL_MS) {
         return;
     }
 
     _now = now;
     // also we can simple using sampling_rate
 
-    HR_LOGD("capture data for hq\n");
     // if (!_velocity_array_handle) {
     //      _velocity_array_handle = blobmsg_open_array(&_b, "acceleration");
     // }
@@ -261,6 +264,12 @@ static void _observer_on_status(struct motion_status* st) {
     jitter_accel = round(st->jitter_accel * 100) / 100;
     jitter_frequency = round(st->jitter_frequency * 100) / 100;
     // double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
+
+    if (_accel_buffer.offset >= DATA_SAMPLE_SIZE_MAX) {
+        // drop data
+        return;
+    }
+
     hrbuffer_append(&_accel_buffer, &accel, sizeof(accel));
     hrbuffer_append(&_velocity_buffer, &velocity, sizeof(velocity));
     hrbuffer_append(&_jitter_freq_buffer, &jitter_frequency, sizeof(jitter_frequency));
@@ -284,6 +293,7 @@ static void _observer_on_event(struct motion_event* data) {
 
     // begin running
     if (_running_state == STOPPED) {
+        _begin_floor = data->floor;
         HR_LOGD("stopped --> running, direction:%d, distance:%f\n", data->direction, data->distance);
     } else if (data->state == STOPPED) {
         HR_LOGD("running --> stopped, direction:%d, distance:%f\n", data->direction, data->distance);
@@ -292,6 +302,13 @@ static void _observer_on_event(struct motion_event* data) {
             HR_LOGE("_b is busy maybe we should drop or wait.........\n");
 
             blob_buf_init(&_b, 0);
+
+            blobmsg_add_double(&_b, "distance", fabs(data->distance));
+            blobmsg_add_u32(&_b, "direction", data->direction);
+            blobmsg_add_u64(&_b, "beginTimeStamp", data->timestamp_begin);
+            blobmsg_add_u64(&_b, "endTimeStamp", data->timestamp_end);
+            blobmsg_add_u64(&_b, "beginFloor", data->floor_begin);
+            blobmsg_add_u64(&_b, "endFloor", data->floor);
 
             void* root = blobmsg_open_array(&_b, "acceleration");
 
@@ -332,6 +349,11 @@ static void _observer_on_event(struct motion_event* data) {
             free(str);
 
             post_message(MSG_HISTORICAL);
+
+            hrbuffer_reset(&_accel_buffer);
+            hrbuffer_reset(&_velocity_buffer);
+            hrbuffer_reset(&_jitter_accel_buffer);
+            hrbuffer_reset(&_jitter_freq_buffer);
         }
     }
 

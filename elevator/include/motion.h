@@ -1,6 +1,7 @@
 #ifndef MOTION_H
 #define MOTION_H
 #include <stddef.h>
+#include <stdint.h>
 #include "sensor.h"
 
 enum motion_state { STOPPED,
@@ -37,8 +38,12 @@ struct motion_status{
 struct motion_event {
     enum motion_state state;
     enum motion_direction direction;
+    int floor;
+    int floor_begin;
     double distance;
     double pressure;
+    int64_t timestamp_begin;
+    int64_t timestamp_end;
 };
 #define CALIBRATION_EVENT_VALUES_MAX 5
 

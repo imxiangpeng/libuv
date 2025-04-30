@@ -8,4 +8,6 @@ static inline int64_t seconds_to_nanoseconds(int64_t secs) {
 }
 
 int64_t get_monotonic_nanoseconds(void);
+
+int64_t get_realtime_ms(void);
 #endif
