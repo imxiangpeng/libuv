@@ -1,15 +1,19 @@
 #include "iot_mosquitto.h"
 
+#include <ifaddrs.h>
 #include <mosquitto.h>
 #include <mqtt_protocol.h>
+#include <net/if.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <uv.h>
 
 #include "hr_list.h"
 #include "hr_log.h"
 #include "iot_topic.h"
+#include "platform.h"
 
 // 感觉不能主动调用 disconnect， 必须先停止 pool 然后再调用 disconnect
 
@@ -28,6 +32,10 @@ struct iot_mosquitto {
     int pevents;
 
     struct hr_list_head topic_head;
+    struct {
+        char ipv4[INET_ADDRSTRLEN];
+        char mac[18];
+    } status;
 };
 
 struct iot__topic {
@@ -104,6 +112,50 @@ static void iot__topic_async_cb(uv_async_t* handle) {
         }
         free(payload);
     }
+}
+
+static void _update_connection_status(struct iot_mosquitto* iot) {
+    struct ifreq ifr;
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+
+    if (!iot || iot->sock <= 0)
+        return;
+
+    int sock = iot->sock;
+    if (sock < 0)
+        return;
+
+    if (0 != getsockname(sock, (struct sockaddr*)&addr, &addr_len)) {
+        return;
+    }
+
+    inet_ntop(AF_INET, &addr.sin_addr, iot->status.ipv4, sizeof(iot->status.ipv4));
+    uint16_t port = ntohs(addr.sin_port);
+
+    HR_LOGD("Local IP: %s, Port: %d\n", iot->status.ipv4, port);
+
+    platform_set_connection_ipv4_address(iot->status.ipv4);
+
+    memset(&ifr, 0, sizeof(ifr));
+    ifr.ifr_addr.sa_family = AF_INET;
+    if (ioctl(sock, SIOCGIFNAME, &ifr) == -1) {
+        perror("ioctl SIOCGIFNAME");
+        return;
+    }
+
+    if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
+        perror("ioctl SIOCGIFHWADDR");
+        return;
+    }
+
+    unsigned char* mac = (unsigned char*)ifr.ifr_hwaddr.sa_data;
+
+    snprintf(iot->status.mac, sizeof(iot->status.mac), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    HR_LOGD("now %s -> %s\n", iot->status.mac, iot->status.ipv4);
+    platform_set_connection_mac_address(iot->status.mac);
 }
 
 static void _on_log(struct mosquitto* mosq, void* obj, int level, const char* str) {

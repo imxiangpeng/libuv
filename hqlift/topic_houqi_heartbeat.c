@@ -192,7 +192,7 @@ static int _on_publish(void **payload, int *len) {
   printf("total:%d, avail:%d, percent:%d\n", total, avail, percent);
 
   cJSON_AddStringToObject(root, "type", "HeartBeat");
-  cJSON_AddStringToObject(root, "macAddr", platform_get_const_mac_address());
+  cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
   cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
   cJSON_AddStringToObject(root, "memory", DEVICE_MEMORY_SIZE_G);
   snprintf(tmp, sizeof(tmp), "%d", _cpu_usage_percent());
@@ -206,8 +206,8 @@ static int _on_publish(void **payload, int *len) {
   //
   snprintf(tmp, sizeof(tmp), "%ld", time(NULL));
   cJSON_AddStringToObject(root, "timeStamp", tmp);
-  printf("ip:%s\n", platform_get_const_ip_address());
-  cJSON_AddStringToObject(root, "ipAddr", platform_get_const_ip_address());
+  printf("ip:%s\n", platform_get_connection_ipv4_address());
+  cJSON_AddStringToObject(root, "ipAddr", platform_get_connection_ipv4_address());
 
   *payload = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);

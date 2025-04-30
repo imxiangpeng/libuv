@@ -201,10 +201,26 @@ int platform_get_ip_address(char* ip, size_t size) {
     return 0;
 }
 
-const char* platform_get_const_mac_address(void) {
-
-    return "";
+static char _connection_mac_address[18] = {0};
+static char _connection_ipv4_address[INET_ADDRSTRLEN] = {0};
+const char* platform_get_connection_mac_address(void) {
+    return _connection_mac_address;
 }
-const char* platform_get_const_ip_address(void) {
-    return "";
+int platform_set_connection_mac_address(char* data) {
+    if (!data)
+        return -1;
+    snprintf(_connection_mac_address, sizeof(_connection_mac_address), "%s", data);
+
+    return 0;
+}
+
+const char* platform_get_connection_ipv4_address(void) {
+    return _connection_ipv4_address;
+}
+int platform_set_connection_ipv4_address(char* data) {
+    if (!data)
+        return -1;
+    snprintf(_connection_ipv4_address, sizeof(_connection_ipv4_address), "%s", data);
+
+    return 0;
 }
