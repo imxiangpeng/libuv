@@ -13,7 +13,7 @@
 #include "hr_log.h"
 #include "iot_mosquitto.h"
 
-#define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
+#define BROKER_DEFAULT_SERVER "localhost" //"a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883
 #define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
@@ -81,6 +81,10 @@ int iot_init() {
     _iot->password[len * 2] = '\0';
     HR_LOGD("iot password:%s\n", _iot->password);
 
+    // force reset password
+
+    sprintf(_iot->username, "%s", "who");
+    sprintf(_iot->password, "%s", "me");
     // free memory
     free(iot_content);
     iot_content = NULL;

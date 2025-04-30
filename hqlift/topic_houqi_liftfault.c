@@ -47,7 +47,7 @@ static int _on_publish(void **payload, int *len) {
     if (!root) return -1;
 
     cJSON_AddStringToObject(root, "type", "LiftFault");
-    cJSON_AddStringToObject(root, "macAddr", platform_get_const_mac_address());
+    cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
     cJSON_AddStringToObject(root, "uuid", "00000000000000000");
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", _current_speed());

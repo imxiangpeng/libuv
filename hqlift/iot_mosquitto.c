@@ -181,6 +181,8 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
 
     if (CONNACK_ACCEPTED == reason) {
         HR_LOGD("%s(%d): connected, ...\n", __FUNCTION__, __LINE__);
+        _update_connection_status(iot);
+
         // auto subscribe all topics
         struct iot__topic* p = NULL;
         hr_list_for_each_entry(p, &iot->topic_head, entry) {
