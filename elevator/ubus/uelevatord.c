@@ -224,6 +224,7 @@ static void _observer_on_status(struct motion_status* st) {
             blobmsg_add_double(&_realtime_b, "velocity", st->velocity);
             blobmsg_add_double(&_realtime_b, "distance", st->distance);
             blobmsg_add_u32(&_realtime_b, "direction", _running_direction);
+            blobmsg_add_u32(&_realtime_b, "floor", (uint32_t)st->floor);
 
             post_message(MSG_REALTIME);
         } else {

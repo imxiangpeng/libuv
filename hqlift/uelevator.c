@@ -25,7 +25,7 @@
 enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
-	MSG_QUIT
+    MSG_QUIT
 };
 
 // 定于事件
@@ -39,7 +39,6 @@ static struct ubus_context* _ubus_ctx = NULL;
 static pthread_t _uobject_tid = 0;
 static int _pipefd[2];  // [0]=read, [1]=write
 
-
 static struct ubus_subscriber _elevatord_subscriber;
 static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
@@ -51,6 +50,7 @@ enum {
     RT_SPEED,
     RT_DISTANCE,
     RT_DIRECTION,
+    RT_FLOOR,
     __RT_MAX
 };
 
@@ -59,6 +59,7 @@ static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
     [RT_SPEED] = {.name = "velocity", .type = BLOBMSG_TYPE_DOUBLE},
     [RT_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
     [RT_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
+    [RT_FLOOR] = {.name = "floor", .type = BLOBMSG_TYPE_INT32},
 };
 
 static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
@@ -85,13 +86,20 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         blobmsg_parse(realtime_policy, __RT_MAX, tb, blobmsg_data(msg),
                       blobmsg_data_len(msg));
 
-        _status.accel = blobmsg_get_double(tb[RT_ACCEL]);
-        _status.speed = fabs(blobmsg_get_double(tb[RT_SPEED]));
-        _status.distance = blobmsg_get_double(tb[RT_DISTANCE]);
-        _status.direction = blobmsg_get_u32(tb[RT_DIRECTION]);
+        if (tb[RT_ACCEL])
+            _status.accel = blobmsg_get_double(tb[RT_ACCEL]);
+        if (tb[RT_SPEED])
+            _status.speed = fabs(blobmsg_get_double(tb[RT_SPEED]));
+        if (tb[RT_DISTANCE])
+            _status.distance = blobmsg_get_double(tb[RT_DISTANCE]);
+        if (tb[RT_DIRECTION])
+            _status.direction = blobmsg_get_u32(tb[RT_DIRECTION]);
+        // cast from uint32_t
+        if (tb[RT_FLOOR])
+            _status.current_floor = (int)blobmsg_get_u32(tb[RT_FLOOR]);
 
-        HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d\n", __FUNCTION__, __LINE__,
-                _status.accel, _status.speed, _status.distance, _status.direction);
+        HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
+                _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // 运行历史记录对应 LiftRunInfo
@@ -206,7 +214,6 @@ static struct ubus_event_handler _object_event = {
     .cb = ubus_object_event_handler,
 };
 
-
 static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
     (void)u;
     (void)events;
@@ -266,20 +273,20 @@ void* uobject_elevator_thread_routin(void* args) {
     subscriber_elevatord_event();
 
     uloop_fd_add(&pipe_fd, ULOOP_READ);
-        HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     uloop_run();
-        HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
-            HR_LOGD("uobject exit clean fdlajfldalfd...\n");
-            ubus_unregister_event_handler(_ubus_ctx, &_object_event);
-            ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
-            ubus_free(_ubus_ctx);
-            _ubus_ctx = NULL;
-        HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
+    HR_LOGD("uobject exit clean fdlajfldalfd...\n");
+    ubus_unregister_event_handler(_ubus_ctx, &_object_event);
+    ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
+    ubus_free(_ubus_ctx);
+    _ubus_ctx = NULL;
+    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     uloop_done();
-        HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     return NULL;
 }
@@ -299,7 +306,6 @@ int elevator_ubus_init(void) {
         return -1;
     }
 
-
     pthread_attr_init(&attr);
 
     ret = pthread_create(&_uobject_tid, &attr, uobject_elevator_thread_routin, NULL);
@@ -318,8 +324,8 @@ struct ubus_context* uelevator_get_ubus_ctx() {
 int elevator_ubus_deinit(void) {
     if (_uobject_tid != 0) {
         HR_LOGD("uobject send exit ...\n");
-	    post_message(MSG_QUIT);
-        //pthread_cancel(_uobject_tid);
+        post_message(MSG_QUIT);
+        // pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
 #if 0
@@ -335,5 +341,13 @@ int elevator_ubus_deinit(void) {
 #endif
         _uobject_tid = 0;
     }
+    return 0;
+}
+
+int uelevator_get_status(struct elevator_status* st) {
+    if (!st)
+        return -1;
+
+    memcpy(st, &_status, sizeof(struct elevator_status));
     return 0;
 }

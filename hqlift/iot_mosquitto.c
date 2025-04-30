@@ -331,7 +331,6 @@ static void iot_mosquitto_reconnect_timer_cb(uv_timer_t* handle) {
     if (!mosq)
         return;
 
-    printf("%s(%d): mosq:%p\n", __FUNCTION__, __LINE__, (void*)mosq);
     if (MOSQ_ERR_SUCCESS != mosquitto_reconnect_async(mosq)) {
         HR_LOGD("%s(%d): failed reconnect\n", __FUNCTION__, __LINE__);
         return;
@@ -486,6 +485,7 @@ struct iot* iot_mosquitto_alloc() {
     HR_LOGE("%s(%d): iot:%p iot_mosquitto:%p\n", __FUNCTION__, __LINE__, &iot->self, iot);
     HR_INIT_LIST_HEAD(&iot->topic_head);
 
+    iot->self.alive_time = 60;
     return &iot->self;
 }
 int iot_mosquitto_release(struct iot* self) {
@@ -599,7 +599,7 @@ int iot_mosquitto_prepare(struct iot* self) {
         // rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
         //_plat.alive_time, NULL);
 
-        rc = mosquitto_connect(iot->mosq, self->server, self->port, 60);
+        rc = mosquitto_connect(iot->mosq, self->server, self->port, self->alive_time);
         if (rc != MOSQ_ERR_SUCCESS)
             usleep(1000 * 1000);
     } while (rc != MOSQ_ERR_SUCCESS);
@@ -625,7 +625,7 @@ int iot_mosquitto_run(struct iot* self, uv_loop_t* loop) {
 
     uv_timer_init(loop, &iot->timer);
     iot->timer.data = iot;
-    uv_timer_start(&iot->timer, iot_mosquitto_loop_misc_timer_cb, 1000, 1000);
+    uv_timer_start(&iot->timer, iot_mosquitto_loop_misc_timer_cb, self->alive_time * 1000, self->alive_time * 1000);
 
     // init topics
     hr_list_for_each_entry(p, &iot->topic_head, entry) {

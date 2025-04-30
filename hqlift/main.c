@@ -9,11 +9,11 @@
 #include "iot.h"
 #include "uelevator.h"
 
-static void dummy_cb(uv_async_t* handle) {
+/*static void dummy_cb(uv_async_t* handle) {
     (void)handle;
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
-}
-static uv_async_t _dummy_keep_loop;
+}*/
+//static uv_async_t _dummy_keep_loop;
 /* Fully close a loop */
 static void close_walk_cb(uv_handle_t* handle, void* arg) {
     (void)arg;
@@ -65,11 +65,11 @@ int main(int argc, char** argv) {
     iot_run(uv_default_loop());
     
     
-    uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
+   // uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
     
-    uv_close((uv_handle_t*)&_dummy_keep_loop, NULL);
+    
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     elevator_ubus_deinit();
 

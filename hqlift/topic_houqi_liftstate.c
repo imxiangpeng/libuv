@@ -10,10 +10,11 @@
 #include "elevator.h"
 #include "hr_log.h"
 #include "platform.h"
+#include "uelevator.h"
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
 
-static int _running_direction = ELEVATOR_DIR_STATIONARY;
+static enum elevator_direction  _running_direction = ELEVATOR_DIR_STATIONARY;
 // report when begin and finish
 // stationary -> up/down
 // up/down -> stationary
@@ -23,16 +24,14 @@ static int _on_publish(void** payload, int* len) {
     printf("liftstate publish \n");
     char tmp[256] = {0};
 
-    int report_direction = _running_direction;
+    struct elevator_status st;
 
-    int direction = elevator_direction();
-    if (_running_direction == direction) {
-        return 0;
-    }
+    uelevator_get_status(&st);
 
-    // only report running direction not stationary
-    if (ELEVATOR_DIR_STATIONARY == report_direction) {
-        report_direction = direction;
+    // only update direction when running
+    // it's no stationary on houqi platform
+    if (st.direction != ELEVATOR_DIR_STATIONARY) {
+        _running_direction = st.direction;
     }
 
     cJSON* root = cJSON_CreateObject();
@@ -50,10 +49,10 @@ static int _on_publish(void** payload, int* len) {
     /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
 
     cJSON_AddStringToObject(root, "faultTime", tmp);
-    cJSON_AddNumberToObject(root, "currentFloor", elevator_floor());
-    cJSON_AddNumberToObject(root, "currentSpeed", elevator_speed());
-    cJSON_AddNumberToObject(root, "runningDirection", report_direction);
-    cJSON_AddNumberToObject(root, "doorStatus", elevator_door());
+    cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
+    cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
+    cJSON_AddNumberToObject(root, "runningDirection", _running_direction);
+    cJSON_AddNumberToObject(root, "doorStatus", st.current_floor);
     cJSON_AddNumberToObject(root, "personInLift", elevator_passenger_count());
 
     *payload = cJSON_PrintUnformatted(root);
@@ -73,7 +72,7 @@ static int _on_publish(void** payload, int* len) {
 static struct iot_topic _topic_liftstate = {
     .name = EVENT_LIFTSTATE_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_LIFTSTATE_TOPIC_NAME,
-    .period = 1000,
+    .period = 1000, // 大华好像配置的是 500ms
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };

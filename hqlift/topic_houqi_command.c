@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "elevator.h"
 #include "iot_topic.h"
 
 extern void topic_houqi_liftstate_post(void);
@@ -21,7 +22,7 @@ struct iot_topic topic_command = {
 int topic_houqi_command_init(const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
-    const char* serialno = "1234567890";
+    const char* serialno = elevator_deviceid();
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     iot_topic_register(&topic_command);
     return 0;
