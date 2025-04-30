@@ -15,6 +15,7 @@ enum elevator_door_state{
 struct elevator_status {
     enum elevator_direction direction;
     enum elevator_door_state door_state;
+    double accel;
     double speed;
     double distance;
     int current_floor;

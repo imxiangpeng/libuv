@@ -11,6 +11,8 @@
 #include "hr_log.h"
 #include "iot_topic.h"
 
+// 感觉不能主动调用 disconnect， 必须先停止 pool 然后再调用 disconnect
+
 #define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
 
 struct iot_mosquitto {
@@ -184,6 +186,7 @@ static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
     struct iot_mosquitto* iot = (struct iot_mosquitto*)userdata;
     if (!mosq || !iot)
         return;
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }
 
 static void _on_subscribe(struct mosquitto* mosq, void* obj, int mid, int qos_count, const int* granted_qos) {
@@ -331,11 +334,26 @@ static void iot_mosquitto_loop_poll_cb(uv_poll_t* handle, int status, int events
         }
     }
 
+    HR_LOGD("%s(%d): come in sock:%d.......\n", __FUNCTION__, __LINE__, mosquitto_socket(mosq));
+    // verify socket has been closed by us
+    if (mosquitto_socket(mosq) == -1) {
+        HR_LOGD("socket is invalid, we should stop poll\n");
+        uv_poll_stop(handle);
+        uv_close((uv_handle_t*)handle, NULL);
+        if (iot->auto_reconnect) {
+            // stop & start reconnect timer callback
+            uv_timer_stop(&iot->timer);
+            uv_timer_start(&iot->timer, iot_mosquitto_reconnect_timer_cb, 1000, 0);
+        }
+
+        return;
+    }
 #if 1
     if (events & UV_DISCONNECT) {
         HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
         // stop current poll, we should reconnect and using new socket
         uv_poll_stop(handle);
+        uv_close((uv_handle_t*)handle, NULL);
 
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback
@@ -431,11 +449,14 @@ int iot_mosquitto_release(struct iot* self) {
     uv_poll_stop(&iot->poll);
     uv_timer_stop(&iot->timer);
 
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     uv_close((uv_handle_t*)&iot->poll, NULL);
     uv_close((uv_handle_t*)&iot->timer, NULL);
 
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     mosquitto_disconnect(iot->mosq);
 
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     mosquitto_destroy(iot->mosq);
 
     if (self->id) {
@@ -461,6 +482,7 @@ int iot_mosquitto_release(struct iot* self) {
 
     HR_INIT_LIST_HEAD(&iot->topic_head);
 
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     // fixed valgrind memory problem
     // free memory after loop
     uv_run(loop, UV_RUN_DEFAULT);

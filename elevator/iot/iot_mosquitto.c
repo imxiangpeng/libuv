@@ -331,11 +331,25 @@ static void iot_mosquitto_loop_poll_cb(uv_poll_t* handle, int status, int events
         }
     }
 
+    HR_LOGD("%s(%d): come in sock:%d.......\n", __FUNCTION__, __LINE__, mosquitto_socket(mosq));
+    if (mosquitto_socket(mosq) == -1) {
+        HR_LOGD("socket is invalid, we should stop poll\n");
+        uv_poll_stop(handle);
+        uv_close((uv_handle_t*)handle, NULL);
+        if (iot->auto_reconnect) {
+            // stop & start reconnect timer callback
+            uv_timer_stop(&iot->timer);
+            uv_timer_start(&iot->timer, iot_mosquitto_reconnect_timer_cb, 1000, 0);
+        }
+
+        return;
+    }
 #if 1
     if (events & UV_DISCONNECT) {
         HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
         // stop current poll, we should reconnect and using new socket
         uv_poll_stop(handle);
+        uv_close((uv_handle_t*)handle, NULL);
 
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback

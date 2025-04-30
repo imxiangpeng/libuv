@@ -15,6 +15,9 @@
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 
+#define ELEVATORD_EVENT_REALTIME "RealTime"
+#define ELEVATORD_EVENT_HISTORICAL "Historical"
+
 #define _UBUS_RETRY_TIMEOUT (2)
 
 #ifndef ARRAY_SIZE
@@ -22,7 +25,8 @@
 #endif
 
 enum {
-    MSG_NOTIFY
+    MSG_REALTIME,
+    MSG_HISTORICAL
 };
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -36,6 +40,8 @@ extern struct ubus_object _elevatord_object;
 static int64_t _now = 0;
 static struct blob_buf _b;
 static int _b_is_busy = 0;
+static struct blob_buf _realtime_b;
+static int _realtime_b_is_busy = 0;
 static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
 static struct hrbuffer _jitter_accel_buffer;
@@ -43,6 +49,10 @@ static struct hrbuffer _jitter_freq_buffer;
 // static struct blob_buf _velocity_array;
 //  static void* _velocity_array_handle;
 //  static struct blob_buf _accel_array;
+
+// 500ms or 1s report to ubus client
+static int _realtime_report_times = 0;
+static const int _realtime_report_fac = 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
 
 static enum motion_state _running_state = STOPPED;
 static enum motion_direction _running_direction = DIRECTION_NONE;
@@ -76,7 +86,7 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(g_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 }
 
@@ -93,9 +103,14 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 
     HR_LOGD("haha receive message:%d \n", which);
     switch (which) {
-        case MSG_NOTIFY:
+        case MSG_REALTIME:
+            HR_LOGD("haha report realtime message \n");
+            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_REALTIME, _realtime_b.head, -1 /*no block*/);
+            _realtime_b_is_busy = 0;
+
+            break;
+        case MSG_HISTORICAL:
             HR_LOGD("haha receive notify message \n");
-            _b_is_busy = 1;
             ubus_notify(_ubus_ctx, &_elevatord_object, "RunEvent", _b.head, -1 /*no block*/);
             _b_is_busy = 0;
             break;
@@ -197,15 +212,40 @@ static void _observer_on_status(struct motion_status* st) {
         return;
     // HR_LOGD("speed : %f\n", _speed_realtime);
 
+    HR_LOGD("_report times:%d\n", _realtime_report_times);
+    if (_realtime_report_times % _realtime_report_fac == 0) {
+        if (!_realtime_b_is_busy) {
+            _realtime_b_is_busy = 1;
+            blob_buf_init(&_realtime_b, 0);
+            // blob_put_raw(struct blob_buf *buf, const void *ptr, unsigned int len)
+            // obmsg_add_double
+            //  blobmsg_add_u8();
+            blobmsg_add_double(&_realtime_b, "accel", st->accel);
+            blobmsg_add_double(&_realtime_b, "velocity", st->velocity);
+            blobmsg_add_double(&_realtime_b, "distance", st->distance);
+            blobmsg_add_u32(&_realtime_b, "direction", _running_direction);
+
+            post_message(MSG_REALTIME);
+        } else {
+            HR_LOGE("drop .........\n");
+            // drop this time trigger next time
+            _realtime_report_times--;
+        }
+    }
+
+    _realtime_report_times++;
+
     if (_running_state == STOPPED) {
         return;
     }
     // ms
     int64_t now = get_monotonic_nanoseconds() / 1000000;
 
-    if (now - _now < 200) {
+    if (now - _now < 2000) {
         return;
     }
+
+    _now = now;
     // also we can simple using sampling_rate
 
     HR_LOGD("capture data for hq\n");
@@ -247,51 +287,51 @@ static void _observer_on_event(struct motion_event* data) {
     } else if (data->state == STOPPED) {
         HR_LOGD("running --> stopped, direction:%d, distance:%f\n", data->direction, data->distance);
 
-        if (_b_is_busy) {
+        if (!_b_is_busy) {
             HR_LOGE("_b is busy maybe we should drop or wait.........\n");
+
+            blob_buf_init(&_b, 0);
+
+            void* root = blobmsg_open_array(&_b, "acceleration");
+
+            for (size_t i = 0; i < _accel_buffer.offset;) {
+                double* v = (double*)(_accel_buffer.data + i);
+                blobmsg_add_double(&_b, NULL, *v);
+                i += sizeof(double);
+            }
+            blobmsg_close_array(&_b, root);
+            root = blobmsg_open_array(&_b, "runSpeed");
+
+            for (size_t i = 0; i < _velocity_buffer.offset;) {
+                double* v = (double*)(_velocity_buffer.data + i);
+                blobmsg_add_double(&_b, NULL, *v);
+                i += sizeof(double);
+            }
+            blobmsg_close_array(&_b, root);
+
+            root = blobmsg_open_array(&_b, "jitterFrequency");
+
+            for (size_t i = 0; i < _jitter_freq_buffer.offset;) {
+                double* v = (double*)(_jitter_freq_buffer.data + i);
+                blobmsg_add_double(&_b, NULL, *v);
+                i += sizeof(double);
+            }
+            blobmsg_close_array(&_b, root);
+            root = blobmsg_open_array(&_b, "jitterAcceleration");
+
+            for (size_t i = 0; i < _jitter_accel_buffer.offset;) {
+                double* v = (double*)(_jitter_accel_buffer.data + i);
+                blobmsg_add_double(&_b, NULL, *v);
+                i += sizeof(double);
+            }
+            blobmsg_close_array(&_b, root);
+
+            char* str = blobmsg_format_json(_b.head, true);
+            HR_LOGD("%s\n", str);
+            free(str);
+
+            post_message(MSG_HISTORICAL);
         }
-
-        blob_buf_init(&_b, 0);
-
-        void* root = blobmsg_open_array(&_b, "acceleration");
-
-        for (size_t i = 0; i < _accel_buffer.offset;) {
-            double* v = (double*)(_accel_buffer.data + i);
-            blobmsg_add_double(&_b, NULL, *v);
-            i += sizeof(double);
-        }
-        blobmsg_close_array(&_b, root);
-        root = blobmsg_open_array(&_b, "runSpeed");
-
-        for (size_t i = 0; i < _velocity_buffer.offset;) {
-            double* v = (double*)(_velocity_buffer.data + i);
-            blobmsg_add_double(&_b, NULL, *v);
-            i += sizeof(double);
-        }
-        blobmsg_close_array(&_b, root);
-
-        root = blobmsg_open_array(&_b, "jitterFrequency");
-
-        for (size_t i = 0; i < _jitter_freq_buffer.offset;) {
-            double* v = (double*)(_jitter_freq_buffer.data + i);
-            blobmsg_add_double(&_b, NULL, *v);
-            i += sizeof(double);
-        }
-        blobmsg_close_array(&_b, root);
-        root = blobmsg_open_array(&_b, "jitterAcceleration");
-
-        for (size_t i = 0; i < _jitter_accel_buffer.offset;) {
-            double* v = (double*)(_jitter_accel_buffer.data + i);
-            blobmsg_add_double(&_b, NULL, *v);
-            i += sizeof(double);
-        }
-        blobmsg_close_array(&_b, root);
-
-        char* str = blobmsg_format_json(_b.head, true);
-        HR_LOGD("%s\n", str);
-        free(str);
-
-        post_message(MSG_NOTIFY);
     }
 
     _running_state = data->state;

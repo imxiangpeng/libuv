@@ -100,9 +100,13 @@ int iot_run(uv_loop_t* loop) {
 }
 
 int iot_deinit(void) {
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     iot_mosquitto_release(_iot);
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     _iot = NULL;
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     mosquitto_lib_cleanup();
+    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     return 0;
 }
 
