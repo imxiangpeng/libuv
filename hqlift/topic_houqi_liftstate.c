@@ -14,7 +14,7 @@
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
 
-static enum elevator_direction  _running_direction = ELEVATOR_DIR_STATIONARY;
+static enum elevator_direction _running_direction = ELEVATOR_DIR_STATIONARY;
 // report when begin and finish
 // stationary -> up/down
 // up/down -> stationary
@@ -22,7 +22,7 @@ static int _on_publish(void** payload, int* len) {
     struct tm tm;
     struct timespec ts;
     printf("liftstate publish \n");
-    char tmp[256] = {0};
+    // char tmp[256] = {0};
 
     struct elevator_status st;
 
@@ -45,10 +45,11 @@ static int _on_publish(void** payload, int* len) {
 
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
-
+#if 0
     /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
-
+    // it's not mandatory
     cJSON_AddStringToObject(root, "faultTime", tmp);
+#endif
     cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
     cJSON_AddNumberToObject(root, "runningDirection", _running_direction);
@@ -57,12 +58,12 @@ static int _on_publish(void** payload, int* len) {
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!*payload)
+    if (!*payload) {
         return -1;
-
+    }
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
-#if 0    
+#if 0
     *payload = strdup("{\"name\":\"xiaohua\"}");
     *len = strlen(*payload);
 #endif
@@ -72,7 +73,7 @@ static int _on_publish(void** payload, int* len) {
 static struct iot_topic _topic_liftstate = {
     .name = EVENT_LIFTSTATE_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_LIFTSTATE_TOPIC_NAME,
-    .period = 1000, // 大华好像配置的是 500ms
+    .period = 1000,  // 大华好像配置的是 500ms
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };

@@ -118,7 +118,7 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static struct iot_topic dm_topic_liftruninfo = {
+static struct iot_topic _topic_liftruninfo = {
     .name = EVENT_RUNINFO_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_RUNINFO_TOPIC_NAME,
     .period = 0,
@@ -131,7 +131,12 @@ int hq_topic_liftruninfo_init(const char* public_key, const char* device_name) {
   (void)device_name;
     platform_get_property(PROPERTY_DEVICEID, _device_id, sizeof(_device_id));
     _running_direction = elevator_direction();
-    iot_topic_register(&dm_topic_liftruninfo);
+    iot_topic_register(&_topic_liftruninfo);
 
     return 0;
+}
+
+// trigger publish immediately
+void topic_houqi_liftruninfo_post(void) {
+    iot_topic_public_async(&_topic_liftruninfo);
 }

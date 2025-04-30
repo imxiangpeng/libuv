@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include "elevator.h"
+#include "hr_buffer.h"
 #include "hr_log.h"
 #include "libubox/blob.h"
 #include "libubox/blobmsg.h"
@@ -45,6 +46,11 @@ static struct blob_buf _b;
 
 static struct elevator_status _status;
 
+static struct elevator_historical _historical;
+
+
+extern void topic_houqi_liftruninfo_post(void);
+
 enum {
     RT_ACCEL,
     RT_SPEED,
@@ -53,6 +59,21 @@ enum {
     RT_FLOOR,
     __RT_MAX
 };
+
+enum {
+    HI_DISTANCE,
+    HI_DIRECTION,
+    HI_TIMESTAMP_BEGIN,
+    HI_TIMESTAMP_END,
+    HI_FLOOR_BEGIN,
+    HI_FLOOR_END,
+    HI_ACCEL_ARRAY,
+    HI_SPEED_ARRAY,
+    HI_JITTER_FREQ_ARRAY,
+    HI_JITTER_ACCEL_ARRAY,
+    __HI_MAX
+};
+
 
 static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
     [RT_ACCEL] = {.name = "accel", .type = BLOBMSG_TYPE_DOUBLE},
@@ -92,8 +113,10 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.speed = fabs(blobmsg_get_double(tb[RT_SPEED]));
         if (tb[RT_DISTANCE])
             _status.distance = blobmsg_get_double(tb[RT_DISTANCE]);
-        if (tb[RT_DIRECTION])
+        if (tb[RT_DIRECTION]) {
             _status.direction = blobmsg_get_u32(tb[RT_DIRECTION]);
+
+        }
         // cast from uint32_t
         if (tb[RT_FLOOR])
             _status.current_floor = (int)blobmsg_get_u32(tb[RT_FLOOR]);
@@ -103,6 +126,9 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // 运行历史记录对应 LiftRunInfo
+        // directly pass 
+        
+        topic_houqi_liftruninfo_post();
     }
 
     return 0;
@@ -300,6 +326,11 @@ int elevator_ubus_init(void) {
 
     blob_buf_init(&_b, 0);
     blob_buf_grow(&_b, 1024);
+    
+    hrbuffer_alloc(&_historical.accel_array, sizeof(double) * 5 * 60);
+    hrbuffer_alloc(&_historical.speed_array, sizeof(double) * 5 * 60);
+    hrbuffer_alloc(&_historical.jitter_frequency_array, sizeof(double) * 5 * 60);
+    hrbuffer_alloc(&_historical.jitter_accel_array, sizeof(double) * 5 * 60);
 
     if (pipe(_pipefd) < 0) {
         perror("pipe");

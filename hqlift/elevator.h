@@ -1,6 +1,9 @@
 
 #ifndef ELEVATOR_H
 #define ELEVATOR_H
+#include <stdint.h>
+#include "hr_buffer.h"
+
 enum elevator_direction {
     ELEVATOR_DIR_STATIONARY = 0,
     ELEVATOR_DIR_UP, // 1
@@ -20,6 +23,19 @@ struct elevator_status {
     double distance;
     int current_floor;
     int passenger_count;
+};
+
+struct elevator_historical {
+    double distance;
+    int direction;
+    uint64_t timestamp_begin;
+    uint64_t timestamp_end;
+    int floor_begin;
+    int floor_end;
+    struct hrbuffer accel_array;
+    struct hrbuffer speed_array;
+    struct hrbuffer jitter_accel_array;
+    struct hrbuffer jitter_frequency_array;
 };
 
 int elevator_init(void);

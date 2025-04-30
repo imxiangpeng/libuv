@@ -114,7 +114,7 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             break;
         case MSG_HISTORICAL:
             HR_LOGD("haha receive notify message \n");
-            ubus_notify(_ubus_ctx, &_elevatord_object, "RunEvent", _b.head, -1 /*no block*/);
+            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _b.head, -1 /*no block*/);
             _b_is_busy = 0;
             break;
     }

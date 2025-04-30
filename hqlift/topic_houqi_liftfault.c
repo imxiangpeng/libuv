@@ -9,52 +9,29 @@
 #include "cjson/cJSON.h"
 #include "hr_log.h"
 #include "platform.h"
+#include "uelevator.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
-
-static const char *_elevator_no(void) {
-    return "1234567890";
-}
-
-static const char *_mac_address(void) {
-    return "FA1FADCDD2SQ";
-}
-
-static int _current_floor() {
-    return 10;
-}
-
-static double _current_speed() {
-    return 2.5;
-}
-static int _running_direction() {
-    return 1;  // 1: up, 2: down
-}
-
-static int _door_status() {
-    return 1;  // 0: open, 1: close
-}
-static int _person_nums() {
-    return 6;  // 0: open, 1: close
-}
 
 static int _on_publish(void **payload, int *len) {
     struct tm tm;
     struct timespec ts;
     printf("liftfault publish \n");
     char tmp[256] = {0};
+    struct elevator_status st;
     cJSON *root = cJSON_CreateObject();
     if (!root) return -1;
 
+    uelevator_get_status(&st);
     cJSON_AddStringToObject(root, "type", "LiftFault");
     cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
     cJSON_AddStringToObject(root, "uuid", "00000000000000000");
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
-    cJSON_AddNumberToObject(root, "currentSpeed", _current_speed());
-    cJSON_AddNumberToObject(root, "runningDirection", _running_direction());
-    cJSON_AddNumberToObject(root, "doorStatus", _door_status());
-    cJSON_AddNumberToObject(root, "personInLift", _person_nums());
-    cJSON_AddNumberToObject(root, "currentFloor", _current_floor());
+    cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
+    cJSON_AddNumberToObject(root, "runningDirection", st.direction);
+    cJSON_AddNumberToObject(root, "doorStatus", elevator_door());
+    cJSON_AddNumberToObject(root, "personInLift", elevator_passenger_count());
+    cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
 
     cJSON *arr = cJSON_AddArrayToObject(root, "ErrorListBean");
     cJSON *fault = cJSON_CreateObject();

@@ -30,7 +30,8 @@ set(SOURCES main.c
                 topic_houqi_liftruninfo
     uelevator.c
     platform.c
-    elevator.c)
+    elevator.c
+    hr_buffer.c)
 
 ADD_EXECUTABLE(hqlift ${SOURCES})
 
