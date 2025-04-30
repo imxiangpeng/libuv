@@ -23,14 +23,14 @@ set(SOURCES main.c
     iot.c
     iot_mosquitto.c
     iot_topic.c
-                hq_topic_heartbeat
-                hq_topic_command
-                hq_topic_liftstate
-                hq_topic_liftfault
-                hq_topic_liftruninfo
+                topic_houqi_heartbeat
+                topic_houqi_command
+                topic_houqi_liftstate
+                topic_houqi_liftfault
+                topic_houqi_liftruninfo
     uelevator.c
-    dm_impl.c
-    dm_elevator.c)
+    platform.c
+    elevator.c)
 
 ADD_EXECUTABLE(hqlift ${SOURCES})
 

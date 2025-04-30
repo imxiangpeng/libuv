@@ -9,10 +9,11 @@
 #include <unistd.h>
 #include <uv.h>
 
+#include "elevator.h"
 #include "iot_topic.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
-#include "dm_impl.h"
+#include "platform.h"
 #include "hr_log.h"
 
 #define DEVICE_MEMORY_SIZE_G "1"
@@ -191,8 +192,8 @@ static int _on_publish(void **payload, int *len) {
   printf("total:%d, avail:%d, percent:%d\n", total, avail, percent);
 
   cJSON_AddStringToObject(root, "type", "HeartBeat");
-  cJSON_AddStringToObject(root, "macAddr", dm_running_interface_macaddr());
-  cJSON_AddStringToObject(root, "elevatorNo", _device_id);
+  cJSON_AddStringToObject(root, "macAddr", platform_get_const_mac_address());
+  cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
   cJSON_AddStringToObject(root, "memory", DEVICE_MEMORY_SIZE_G);
   snprintf(tmp, sizeof(tmp), "%d", _cpu_usage_percent());
   cJSON_AddStringToObject(root, "cpu", tmp);
@@ -205,8 +206,8 @@ static int _on_publish(void **payload, int *len) {
   //
   snprintf(tmp, sizeof(tmp), "%ld", time(NULL));
   cJSON_AddStringToObject(root, "timeStamp", tmp);
-  printf("ip:%s\n", dm_running_interface_ipv4addr());
-  cJSON_AddStringToObject(root, "ipAddr", dm_running_interface_ipv4addr());
+  printf("ip:%s\n", platform_get_const_ip_address());
+  cJSON_AddStringToObject(root, "ipAddr", platform_get_const_ip_address());
 
   *payload = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
@@ -227,11 +228,11 @@ static struct iot_topic dm_topic_heartbeat = {
     .callback.on_publish = _on_publish,
 };
 
-int hq_topic_heartbeat_init(const char* public_key, const char* device_name) {
+int topic_houqi_heartbeat_init(const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
 
-  dm_impl_system_property_get(PROPERTY_DEVICEID, _device_id, sizeof(_device_id));
+  platform_get_property(PROPERTY_DEVICEID, _device_id, sizeof(_device_id));
   
   iot_topic_register(&dm_topic_heartbeat);
 

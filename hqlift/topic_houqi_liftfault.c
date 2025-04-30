@@ -3,10 +3,12 @@
 #include <string.h>
 #include <time.h>
 
+#include "elevator.h"
 #include "iot_topic.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
+#include "platform.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
 
@@ -45,9 +47,9 @@ static int _on_publish(void **payload, int *len) {
     if (!root) return -1;
 
     cJSON_AddStringToObject(root, "type", "LiftFault");
-    cJSON_AddStringToObject(root, "macAddr", "02424feea717");
+    cJSON_AddStringToObject(root, "macAddr", platform_get_const_mac_address());
     cJSON_AddStringToObject(root, "uuid", "00000000000000000");
-    cJSON_AddStringToObject(root, "elevatorNo", _elevator_no());
+    cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", _current_speed());
     cJSON_AddNumberToObject(root, "runningDirection", _running_direction());
     cJSON_AddNumberToObject(root, "doorStatus", _door_status());
@@ -85,7 +87,7 @@ static struct iot_topic dm_topic_liftfault = {
     .callback.on_publish = _on_publish,
 };
 
-int hq_topic_liftfault_init(const char* public_key, const char* device_name) {
+int topic_houqi_liftfault_init(const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
     iot_topic_register(&dm_topic_liftfault);

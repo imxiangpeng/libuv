@@ -4,6 +4,8 @@
 
 #include "iot_topic.h"
 
+extern void topic_houqi_liftstate_post(void);
+
 static int _on_message(void* payload, int len) {
     printf("command message %d -> %s\n", len, (char*)payload);
     return 0;
@@ -16,7 +18,7 @@ struct iot_topic topic_command = {
     .callback.on_message = _on_message,
 };
 
-int hq_topic_command_init(const char* public_key, const char* device_name) {
+int topic_houqi_command_init(const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
     const char* serialno = "1234567890";
