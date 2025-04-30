@@ -362,6 +362,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
         s->fft[i].in = (double*)fftw_malloc(sizeof(double) * s->fft[i].sampling_size);
         s->fft[i].out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->fft[i].sampling_size / 2 + 1));
     }
+
     return &s->self;
 }
 
@@ -380,7 +381,18 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
         free(s->calibration_data);
         s->calibration_data = NULL;
     }
+    
+     for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
+        s->fft[i].count = 0;
+        s->fft[i].sum = 0;
+        fftw_free(s->fft[i].in);
+        fftw_free(s->fft[i].out);
+    }
+
+   
     free(s);
+    
+    fftw_cleanup();
     return 0;
 }
 

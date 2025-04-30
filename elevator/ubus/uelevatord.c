@@ -28,7 +28,8 @@
 
 enum {
     MSG_REALTIME,
-    MSG_HISTORICAL
+    MSG_HISTORICAL,
+    MSG_QUIT
 };
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -117,6 +118,10 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _b.head, -1 /*no block*/);
             _b_is_busy = 0;
             break;
+        case MSG_QUIT:
+            HR_LOGD("haha receive message:%d quit\n", which);
+            uloop_end();
+            break;
     }
 }
 
@@ -158,6 +163,8 @@ void* uobject_elevator_thread_routin(void* args) {
     uloop_fd_add(&pipe_fd, ULOOP_READ);
     uloop_run();
 
+    ubus_free(_ubus_ctx);
+    _ubus_ctx = NULL;
     uloop_done();
 
     return NULL;
@@ -200,11 +207,19 @@ struct ubus_context* uelevatord_get_ubus_ctx() {
     return _ubus_ctx;
 }
 int uobject_elevatord_deinit(void) {
+    motion_unregister_observer(&_ubus_observer);
     if (_uobject_tid != 0) {
-        pthread_cancel(_uobject_tid);
+        post_message(MSG_QUIT);
+        // pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
         _uobject_tid = 0;
+        
+
+        hrbuffer_free(&_accel_buffer);
+        hrbuffer_free(&_velocity_buffer);
+        hrbuffer_free(&_jitter_freq_buffer);
+        hrbuffer_free(&_jitter_accel_buffer);
     }
     return 0;
 }
