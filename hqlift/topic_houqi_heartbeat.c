@@ -234,7 +234,7 @@ static int _on_publish(void **payload, int *len) {
   return 0;
 }
 
-static struct iot_topic dm_topic_heartbeat = {
+static struct uviot_topic dm_topic_heartbeat = {
     .name = EVENT_HEARTBEAT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_HEARTBEAT_TOPIC_NAME,
     .period = 10 * 1000,
@@ -242,13 +242,13 @@ static struct iot_topic dm_topic_heartbeat = {
     .callback.on_publish = _on_publish,
 };
 
-int topic_houqi_heartbeat_init(const char* public_key, const char* device_name) {
+int topic_houqi_heartbeat_init(struct uviot* iot,const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
 
   platform_get_property(PROPERTY_DEVICEID, _device_id, sizeof(_device_id));
   
-  iot_topic_register(&dm_topic_heartbeat);
+  uviot_topic_register(iot, &dm_topic_heartbeat);
 
   return 0;
 }

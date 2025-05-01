@@ -10,6 +10,7 @@
 #include "iot_topic.h"
 #include "platform.h"
 #include "uelevator.h"
+#include "uviot.h"
 
 #define EVENT_RUNINFO_TOPIC_NAME "LiftRunInfo"
 
@@ -102,7 +103,7 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static struct iot_topic _topic_liftruninfo = {
+static struct uviot_topic _topic_liftruninfo = {
     .name = EVENT_RUNINFO_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_RUNINFO_TOPIC_NAME,
     .period = 0,
@@ -110,15 +111,17 @@ static struct iot_topic _topic_liftruninfo = {
     .callback.on_publish = _on_publish,
 };
 
-int topic_houqi_liftruninfo_init(const char* public_key, const char* device_name) {
+struct uviot *_iot = NULL;
+int topic_houqi_liftruninfo_init(struct uviot* iot,const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
-    iot_topic_register(&_topic_liftruninfo);
+    _iot = iot;
+    uviot_topic_register(iot, &_topic_liftruninfo);
 
     return 0;
 }
 
 // trigger publish immediately
 void topic_houqi_liftruninfo_post(void) {
-    iot_topic_public_async(&_topic_liftruninfo);
+    uviot_publish_async(_iot, &_topic_liftruninfo);
 }

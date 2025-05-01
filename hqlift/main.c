@@ -58,24 +58,20 @@ int main(int argc, char** argv) {
     sigaction(SIGUSR1, &action, NULL);
 
 
-    iot_init();
 
     elevator_ubus_init();
     
-    iot_run(uv_default_loop());
-    
+    // block until connected
+    iot_init(uv_default_loop());
     
    // uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-    
-    
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
-    elevator_ubus_deinit();
 
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     iot_deinit();
 
+    elevator_ubus_deinit();
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

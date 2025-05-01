@@ -21,7 +21,7 @@ set(SOURCES main.c
     file_util.c
     hr_log.c 
     iot.c
-    iot_mosquitto.c
+    #iot_mosquitto.c
     iot_topic.c
                 topic_houqi_heartbeat
                 topic_houqi_command
@@ -50,5 +50,6 @@ TARGET_LINK_LIBRARIES(hqlift pthread)
 TARGET_LINK_LIBRARIES(hqlift -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(hqlift ${ubox_library} ${ubus_library} ${blob_library})
 
+TARGET_LINK_LIBRARIES(hqlift uviot)
 
 #INSTALL(TARGETS hqlift RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

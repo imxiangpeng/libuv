@@ -88,7 +88,7 @@ static int _on_command_message(void* payload, int len) {
 // static int _on_upload_record_list_publish(void** payload, int* len) {
 //     return 0;
 // }
-struct iot_topic topic_command = {
+struct uviot_topic topic_command = {
     .name = "Command",
     .topic = {0},
     .type = TOPIC_TYPE_SUBSCRIBE,
@@ -102,11 +102,11 @@ struct iot_topic topic_command = {
 //     .callback.on_publish = _on_upload_record_list_publish,
 // };
 
-int topic_houqi_command_init(const char* public_key, const char* device_name) {
+int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
     const char* serialno = elevator_deviceid();
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
-    iot_topic_register(&topic_command);
+    uviot_topic_register(iot, &topic_command);
     return 0;
 }

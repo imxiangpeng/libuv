@@ -11,6 +11,7 @@
 #include "hr_log.h"
 #include "platform.h"
 #include "uelevator.h"
+#include "uviot.h"
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
 
@@ -70,7 +71,7 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static struct iot_topic _topic_liftstate = {
+static struct uviot_topic _topic_liftstate = {
     .name = EVENT_LIFTSTATE_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_LIFTSTATE_TOPIC_NAME,
     .period = 1000,  // 大华好像配置的是 500ms
@@ -78,16 +79,19 @@ static struct iot_topic _topic_liftstate = {
     .callback.on_publish = _on_publish,
 };
 
-int topic_houqi_liftstate_init(const char* public_key, const char* device_name) {
+static struct uviot* _iot = NULL;
+int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
     _running_direction = elevator_direction();
-    iot_topic_register(&_topic_liftstate);
+    _iot = iot;
+    uviot_topic_register(iot, &_topic_liftstate);
+
 
     return 0;
 }
 
 // trigger publish immediately
 void topic_houqi_liftstate_post(void) {
-    iot_topic_public_async(&_topic_liftstate);
+    uviot_publish_async(_iot, &_topic_liftstate);
 }

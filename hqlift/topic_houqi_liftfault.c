@@ -4,7 +4,7 @@
 #include <time.h>
 
 #include "elevator.h"
-#include "iot_topic.h"
+#include "uviot.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
@@ -56,17 +56,17 @@ static int _on_publish(void **payload, int *len) {
     return 0;
 }
 
-static struct iot_topic dm_topic_liftfault = {
+static struct uviot_topic dm_topic_liftfault = {
     .name = EVENT_FAULT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_FAULT_TOPIC_NAME,
-    .period = 30000,
+    .period = 0,
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };
 
-int topic_houqi_liftfault_init(const char* public_key, const char* device_name) {
+int topic_houqi_liftfault_init(struct uviot* iot,const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
-    iot_topic_register(&dm_topic_liftfault);
+    uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
 }
