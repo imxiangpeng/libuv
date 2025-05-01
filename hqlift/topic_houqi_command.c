@@ -3,9 +3,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-
 #include "elevator.h"
-#include "iot_topic.h"
+#include "uviot.h"
 
 extern void topic_houqi_liftstate_post(void);
 
@@ -58,7 +57,6 @@ static int _on_command_message(void* payload, int len) {
         end_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "endTime"));
 
         if (!start_time || !end_time) {
-            
         }
         // todo
         cJSON_Delete(root);

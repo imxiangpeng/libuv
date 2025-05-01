@@ -11,11 +11,4 @@ typedef enum {
 
 // client should implement interface
 int platform_get_property(PROPERTY_e which, char* data, int len);
-
-int platform_get_mac_address(char *mac, size_t size);
-int platform_get_ip_address(char *ip, size_t size);
-const char* platform_get_connection_mac_address(void);
-int platform_set_connection_mac_address(char* data);
-const char* platform_get_connection_ipv4_address(void);
-int platform_set_connection_ipv4_address(char* data);
 #endif // DM_IMPL_

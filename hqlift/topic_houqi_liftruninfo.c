@@ -7,12 +7,11 @@
 #include "cjson/cJSON.h"
 #include "elevator.h"
 #include "hr_log.h"
-#include "iot_topic.h"
-#include "platform.h"
 #include "uelevator.h"
 #include "uviot.h"
 
 #define EVENT_RUNINFO_TOPIC_NAME "LiftRunInfo"
+static struct uviot* _iot = NULL;
 
 static int _on_publish(void** payload, int* len) {
     struct tm tm;
@@ -41,7 +40,7 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     cJSON_AddStringToObject(root, "type", EVENT_RUNINFO_TOPIC_NAME);
-    cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
+    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
     cJSON_AddNumberToObject(root, "runningMileageTotal", his->distance);
@@ -111,8 +110,7 @@ static struct uviot_topic _topic_liftruninfo = {
     .callback.on_publish = _on_publish,
 };
 
-struct uviot *_iot = NULL;
-int topic_houqi_liftruninfo_init(struct uviot* iot,const char* public_key, const char* device_name) {
+int topic_houqi_liftruninfo_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
     _iot = iot;

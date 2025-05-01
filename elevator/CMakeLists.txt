@@ -40,7 +40,7 @@ set(SOURCES main.c
     utils/file_util.c
     utils/hr_log.c 
     iot/iot.c
-    iot/iot_mosquitto.c
+    #iot/iot_mosquitto.c
     iot/iot_topic.c
     iot/iot_topic_property.c
     iot/iot_topic_calibration.c
@@ -76,6 +76,7 @@ TARGET_LINK_LIBRARIES(elevatord ncurses)
 TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(elevatord -lfftw3)
 TARGET_LINK_LIBRARIES(elevatord ${ubox_library} ${ubus_library} ${blob_library})
+TARGET_LINK_LIBRARIES(elevatord uviot)
 
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

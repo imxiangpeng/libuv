@@ -13,6 +13,8 @@
 #include "hr_list.h"
 #include "hr_log.h"
 #include "motion.h"
+#include "uviot.h"
+
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -43,8 +45,8 @@ struct calibration_event {
 
 static HR_LIST_HEAD(_auto_floor_calibration_message_queue);
 static pthread_mutex_t _queue_mutex;
-
-static struct iot_topic _iot_calibration_topics[];
+static struct uviot *_iot = NULL;
+static struct uviot_topic _iot_calibration_topics[];
 
 static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
@@ -83,7 +85,7 @@ static int send_calibration_event(struct calibration_event* m) {
     pthread_mutex_lock(&_queue_mutex);
     hr_list_add_tail(&m->entry, &_auto_floor_calibration_message_queue);
     pthread_mutex_unlock(&_queue_mutex);
-    return iot_topic_public_async(&_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
+    return uviot_publish_async(_iot, &_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
 }
 
 static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
@@ -132,7 +134,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
     if (!hr_list_empty(&_auto_floor_calibration_message_queue)) {
         // when queue is not empty, we should trigger again
         // because uv_async merges multiple requests and triggers the callback only once
-        return iot_topic_public_async(&_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
+        return uviot_publish_async(_iot, &_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
     }
 #endif
     return 0;
@@ -273,7 +275,7 @@ static int _CalibrateAtHeightManually(cJSON* params) {
     return 0;
 }
 
-static struct iot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
+static struct uviot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
     [CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT] = {
         .name = "event/AutoFloorCalibrationEvent/post",
         .topic = {0},
@@ -307,16 +309,17 @@ static struct iot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
     },
 };
 
-int iot_topic_calibration_init(const char* public_key, const char* device_name) {
+int iot_topic_calibration_init(struct uviot* iot, const char* public_key, const char* device_name) {
+    (void)iot;
     if (!public_key || !device_name) {
         return -1;
     }
-
+    _iot = iot;
     pthread_mutex_init(&_queue_mutex, NULL);
     for (size_t i = 0; i < ARRAY_SIZE(_iot_calibration_topics); i++) {
-        struct iot_topic* t = &_iot_calibration_topics[i];
+        struct uviot_topic* t = &_iot_calibration_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
-        iot_topic_register(t);
+        uviot_topic_register(iot, t);
     }
 
     return 0;

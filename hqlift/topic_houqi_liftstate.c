@@ -3,17 +3,14 @@
 #include <string.h>
 #include <time.h>
 
-#include "elevator.h"
-#include "iot_topic.h"
-/// publish every 10s
 #include "cjson/cJSON.h"
 #include "elevator.h"
 #include "hr_log.h"
-#include "platform.h"
 #include "uelevator.h"
 #include "uviot.h"
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
+static struct uviot* _iot = NULL;
 
 static enum elevator_direction _running_direction = ELEVATOR_DIR_STATIONARY;
 // report when begin and finish
@@ -40,7 +37,7 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     cJSON_AddStringToObject(root, "type", EVENT_LIFTSTATE_TOPIC_NAME);
-    cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
+    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "faultType", 0);
 
@@ -79,14 +76,12 @@ static struct uviot_topic _topic_liftstate = {
     .callback.on_publish = _on_publish,
 };
 
-static struct uviot* _iot = NULL;
 int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
     _running_direction = elevator_direction();
     _iot = iot;
     uviot_topic_register(iot, &_topic_liftstate);
-
 
     return 0;
 }

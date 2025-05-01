@@ -12,6 +12,8 @@
 #include "motion.h"
 #include "sensor.h"
 
+#include "uviot.h"
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 enum {
@@ -20,6 +22,7 @@ enum {
     _PROPERTY_TOPIC_MAX,
 };
 
+static struct uviot *_iot = NULL;
 static int _property_imu_calibration = 0;
 static double _property_G = 9.81;
 
@@ -114,7 +117,7 @@ static int _on_property_set_message(void* payload, int len) {
     return 0;
 }
 
-static struct iot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
+static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     [PROPERTY_TOPIC_POST] = {
         .name = "event/property/post",
         .topic = {0},
@@ -136,15 +139,16 @@ static struct iot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .callback.on_message = _on_property_set_message,
     }};
 
-int iot_topic_property_init(const char* public_key, const char* device_name) {
+int iot_topic_property_init(struct uviot* iot, const char* public_key, const char* device_name) {
+    (void) iot;
     if (!public_key || !device_name) {
         return -1;
     }
-
+    _iot = iot;
     for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
-        struct iot_topic* t = &_iot_property_topics[i];
+        struct uviot_topic* t = &_iot_property_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
-        iot_topic_register(t);
+        uviot_topic_register(iot, t);
     }
 
     motion_register_observer(&_iot_property_observer);
@@ -160,6 +164,6 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
     if (data->type == SENSOR_ACCELEROMETER) {
         _property_imu_calibration = data->is_calibration;
         _property_G = round(data->value[0] * 10000) / 10000;
-        iot_topic_public_async(&_iot_property_topics[PROPERTY_TOPIC_POST]);
+        uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
     }
 }

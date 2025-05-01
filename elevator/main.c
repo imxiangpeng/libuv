@@ -105,13 +105,12 @@ int main(int argc, char** argv) {
 
     tui_init();
 
-    iot_init();
-
     motion_run();
 
     uobject_elevatord_init();
     
-    iot_run(uv_default_loop());
+    // iot block until connected
+    iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
     
     motion_deinitalize();

@@ -12,6 +12,7 @@
 #include "uelevator.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
+static struct uviot* _iot = NULL;
 
 static int _on_publish(void **payload, int *len) {
     struct tm tm;
@@ -24,7 +25,7 @@ static int _on_publish(void **payload, int *len) {
 
     uelevator_get_status(&st);
     cJSON_AddStringToObject(root, "type", "LiftFault");
-    cJSON_AddStringToObject(root, "macAddr", platform_get_connection_mac_address());
+    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     cJSON_AddStringToObject(root, "uuid", "00000000000000000");
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
@@ -67,6 +68,7 @@ static struct uviot_topic dm_topic_liftfault = {
 int topic_houqi_liftfault_init(struct uviot* iot,const char* public_key, const char* device_name) {
   (void)public_key;
   (void)device_name;
+    _iot = iot;
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
 }
