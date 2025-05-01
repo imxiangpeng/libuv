@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     sigaction(SIGUSR1, &action, NULL);
 
 
-    struct iot * iot = uviot_alloc(uv_default_loop());
+    struct uviot * iot = uviot_alloc(uv_default_loop());
 
     snprintf(iot->id, sizeof(iot->id), "%s", "LC0987654321");
     snprintf(iot->server, sizeof(iot->server), "%s", "127.0.0.1");

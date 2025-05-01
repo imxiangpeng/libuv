@@ -1,9 +1,10 @@
 #ifndef IOT_TOPIC_H
 #define IOT_TOPIC_H
+#include "uviot.h"
+#if 0
+struct uviot;
 
-struct iot;
-
-struct iot_topic {
+struct uviot_topic {
     char name[128];
     char topic[256];
     int period;
@@ -24,12 +25,12 @@ struct iot_topic {
 
 int iot_generate_mid();
 
+#endif
 // pub
-int iot_topic_init(struct iot*iot, const char* public_key, const char* device_name);
+int iot_topic_init(struct uviot*iot, const char* public_key, const char* device_name);
 
 // impl
-int iot_topic_register(struct iot*iot, const struct iot_topic *topic);
+int iot_topic_register(struct uviot*iot, const struct uviot_topic *topic);
 
-int iot_topic_public_async(struct iot*iot, const struct iot_topic* topic);
-
+int iot_topic_public_async(struct uviot*iot, const struct uviot_topic* topic);
 #endif

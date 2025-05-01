@@ -25,6 +25,7 @@ ADD_LIBRARY(uviot STATIC uviot.c)
 
 target_compile_options(uviot PRIVATE -fvisibility=hidden)
 TARGET_LINK_LIBRARIES(uviot ${libmosquitto_library})
+TARGET_LINK_LIBRARIES(uviot ${libuv_library})
 
 ADD_EXECUTABLE(uviot_main ${SOURCES})
 
