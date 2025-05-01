@@ -253,6 +253,7 @@ static void _observer_on_status(struct motion_status* st) {
             blobmsg_add_u32(&_realtime_b, "floor", (uint32_t)st->floor);
 
             post_message(MSG_REALTIME);
+            _realtime_report_times = 0;
         } else {
             HR_LOGE("drop .........\n");
             // drop this time trigger next time

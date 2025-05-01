@@ -22,14 +22,28 @@ enum {
     _PROPERTY_TOPIC_MAX,
 };
 
-static struct uviot *_iot = NULL;
+static struct uviot* _iot = NULL;
 static int _property_imu_calibration = 0;
 static double _property_G = 9.81;
 
+static int _realtime_report_times = 0;
+static const int _realtime_report_fac = 50;  // 10 * sampling_rate = 100 * 1/100 = 1s
+
+static double _status_pressure = 0;
+static double _status_temperature = 20.3;
+static int _status_floor = 0;
+// static int _status_door = 0;
+static double _status_speed = 0;
+static double _status_height = 0;
+// static int _status_direction = 0;
+
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
+static void _observer_on_status(struct motion_status* st);
 
 static struct motion_observer _iot_property_observer = {
+    .on_status = _observer_on_status,
     .on_sensor_calibration = _iot_motion_observer_on_sensor_calibration,
+
 };
 
 static int _on_publish(void** payload, int* len) {
@@ -46,10 +60,12 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "version", "1.0.0");
 
     param = cJSON_AddObjectToObject(root, "params");
-    cJSON_AddNumberToObject(param, "pressure", 97.973);
-    cJSON_AddNumberToObject(param, "temperature", 28.33);
+    cJSON_AddNumberToObject(param, "pressure", _status_pressure);
+    cJSON_AddNumberToObject(param, "temperature", _status_temperature);
     cJSON_AddNumberToObject(param, "imu_calibration", _property_imu_calibration);
     cJSON_AddNumberToObject(param, "G", _property_G);
+    cJSON_AddNumberToObject(param, "speed", _status_speed);
+    cJSON_AddNumberToObject(param, "height", _status_height);
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -99,7 +115,6 @@ static int _on_property_set_message(void* payload, int len) {
 
     cJSON_ArrayForEach(ele, params) {
         HR_LOGD("ele: %s -> type:%d\n", ele->string, ele->type);
-
     }
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "imu_calibration"));
     if (isnan(val)) {
@@ -122,7 +137,7 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .name = "event/property/post",
         .topic = {0},
         .period = 0,
-        .auto_public = 1,
+        .auto_public = 0,
         .type = TOPIC_TYPE_PUBLISH,
         .callback.on_publish = _on_publish,
     },
@@ -140,7 +155,7 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     }};
 
 int iot_topic_property_init(struct uviot* iot, const char* public_key, const char* device_name) {
-    (void) iot;
+    (void)iot;
     if (!public_key || !device_name) {
         return -1;
     }
@@ -164,6 +179,41 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
     if (data->type == SENSOR_ACCELEROMETER) {
         _property_imu_calibration = data->is_calibration;
         _property_G = round(data->value[0] * 10000) / 10000;
+        uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
+    }
+}
+
+static void _observer_on_status(struct motion_status* st) {
+    int need_publish = 0;
+
+    if (!st)
+        return;
+    // HR_LOGD("speed : %f\n", _speed_realtime);
+
+    HR_LOGD("_report times:%d\n", _realtime_report_times);
+    if (_realtime_report_times % _realtime_report_fac == 0) {
+        _realtime_report_times = 0;
+
+        if (_status_speed != fabs(st->velocity)) {
+            _status_speed = fabs(st->velocity);
+            need_publish |= 1;
+        }
+        if (_status_height != st->height) {
+            _status_height = st->height;
+        }
+        if (_status_floor != st->floor) {
+            need_publish |= 1;
+            _status_floor = st->floor;
+        }
+        if (_status_pressure != st->pressure) {
+            _status_pressure = st->pressure;
+            need_publish |= 1;
+        }
+    }
+
+    _realtime_report_times++;
+
+    if (0 != need_publish) {
         uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
     }
 }
