@@ -36,6 +36,7 @@ static double _status_pressure_reported = 0;
 static double _status_temperature = 20.3;
 static double _status_temperature_reported = 20.3;
 static int _status_floor = 0;
+static int _status_floor_reported = 0;
 // static int _status_door = 0;
 static double _status_speed = 0;
 static double _status_speed_reported = 0;
@@ -88,10 +89,14 @@ static int _on_publish(void** payload, int* len) {
     }
 
     if (_status_height_reported != _status_height) {
-        cJSON_AddNumberToObject(param, "height", round(_status_height * 100) / 100);
+        cJSON_AddNumberToObject(param, "height", _status_height);
         _status_height_reported = _status_height;
     }
 
+    if (_status_floor_reported != _status_floor) {
+        cJSON_AddNumberToObject(param, "floor", _status_floor);
+        _status_floor_reported = _status_floor;
+    }
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!*payload)
@@ -231,7 +236,7 @@ static void _observer_on_status(struct motion_status* st) {
             _status_floor = st->floor;
         }
         if (_status_pressure != st->pressure) {
-            _status_pressure = round(st->pressure) / 100;
+            _status_pressure = round(st->pressure * 100) / 100;
             need_publish |= 1;
         }
     }
