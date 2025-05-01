@@ -38,6 +38,7 @@ struct fft_stream {
     size_t count;
     double sum;
     // struct moving_window* mw;  // size 256, sampling
+    fftw_plan plan;
     double* in;
     fftw_complex* out;
     double jitter_frequency;
@@ -361,6 +362,8 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
         s->fft[i].sampling_size = sampling_frequency;
         s->fft[i].in = (double*)fftw_malloc(sizeof(double) * s->fft[i].sampling_size);
         s->fft[i].out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->fft[i].sampling_size / 2 + 1));
+
+        s->fft[i].plan = fftw_plan_dft_r2c_1d(s->fft[i].sampling_size, s->fft[i].in, s->fft[i].out, FFTW_ESTIMATE);
     }
 
     return &s->self;
@@ -385,6 +388,8 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
      for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
         s->fft[i].count = 0;
         s->fft[i].sum = 0;
+
+        fftw_destroy_plan(s->fft[i].plan);
         fftw_free(s->fft[i].in);
         fftw_free(s->fft[i].out);
     }
@@ -506,9 +511,9 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             f->sum = 0;
 
 
-            fftw_plan plan = fftw_plan_dft_r2c_1d(f->sampling_size, f->in, f->out, FFTW_ESTIMATE);
-            fftw_execute(plan);
-            fftw_destroy_plan(plan);
+            if (f->plan) {
+                fftw_execute(f->plan);
+            }
 
             int max_index = -1;
             double max_magnitude = 0.0;
