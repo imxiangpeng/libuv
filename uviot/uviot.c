@@ -51,6 +51,8 @@ struct uviot__topic {
     int refs;
 };
 
+static int mosquitto_lib_refs = 0;
+
 static void uviot_impl_loop_misc_timer_cb(uv_timer_t* handle);
 static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle);
 static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events);
@@ -488,8 +490,8 @@ static void iot__topic_free(struct uviot__topic* t) {
     }
     // should not directl free, we should wait callback
     // see iot__topic_close_uv_dynamic_handle
-    //memset((void*)t, 0, sizeof(struct uviot__topic));
-    //free(t);
+    // memset((void*)t, 0, sizeof(struct uviot__topic));
+    // free(t);
     if (t->refs == 0) {
         free(t);
     }
@@ -500,6 +502,11 @@ struct uviot* uviot_alloc(uv_loop_t* loop) {
     if (!iot) {
         printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return NULL;
+    }
+
+    if (mosquitto_lib_refs == 0) {
+        mosquitto_lib_refs++;
+        mosquitto_lib_init();
     }
 
     iot->loop = loop;
@@ -524,14 +531,12 @@ static void uviot__close_uv_dynamic_handle(uv_handle_t* handle) {
         memset((void*)iot, 0, sizeof(*iot));
         free(iot);
     }
-    
 }
 int uviot_release(struct uviot* self) {
     uv_loop_t* loop = NULL;
     struct uviot__topic *n = NULL, *p = NULL;
     struct uviot_impl* iot = container_of(self, struct uviot_impl, self);
     if (!self || !iot) {
-        printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -541,12 +546,9 @@ int uviot_release(struct uviot* self) {
     uv_poll_stop(&iot->poll);
     uv_timer_stop(&iot->timer);
 
-    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
 
-    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     mosquitto_disconnect(iot->mosq);
 
-    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     mosquitto_destroy(iot->mosq);
 
     hr_list_for_each_entry_safe(p, n, &iot->topic_head, entry) {
@@ -555,10 +557,9 @@ int uviot_release(struct uviot* self) {
 
     HR_INIT_LIST_HEAD(&iot->topic_head);
 
-    HR_LOGD("%s(%d): .........\n", __FUNCTION__, __LINE__);
     // fixed valgrind memory problem
     // free memory after loop
-    uv_run(loop, UV_RUN_ONCE /*UV_RUN_DEFAULT*/);
+    // uv_run(loop, UV_RUN_ONCE /*UV_RUN_DEFAULT*/);
     // must free after loop finished
     // prepare shutdown
     iot->refs = 2;
@@ -566,13 +567,23 @@ int uviot_release(struct uviot* self) {
     iot->timer.data = iot;
     uv_close((uv_handle_t*)&iot->poll, uviot__close_uv_dynamic_handle);
     uv_close((uv_handle_t*)&iot->timer, uviot__close_uv_dynamic_handle);
+    // do not call free directly
+    // it will auto release in uviot__close_uv_dynamic_handle
     // free(iot);
+    
+    mosquitto_lib_refs--;
+
+     if (mosquitto_lib_refs == 0) {
+        mosquitto_lib_cleanup();
+    }
+
+   
     return 0;
 }
 
 int uviot_prepare(struct uviot* self) {
     int rc = -1;
-    //struct uviot__topic* p = NULL;
+    // struct uviot__topic* p = NULL;
     struct mosquitto* mosq = NULL;
     struct uviot_impl* iot = container_of(self, struct uviot_impl, self);
 
@@ -631,10 +642,7 @@ int uviot_prepare(struct uviot* self) {
             usleep(1000 * 1000);
     } while (rc != MOSQ_ERR_SUCCESS);
 
-    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     iot->sock = mosquitto_socket(iot->mosq);
-
-    HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
 
     // using uv_poll_init update socket
     // any memory leak ?
@@ -647,29 +655,14 @@ int uviot_prepare(struct uviot* self) {
     iot->timer.data = iot;
     uv_timer_start(&iot->timer, uviot_impl_loop_misc_timer_cb, self->alive_time * 1000, self->alive_time * 1000);
 
-#if 0
-    // init topics
-    hr_list_for_each_entry(p, &iot->topic_head, entry) {
-        // create topic timer delay when it's connected
-        if (p->self->type == TOPIC_TYPE_PUBLISH && p->self->period > 0 /*&& !p->timer*/) {
-            p->timer = (uv_timer_t*)calloc(1, sizeof(uv_timer_t));
-            uv_timer_init(iot->poll.loop, p->timer);
-            p->timer->data = p;
-        }
-        if (p->self->type == TOPIC_TYPE_PUBLISH /*&& !p->async*/) {
-            p->async = (uv_async_t*)calloc(1, sizeof(uv_async_t));
-            p->async->data = p;
-            uv_async_init(iot->poll.loop, p->async, iot__topic_async_cb);
-        }
-    }
-#endif
+    // struct iot hold two uv handle: poll & timer
+    iot->refs = 2;
 
     return 0;
 }
 
 int uviot_topic_register(struct uviot* self, const struct uviot_topic* topic) {
     struct uviot_impl* iot = container_of(self, struct uviot_impl, self);
-    HR_LOGE("%s(%d): iot:%p topic:%s\n", __FUNCTION__, __LINE__, self, topic->topic);
     struct uviot__topic* t = NULL;
     if (!self || !iot || !topic) {
         return -1;
