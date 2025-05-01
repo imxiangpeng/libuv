@@ -19,6 +19,7 @@
 #define DATA_SAMPLE_SIZE_MAX 7200    // limit 3min, too much data: 8*5*60*3
 #define ELEVATORD_EVENT_REALTIME "RealTime"
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
+#define ELEVATORD_EVENT_MOTION "Motion"
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
@@ -29,6 +30,7 @@
 enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
+    MSG_MOTION_EVENT,
     MSG_QUIT
 };
 static struct ubus_context* _ubus_ctx = NULL;
@@ -45,6 +47,7 @@ static struct blob_buf _b;
 static int _b_is_busy = 0;
 static struct blob_buf _realtime_b;
 static int _realtime_b_is_busy = 0;
+static struct blob_buf _motion_b;
 static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
 static struct hrbuffer _jitter_accel_buffer;
@@ -111,12 +114,15 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             HR_LOGD("haha report realtime message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_REALTIME, _realtime_b.head, -1 /*no block*/);
             _realtime_b_is_busy = 0;
-
             break;
         case MSG_HISTORICAL:
             HR_LOGD("haha receive notify message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _b.head, -1 /*no block*/);
             _b_is_busy = 0;
+            break;
+        case MSG_MOTION_EVENT:
+            HR_LOGD("haha receive motion event message \n");
+            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_MOTION, _motion_b.head, -1 /*no block*/);
             break;
         case MSG_QUIT:
             HR_LOGD("haha receive message:%d quit\n", which);
@@ -214,7 +220,9 @@ int uobject_elevatord_deinit(void) {
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
         _uobject_tid = 0;
-        
+
+        blob_buf_free(&_b);
+        blob_buf_free(&_realtime_b);
 
         hrbuffer_free(&_accel_buffer);
         hrbuffer_free(&_velocity_buffer);
@@ -309,6 +317,11 @@ static void _observer_on_event(struct motion_event* data) {
     // begin running
     if (_running_state == STOPPED) {
         _begin_floor = data->floor;
+
+        blob_buf_init(&_motion_b, 0);
+        blobmsg_add_u32(&_motion_b, "state", data->state);
+        post_message(MSG_MOTION_EVENT);
+
         HR_LOGD("stopped --> running, direction:%d, distance:%f\n", data->direction, data->distance);
     } else if (data->state == STOPPED) {
         HR_LOGD("running --> stopped, direction:%d, distance:%f\n", data->direction, data->distance);

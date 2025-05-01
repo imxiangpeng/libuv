@@ -368,10 +368,18 @@ int elevator_ubus_deinit(void) {
             _ubus_ctx = NULL;
         }
         HR_LOGD("uobject exit2 ...\n");
-        // blob_buf_free(&_b);
 #endif
         _uobject_tid = 0;
     }
+    
+    blob_buf_free(&_b);
+
+    hrbuffer_free(&_historical.accel_array);
+    hrbuffer_free(&_historical.speed_array);
+    hrbuffer_free(&_historical.jitter_frequency_array);
+    hrbuffer_free(&_historical.jitter_accel_array);
+
+   
     return 0;
 }
 

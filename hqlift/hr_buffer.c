@@ -63,7 +63,7 @@ int hrbuffer_realloc(struct hrbuffer *buf, size_t size) {
     return 0;
 }
 int hrbuffer_free(struct hrbuffer *buf) {
-    if (!buf)
+    if (!buf || !buf->data)
         return -1;
     buf->offset = 0;
     if (buf->preallocated != 0) {
@@ -115,4 +115,3 @@ int hrbuffer_append_string(struct hrbuffer *buf, const char *str) {
    
     return 0;
 }
-

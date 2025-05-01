@@ -170,6 +170,19 @@ static int _cpu_usage_percent() {
 
   return usage;
 }
+
+static void print_memory_usage() {
+    FILE *f = fopen("/proc/self/status", "r");
+    if (!f) return;
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "VmRSS:", 6) == 0 || strncmp(line, "VmSize:", 7) == 0) {
+            HR_LOGD("%s", line);
+        }
+    }
+    fclose(f);
+}
 static int _on_publish(void **payload, int *len) {
   printf("heartbeat publish \n");
   char tmp[256] = {0};
@@ -217,6 +230,7 @@ static int _on_publish(void **payload, int *len) {
   *len = strlen(*payload);
   HR_LOGD("publish: %s\n", *payload);
 
+   print_memory_usage();
   return 0;
 }
 
