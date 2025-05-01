@@ -49,4 +49,7 @@ int uviot_release(struct uviot * iot);
 
 int uviot_topic_register(struct uviot* self, const struct uviot_topic* topic);
 int uviot_publish_async(struct uviot* self, const struct uviot_topic* topic);
+
+const char* uviot_get_connection_ipv4_address(struct uviot *self);
+const char* uviot_get_connection_mac_address(struct uviot *self);
 #endif

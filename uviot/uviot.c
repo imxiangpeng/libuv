@@ -386,7 +386,6 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
         }
     }
 
-    HR_LOGD("%s(%d): come in sock:%d.......\n", __FUNCTION__, __LINE__, mosquitto_socket(mosq));
     // verify socket has been closed by us
     if (mosquitto_socket(mosq) == -1) {
         HR_LOGD("socket is invalid, we should stop poll\n");
@@ -452,11 +451,12 @@ static struct uviot__topic* iot__topic_new(struct uviot_impl* iot, const struct 
 
     HR_INIT_LIST_HEAD(&t->entry);
 
+    // attach topic to iot
+    hr_list_add_tail(&t->entry, &iot->topic_head);
     return t;
 }
 
 static void iot__topic_close_uv_dynamic_handle(uv_handle_t* handle) {
-    HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, handle);
     struct uviot__topic* t = (struct uviot__topic*)handle->data;
     HR_LOGD("%s(%d): close :%p -> %s (%d)\n", __FUNCTION__, __LINE__, handle, t->self->name, t->refs);
     free(handle);
@@ -479,7 +479,6 @@ static void iot__topic_free(struct uviot__topic* t) {
 
     HR_LOGD("%s(%d): free :%p -> %s (%d)\n", __FUNCTION__, __LINE__, t, t->self->name, t->refs);
     if (t->timer != NULL) {
-        HR_LOGD("%s(%d): close :%p\n", __FUNCTION__, __LINE__, t->timer);
         uv_close((uv_handle_t*)t->timer, iot__topic_close_uv_dynamic_handle);
         t->timer = NULL;
     }
@@ -499,7 +498,6 @@ static void iot__topic_free(struct uviot__topic* t) {
 struct uviot* uviot_alloc(uv_loop_t* loop) {
     struct uviot_impl* iot = (struct uviot_impl*)calloc(1, sizeof(struct uviot_impl));
     if (!iot) {
-        printf("%s(%d): ............\n", __FUNCTION__, __LINE__);
         return NULL;
     }
 
@@ -510,7 +508,6 @@ struct uviot* uviot_alloc(uv_loop_t* loop) {
 
     iot->loop = loop;
 
-    HR_LOGE("%s(%d): iot:%p uviot_impl:%p\n", __FUNCTION__, __LINE__, &iot->self, iot);
     HR_INIT_LIST_HEAD(&iot->topic_head);
 
     iot->self.alive_time = 60;
@@ -670,10 +667,6 @@ int uviot_topic_register(struct uviot* self, const struct uviot_topic* topic) {
         return -1;
     }
 
-    // keep iot reference
-    // t->iot = iot;
-    // attach topic to iot
-    hr_list_add_tail(&t->entry, &iot->topic_head);
     return 0;
 }
 
@@ -706,4 +699,20 @@ int uviot_publish_async(struct uviot* self, const struct uviot_topic* topic) {
     }
 
     return 0;
+}
+
+const char* uviot_get_connection_ipv4_address(struct uviot* self) {
+    struct uviot_impl* iot = container_of(self, struct uviot_impl, self);
+    if (!self || !iot) {
+        return "";
+    }
+    return iot->status.ipv4;
+}
+const char* uviot_get_connection_mac_address(struct uviot* self) {
+    struct uviot_impl* iot = container_of(self, struct uviot_impl, self);
+    if (!self || !iot) {
+        return "";
+    }
+
+    return iot->status.mac;
 }
