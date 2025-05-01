@@ -48,7 +48,6 @@ static struct elevator_status _status;
 
 static struct elevator_historical _historical;
 
-
 extern void topic_houqi_liftruninfo_post(void);
 
 enum {
@@ -58,6 +57,14 @@ enum {
     RT_DIRECTION,
     RT_FLOOR,
     __RT_MAX
+};
+
+static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
+    [RT_ACCEL] = {.name = "accel", .type = BLOBMSG_TYPE_DOUBLE},
+    [RT_SPEED] = {.name = "velocity", .type = BLOBMSG_TYPE_DOUBLE},
+    [RT_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
+    [RT_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
+    [RT_FLOOR] = {.name = "floor", .type = BLOBMSG_TYPE_INT32},
 };
 
 enum {
@@ -74,13 +81,17 @@ enum {
     __HI_MAX
 };
 
-
-static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
-    [RT_ACCEL] = {.name = "accel", .type = BLOBMSG_TYPE_DOUBLE},
-    [RT_SPEED] = {.name = "velocity", .type = BLOBMSG_TYPE_DOUBLE},
-    [RT_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
-    [RT_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
-    [RT_FLOOR] = {.name = "floor", .type = BLOBMSG_TYPE_INT32},
+static const struct blobmsg_policy historical_policy[__HI_MAX] = {
+    [HI_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
+    [HI_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
+    [HI_TIMESTAMP_BEGIN] = {.name = "timestamp_begin", .type = BLOBMSG_TYPE_INT64},
+    [HI_TIMESTAMP_END] = {.name = "timestamp_end", .type = BLOBMSG_TYPE_INT64},
+    [HI_FLOOR_BEGIN] = {.name = "floor_begin", .type = BLOBMSG_TYPE_INT32},
+    [HI_FLOOR_END] = {.name = "floor_end", .type = BLOBMSG_TYPE_INT32},
+    [HI_ACCEL_ARRAY] = {.name = "accels", .type = BLOBMSG_TYPE_ARRAY},
+    [HI_SPEED_ARRAY] = {.name = "speeds", .type = BLOBMSG_TYPE_ARRAY},
+    [HI_JITTER_FREQ_ARRAY] = {.name = "jitter_freqs", .type = BLOBMSG_TYPE_ARRAY},
+    [HI_JITTER_ACCEL_ARRAY] = {.name = "jitter_accels", .type = BLOBMSG_TYPE_ARRAY},
 };
 
 static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
@@ -115,7 +126,6 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.distance = blobmsg_get_double(tb[RT_DISTANCE]);
         if (tb[RT_DIRECTION]) {
             _status.direction = blobmsg_get_u32(tb[RT_DIRECTION]);
-
         }
         // cast from uint32_t
         if (tb[RT_FLOOR])
@@ -126,8 +136,78 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // 运行历史记录对应 LiftRunInfo
-        // directly pass 
-        
+        // directly pass
+
+        HR_LOGE("%s(%d): come in \n", __FUNCTION__, __LINE__);
+        struct blob_attr* cur = NULL;
+        size_t rem;
+        struct blob_attr* tb[__HI_MAX] = {NULL};
+        blobmsg_parse(historical_policy, __HI_MAX, tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+
+        if (!tb[HI_DISTANCE] || !tb[HI_DIRECTION] ||
+            !tb[HI_TIMESTAMP_BEGIN] || !tb[HI_TIMESTAMP_END] ||
+            !tb[HI_FLOOR_BEGIN] || !tb[HI_FLOOR_END] ||
+            !tb[HI_ACCEL_ARRAY] || !tb[HI_SPEED_ARRAY] ||
+            !tb[HI_JITTER_FREQ_ARRAY] || !tb[HI_JITTER_ACCEL_ARRAY]) {
+            HR_LOGE(
+                "%s(%d): come out \n"
+                "tb[HI_DISTANCE] :%p\n"
+                "tb[HI_DIRECTION] :%p\n"
+                "tb[HI_TIMESTAMP_BEGIN] :%p\n"
+                "tb[HI_TIMESTAMP_END]:%p\n"
+                "tb[HI_FLOOR_BEGIN] :%p\n"
+                "tb[HI_FLOOR_END] :%p\n"
+                "tb[HI_ACCEL_ARRAY] :%p\n"
+                "tb[HI_SPEED_ARRAY]: %p\n"
+                "tb[HI_JITTER_FREQ_ARRAY] :%p\n"
+                "tb[HI_JITTER_ACCEL_ARRAY] :%p\n",
+                __FUNCTION__, __LINE__,
+                tb[HI_DISTANCE], tb[HI_DIRECTION],
+                tb[HI_TIMESTAMP_BEGIN], tb[HI_TIMESTAMP_END],
+                tb[HI_FLOOR_BEGIN], tb[HI_FLOOR_END],
+                tb[HI_ACCEL_ARRAY], tb[HI_SPEED_ARRAY],
+                tb[HI_JITTER_FREQ_ARRAY], tb[HI_JITTER_ACCEL_ARRAY]);
+            return 0;
+        }
+
+        _historical.distance = blobmsg_get_double(tb[HI_DISTANCE]);
+        _historical.direction = (int)blobmsg_get_u32(tb[HI_DIRECTION]);
+        _historical.timestamp_begin = blobmsg_get_u64(tb[HI_TIMESTAMP_BEGIN]);
+        _historical.timestamp_end = blobmsg_get_u64(tb[HI_TIMESTAMP_END]);
+        _historical.floor_begin = (int)blobmsg_get_u32(tb[HI_FLOOR_BEGIN]);
+        _historical.floor_end = (int)blobmsg_get_u32(tb[HI_FLOOR_END]);
+
+        HR_LOGD("historical: distance:%f, direction:%d, timestamp:%u -> %u(%u), floor: %d -> %d\n", _historical.distance, _historical.direction,
+                _historical.timestamp_begin, _historical.timestamp_end, _historical.timestamp_end - _historical.timestamp_begin,
+                _historical.floor_begin, _historical.floor_end);
+
+        hrbuffer_reset(&_historical.accel_array);
+        hrbuffer_reset(&_historical.speed_array);
+        hrbuffer_reset(&_historical.jitter_frequency_array);
+        hrbuffer_reset(&_historical.jitter_accel_array);
+
+        blobmsg_for_each_attr(cur, tb[HI_ACCEL_ARRAY], rem) {
+            double v = blobmsg_get_double(cur);
+            HR_LOGD("a:%f\n", v);
+            hrbuffer_append(&_historical.accel_array, &v, sizeof(v));
+        }
+        blobmsg_for_each_attr(cur, tb[HI_SPEED_ARRAY], rem) {
+            double v = blobmsg_get_double(cur);
+            HR_LOGD("s:%f\n", v);
+            hrbuffer_append(&_historical.speed_array, &v, sizeof(v));
+        }
+        blobmsg_for_each_attr(cur, tb[HI_JITTER_FREQ_ARRAY], rem) {
+            double v = blobmsg_get_double(cur);
+            HR_LOGD("jf:%f\n", v);
+            hrbuffer_append(&_historical.jitter_frequency_array, &v, sizeof(v));
+        }
+        blobmsg_for_each_attr(cur, tb[HI_JITTER_ACCEL_ARRAY], rem) {
+            double v = blobmsg_get_double(cur);
+            HR_LOGD("ja:%f\n", v);
+            hrbuffer_append(&_historical.jitter_accel_array, &v, sizeof(v));
+        }
+
         topic_houqi_liftruninfo_post();
     }
 
@@ -326,7 +406,7 @@ int elevator_ubus_init(void) {
 
     blob_buf_init(&_b, 0);
     blob_buf_grow(&_b, 1024);
-    
+
     hrbuffer_alloc(&_historical.accel_array, sizeof(double) * 5 * 60);
     hrbuffer_alloc(&_historical.speed_array, sizeof(double) * 5 * 60);
     hrbuffer_alloc(&_historical.jitter_frequency_array, sizeof(double) * 5 * 60);
@@ -371,7 +451,7 @@ int elevator_ubus_deinit(void) {
 #endif
         _uobject_tid = 0;
     }
-    
+
     blob_buf_free(&_b);
 
     hrbuffer_free(&_historical.accel_array);
@@ -379,7 +459,6 @@ int elevator_ubus_deinit(void) {
     hrbuffer_free(&_historical.jitter_frequency_array);
     hrbuffer_free(&_historical.jitter_accel_array);
 
-   
     return 0;
 }
 
@@ -388,5 +467,14 @@ int uelevator_get_status(struct elevator_status* st) {
         return -1;
 
     memcpy(st, &_status, sizeof(struct elevator_status));
+    return 0;
+}
+
+int uelevator_get_historical(struct elevator_historical** h) {
+    if (!h) {
+        return -1;
+    }
+
+    *h = &_historical;
     return 0;
 }

@@ -108,8 +108,5 @@ int topic_houqi_command_init(const char* public_key, const char* device_name) {
     const char* serialno = elevator_deviceid();
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     iot_topic_register(&topic_command);
-
-    snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
-    iot_topic_register(&topic_command);
     return 0;
 }

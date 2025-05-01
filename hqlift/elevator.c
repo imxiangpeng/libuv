@@ -1,9 +1,15 @@
 #include "elevator.h"
+#include <stdio.h>
 
+#include "platform.h"
+
+static char _device_id[256] = {0};
 int elevator_init(void) {
+    platform_get_property(PROPERTY_DEVICEID, _device_id, sizeof(_device_id));
     return 0;
 }
 const char* elevator_deviceid(void) {
+    // return _device_id;
     return "NO.123";
 }
 int elevator_get_status(struct elevator_status *st) {
@@ -40,5 +46,18 @@ int elevator_passenger_count_out(void) {
 }
 
 float elevator_temperature(void) {
-    return 24.2f;
+    float temp = 15.0;
+    const char* temp_channel = "/sys/bus/iio/devices/iio:device0/in_temp_input";
+    FILE *fp = fopen(temp_channel, "r");
+    if (fp == NULL) {
+        return 15.0f;
+    }
+
+    if (fscanf(fp, "%f", &temp) != 1) {
+        fclose(fp);
+        return temp;
+    }
+
+    fclose(fp);
+    return temp;
 }

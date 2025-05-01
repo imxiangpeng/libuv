@@ -5,4 +5,5 @@ int elevator_ubus_init(void);
 int elevator_ubus_deinit(void);
 
 int uelevator_get_status(struct elevator_status *st);
+int uelevator_get_historical(struct elevator_historical **h);
 #endif

@@ -333,12 +333,12 @@ static void _observer_on_event(struct motion_event* data) {
 
             blobmsg_add_double(&_b, "distance", fabs(data->distance));
             blobmsg_add_u32(&_b, "direction", data->direction);
-            blobmsg_add_u64(&_b, "beginTimeStamp", data->timestamp_begin);
-            blobmsg_add_u64(&_b, "endTimeStamp", data->timestamp_end);
-            blobmsg_add_u64(&_b, "beginFloor", data->floor_begin);
-            blobmsg_add_u64(&_b, "endFloor", data->floor);
+            blobmsg_add_u64(&_b, "timestamp_begin", data->timestamp_begin);
+            blobmsg_add_u64(&_b, "timestamp_end", data->timestamp_end);
+            blobmsg_add_u32(&_b, "floor_begin", data->floor_begin);
+            blobmsg_add_u32(&_b, "floor_end", data->floor);
 
-            void* root = blobmsg_open_array(&_b, "acceleration");
+            void* root = blobmsg_open_array(&_b, "accels");
 
             for (size_t i = 0; i < _accel_buffer.offset;) {
                 double* v = (double*)(_accel_buffer.data + i);
@@ -346,7 +346,7 @@ static void _observer_on_event(struct motion_event* data) {
                 i += sizeof(double);
             }
             blobmsg_close_array(&_b, root);
-            root = blobmsg_open_array(&_b, "runSpeed");
+            root = blobmsg_open_array(&_b, "speeds");
 
             for (size_t i = 0; i < _velocity_buffer.offset;) {
                 double* v = (double*)(_velocity_buffer.data + i);
@@ -355,7 +355,7 @@ static void _observer_on_event(struct motion_event* data) {
             }
             blobmsg_close_array(&_b, root);
 
-            root = blobmsg_open_array(&_b, "jitterFrequency");
+            root = blobmsg_open_array(&_b, "jitter_freqs");
 
             for (size_t i = 0; i < _jitter_freq_buffer.offset;) {
                 double* v = (double*)(_jitter_freq_buffer.data + i);
@@ -363,7 +363,7 @@ static void _observer_on_event(struct motion_event* data) {
                 i += sizeof(double);
             }
             blobmsg_close_array(&_b, root);
-            root = blobmsg_open_array(&_b, "jitterAcceleration");
+            root = blobmsg_open_array(&_b, "jitter_accels");
 
             for (size_t i = 0; i < _jitter_accel_buffer.offset;) {
                 double* v = (double*)(_jitter_accel_buffer.data + i);
