@@ -261,6 +261,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .jitter_frequency = result.jitter_frequency,
             .floor = atoi(floor_label),
             .running = (new_state != STOPPED),
+            .pressure = barometer_pressure,
         };
 
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);

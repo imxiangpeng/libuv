@@ -24,17 +24,23 @@ enum {
 
 static struct uviot* _iot = NULL;
 static int _property_imu_calibration = 0;
+static int _property_imu_calibration_reported = 0;
 static double _property_G = 9.81;
+static double _property_G_reported = 9.81;
 
 static int _realtime_report_times = 0;
-static const int _realtime_report_fac = 50;  // 10 * sampling_rate = 100 * 1/100 = 1s
+static const int _realtime_report_fac = 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
 
 static double _status_pressure = 0;
+static double _status_pressure_reported = 0;
 static double _status_temperature = 20.3;
+static double _status_temperature_reported = 20.3;
 static int _status_floor = 0;
 // static int _status_door = 0;
 static double _status_speed = 0;
+static double _status_speed_reported = 0;
 static double _status_height = 0;
+static double _status_height_reported = 0;
 // static int _status_direction = 0;
 
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
@@ -60,12 +66,31 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "version", "1.0.0");
 
     param = cJSON_AddObjectToObject(root, "params");
-    cJSON_AddNumberToObject(param, "pressure", _status_pressure);
-    cJSON_AddNumberToObject(param, "temperature", _status_temperature);
-    cJSON_AddNumberToObject(param, "imu_calibration", _property_imu_calibration);
-    cJSON_AddNumberToObject(param, "G", _property_G);
-    cJSON_AddNumberToObject(param, "speed", _status_speed);
-    cJSON_AddNumberToObject(param, "height", _status_height);
+    if (_status_pressure_reported != _status_pressure) {
+        cJSON_AddNumberToObject(param, "pressure", _status_pressure);
+        _status_pressure_reported = _status_pressure;
+    }
+    if (_status_temperature_reported != _status_temperature) {
+        cJSON_AddNumberToObject(param, "temperature", _status_temperature);
+        _status_temperature_reported = _status_temperature;
+    }
+    if (_property_imu_calibration_reported != _property_imu_calibration) {
+        cJSON_AddNumberToObject(param, "imu_calibration", _property_imu_calibration);
+        _property_imu_calibration_reported = _property_imu_calibration;
+    }
+    if (_property_G_reported != _property_G) {
+        cJSON_AddNumberToObject(param, "G", _property_G);
+        _property_G_reported = _property_G;
+    }
+    if (_status_speed_reported != _status_speed) {
+        cJSON_AddNumberToObject(param, "speed", _status_speed);
+        _status_speed_reported = _status_speed;
+    }
+
+    if (_status_height_reported != _status_height) {
+        cJSON_AddNumberToObject(param, "height", round(_status_height * 100) / 100);
+        _status_height_reported = _status_height;
+    }
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -195,18 +220,18 @@ static void _observer_on_status(struct motion_status* st) {
         _realtime_report_times = 0;
 
         if (_status_speed != fabs(st->velocity)) {
-            _status_speed = fabs(st->velocity);
+            _status_speed = round(fabs(st->velocity) * 1000) / 1000;
             need_publish |= 1;
         }
         if (_status_height != st->height) {
-            _status_height = st->height;
+            _status_height = round(st->height * 100) / 100;
         }
         if (_status_floor != st->floor) {
             need_publish |= 1;
             _status_floor = st->floor;
         }
         if (_status_pressure != st->pressure) {
-            _status_pressure = st->pressure;
+            _status_pressure = round(st->pressure) / 100;
             need_publish |= 1;
         }
     }
