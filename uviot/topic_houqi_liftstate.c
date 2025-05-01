@@ -3,10 +3,10 @@
 #include <string.h>
 #include <time.h>
 
-#include "iot_topic.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
+#include "uviot.h"
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
 

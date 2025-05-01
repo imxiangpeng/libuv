@@ -12,7 +12,6 @@
 
 #include "hr_list.h"
 #include "hr_log.h"
-#include "iot_topic.h"
 
 // 感觉不能主动调用 disconnect， 必须先停止 pool 然后再调用 disconnect
 
@@ -546,7 +545,6 @@ int uviot_release(struct uviot* self) {
     uv_poll_stop(&iot->poll);
     uv_timer_stop(&iot->timer);
 
-
     mosquitto_disconnect(iot->mosq);
 
     mosquitto_destroy(iot->mosq);
@@ -570,14 +568,13 @@ int uviot_release(struct uviot* self) {
     // do not call free directly
     // it will auto release in uviot__close_uv_dynamic_handle
     // free(iot);
-    
+
     mosquitto_lib_refs--;
 
-     if (mosquitto_lib_refs == 0) {
+    if (mosquitto_lib_refs == 0) {
         mosquitto_lib_cleanup();
     }
 
-   
     return 0;
 }
 

@@ -22,6 +22,7 @@ set(SOURCES main.c
 )
 
 ADD_LIBRARY(uviot STATIC uviot.c)
+target_include_directories(uviot PUBLIC .)
 
 target_compile_options(uviot PRIVATE -fvisibility=hidden)
 TARGET_LINK_LIBRARIES(uviot ${libmosquitto_library})

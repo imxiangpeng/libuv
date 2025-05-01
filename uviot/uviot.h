@@ -11,7 +11,7 @@ struct uviot {
     int port;
     int alive_time;
     char username[128];
-    char password[128];
+    char password[256];
 };
 
 struct uviot_topic {
