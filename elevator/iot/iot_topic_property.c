@@ -1,9 +1,11 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+#include "file_util.h"
 #include "iot_topic.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
@@ -23,6 +25,9 @@ enum {
 };
 
 static struct uviot* _iot = NULL;
+
+static const char* _elevator_id_pending = NULL;
+
 static int _property_imu_calibration = 0;
 static int _property_imu_calibration_reported = 0;
 static double _property_G = 9.81;
@@ -43,6 +48,8 @@ static double _status_speed_reported = 0;
 static double _status_height = 0;
 static double _status_height_reported = 0;
 // static int _status_direction = 0;
+
+static int _property_floor_model_pending = 0;
 
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
 static void _observer_on_status(struct motion_status* st);
@@ -97,6 +104,22 @@ static int _on_publish(void** payload, int* len) {
         cJSON_AddNumberToObject(param, "floor", _status_floor);
         _status_floor_reported = _status_floor;
     }
+
+    if (_elevator_id_pending) {
+        cJSON_AddStringToObject(param, "elevator_id", _elevator_id_pending);
+        _elevator_id_pending = NULL;
+    }
+
+    if (_property_floor_model_pending) {
+        char* data = NULL;
+        _property_floor_model_pending = 0;
+        futil_read("./floor_model_generated.json", &data);
+
+        cJSON_AddStringToObject(param, "floor_model", data);
+        HR_LOGD("property report floor model:%s\n", data);
+        free(data);
+    }
+
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!*payload)
@@ -120,6 +143,7 @@ static int _on_property_set_message(void* payload, int len) {
     printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     double val = 0;
+    const char* elevator_id = NULL;
     cJSON *root = NULL, *params = NULL, *ele = NULL;
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
@@ -146,18 +170,20 @@ static int _on_property_set_message(void* payload, int len) {
     cJSON_ArrayForEach(ele, params) {
         HR_LOGD("ele: %s -> type:%d\n", ele->string, ele->type);
     }
+
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "imu_calibration"));
-    if (isnan(val)) {
-        cJSON_Delete(root);
-        return -1;
+    if (!isnan(val)) {
+        HR_LOGD("%s(%d): enter calibration val: %d\n", __FUNCTION__, __LINE__, val);
+        if (val == 1) {
+            motion_enter_sensor_calibration();
+        }
     }
 
+    elevator_id = cJSON_GetStringValue(cJSON_GetObjectItem(params, "elevator_id"));
+    if (elevator_id) {
+        // burn elevator id
+    }
     cJSON_Delete(root);
-    HR_LOGD("%s(%d): enter calibration val: %d\n", __FUNCTION__, __LINE__, val);
-
-    if (val == 1) {
-        motion_enter_sensor_calibration();
-    }
 
     return 0;
 }
@@ -209,6 +235,7 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
     if (data->type == SENSOR_ACCELEROMETER) {
         _property_imu_calibration = data->is_calibration;
         _property_G = round(data->value[0] * 10000) / 10000;
+        HR_LOGD("%s(%d): sensor:%d, is calibration:%d, G:%f vs %f\n", __FUNCTION__, __LINE__, data->type, data->is_calibration, _property_G, data->value[0]);
         uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
     }
 }
@@ -236,7 +263,7 @@ static void _observer_on_status(struct motion_status* st) {
             _status_floor = st->floor;
         }
         if (_status_pressure != st->pressure) {
-            _status_pressure = round(st->pressure * 100) / 100;
+            _status_pressure = round(st->pressure);
             need_publish |= 1;
         }
     }
@@ -246,4 +273,9 @@ static void _observer_on_status(struct motion_status* st) {
     if (0 != need_publish) {
         uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
     }
+}
+
+void report_floor_model_property() {
+    _property_floor_model_pending = 1;
+    uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

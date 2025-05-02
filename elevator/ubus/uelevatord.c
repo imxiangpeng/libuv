@@ -37,7 +37,7 @@ static struct ubus_context* _ubus_ctx = NULL;
 
 struct uloop_timeout _loop_thread_notify_timer;
 
-static int _pipefd[2];  // [0]=read, [1]=write
+static int _pipefd[2] = {-1};  // [0]=read, [1]=write
 static pthread_t _uobject_tid = 0;
 
 extern struct ubus_object _elevatord_object;
@@ -275,19 +275,11 @@ static void _observer_on_status(struct motion_status* st) {
     }
 
     _now = now;
-    // also we can simple using sampling_rate
-
-    // if (!_velocity_array_handle) {
-    //      _velocity_array_handle = blobmsg_open_array(&_b, "acceleration");
-    // }
-
-    // blobmsg_add_double(&_velocity_array, NULL, st->accel);
 
     accel = round(st->accel * 100) / 100;
     velocity = fabs(round(st->velocity * 100) / 100);
     jitter_accel = round(st->jitter_accel * 100) / 100;
     jitter_frequency = round(st->jitter_frequency * 100) / 100;
-    // double *v = (double*)(_velocity_buffer.data + _velocity_buffer.offset);
 
     if (_accel_buffer.offset >= DATA_SAMPLE_SIZE_MAX) {
         // drop data
@@ -298,8 +290,6 @@ static void _observer_on_status(struct motion_status* st) {
     hrbuffer_append(&_velocity_buffer, &velocity, sizeof(velocity));
     hrbuffer_append(&_jitter_freq_buffer, &jitter_frequency, sizeof(jitter_frequency));
     hrbuffer_append(&_jitter_accel_buffer, &jitter_accel, sizeof(jitter_accel));
-    // HR_LOGD("acc:%f, prev:%f, %p\n", st->accel, *v, v);
-    //     blobmsg_add_field(&b, BLOBMSG_TYPE_ARRAY, "array1", arr1.head, blob_raw_len(arr1.head));
 }
 static void _observer_on_event(struct motion_event* data) {
     if (!data)

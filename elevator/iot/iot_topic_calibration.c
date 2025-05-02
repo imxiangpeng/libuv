@@ -15,6 +15,7 @@
 #include "motion.h"
 #include "uviot.h"
 
+extern void report_floor_model_property();
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -45,7 +46,7 @@ struct calibration_event {
 
 static HR_LIST_HEAD(_auto_floor_calibration_message_queue);
 static pthread_mutex_t _queue_mutex;
-static struct uviot *_iot = NULL;
+static struct uviot* _iot = NULL;
 static struct uviot_topic _iot_calibration_topics[];
 
 static int _StartAutoFloorCalibration(cJSON* params);
@@ -186,7 +187,7 @@ static int _on_svc_message(void* payload, int len) {
     return 0;
 }
 
-static void _on_floor_calibration_event(int id, int floor, const char* label, double height) {
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
     struct calibration_event* e = NULL;
     if (!label) {
         return;
@@ -207,6 +208,12 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
         snprintf(e->label, sizeof(e->label), "%d", floor);
     }
     send_calibration_event(e);
+
+    if (completed != 0) {
+        // report floor model data
+
+        report_floor_model_property();
+    }
 }
 
 // {"BaseFloor":1,"FloorsBelow":2,"FloorsAbove":22}

@@ -72,7 +72,8 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
 }
 
 // ubus -s /tmp/ubus.sock subscribe elevatord
-static void _on_floor_calibration_event(int id, int floor, const char* label, double height) {
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
+  (void)completed;
     struct ubus_context* ctx = uelevatord_get_ubus_ctx();
     if (!ctx) {
         return;

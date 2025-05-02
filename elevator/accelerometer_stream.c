@@ -95,7 +95,8 @@ static void _ekf_run_model(struct accelerometer_stream* self, double input, doub
 static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
 double hanning_window(int i, int N) {
-    if (N <= 1) return 1.0;
+    if (N <= 1)
+        return 1.0;
     return 0.5 * (1.0 - cos(2.0 * M_PI * i / (N - 1)));
 }
 static void apply_hanning_window(struct fft_stream* f) {
@@ -187,7 +188,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
 static int accelerometer_stream_read(struct motion_stream* self, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
-    struct accelerometer_stream_data *p = (struct accelerometer_stream_data*)data;
+    struct accelerometer_stream_data* p = (struct accelerometer_stream_data*)data;
     double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
@@ -221,7 +222,6 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #endif
 
     HR_LOGD("dt:%f\n", dt);
-        // accel_filter = butterworth_filter_process(s->bw_filter, accel_union);
     double accel_filtered[3] = {0};
 
     // butter worth filter cutoff 10hz
@@ -258,21 +258,24 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         }
     }
 #endif
+
+    calibration(s, s->ekf.x[3]);
+
+    // capture data after calibration, otherwise G is not correct
     p->accel = s->ekf.x[2];
     p->velocity = s->ekf.x[1];
     p->distance = s->ekf.x[0];
     p->G = s->G;
     p->jitter_accel = s->fft[0].jitter_accel;
     p->jitter_frequency = s->fft[0].jitter_frequency;
-    
-    for(size_t i = 1; i < ARRAY_SIZE(s->fft);i++) {
+
+    for (size_t i = 1; i < ARRAY_SIZE(s->fft); i++) {
         if (s->fft[i].jitter_accel > p->jitter_accel) {
             p->jitter_accel = s->fft[i].jitter_accel;
             p->jitter_frequency = s->fft[i].jitter_frequency;
         }
     }
 
-    calibration(s, s->ekf.x[3]);
     HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
             __FUNCTION__, __LINE__,
             accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
@@ -384,8 +387,8 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
         free(s->calibration_data);
         s->calibration_data = NULL;
     }
-    
-     for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
+
+    for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
         s->fft[i].count = 0;
         s->fft[i].sum = 0;
 
@@ -394,9 +397,8 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
         fftw_free(s->fft[i].out);
     }
 
-   
     free(s);
-    
+
     fftw_cleanup();
     return 0;
 }
@@ -498,10 +500,9 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
 
         if (f->count == f->sampling_size) {
             double mean = f->sum / f->sampling_size;
-            
 
             double window_sum = 0.0;
-            for ( size_t j = 0; j < f->sampling_size; j++) {
+            for (size_t j = 0; j < f->sampling_size; j++) {
                 double window_val = hanning_window(j, f->sampling_size);
                 f->in[j] = (f->in[j] - mean) * window_val;
                 window_sum += window_val;
@@ -509,7 +510,6 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             // apply_hanning_window(f);
             f->count = 0;
             f->sum = 0;
-
 
             if (f->plan) {
                 fftw_execute(f->plan);
@@ -537,7 +537,7 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             magnitudes = NULL;
 
             double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
-            double accel_value = (2.0 * max_magnitude) /  window_sum;//f->sampling_size;
+            double accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
             HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
             f->jitter_frequency = frequency;
             f->jitter_accel = accel_value;

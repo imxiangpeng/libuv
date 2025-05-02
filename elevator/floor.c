@@ -241,7 +241,7 @@ static void _observer_on_event(struct motion_event* data) {
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
 
             if (_floor_calibration_cb) {
-                _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height);
+                _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, 0);
             }
             _floor_calibration_index++;
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d, floor_nums:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index, _building.floor_nums);
@@ -258,7 +258,7 @@ static void _observer_on_event(struct motion_event* data) {
                 floor_store_model();
 
                 if (_floor_calibration_cb) {
-                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height);
+                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, 1 /*completed*/);
                     _floor_calibration_cb = NULL;
                 }
                 _floor_calibration = 0;

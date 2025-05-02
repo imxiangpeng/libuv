@@ -40,7 +40,7 @@ static int BAROMETER_SAMPLE_RATE_HZ = 10;
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
-static double BAROMETER_WINDOW_DELAY_SECONDS = 1;
+static double BAROMETER_WINDOW_DELAY_SECONDS = 2;
 
 // 低于该速度的时候不更新状态，保持原有状态
 static double VELOCITY_ZUPT_THRESHOLD = 0.1;
@@ -165,6 +165,7 @@ static void* _accelerometer_thread_routin(void* args) {
             ev.type = SENSOR_ACCELEROMETER;
             ev.is_calibration = 0;
             ev.value[0] = result.G;  // id 4 --> local G
+                                HR_LOGD("calibration event: G:%f vs %f\n", result.G, ev.value[0]);
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 
@@ -227,7 +228,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     double height = _accelerometer_motion.height;
                     if (0 == floor_relative_height(floor_num, &height)) {
                         HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
-                        _accelerometer_motion.height = hbarometer_distanceeight;
+                        _accelerometer_motion.height = height;
                     }
                 }
 #endif
@@ -262,6 +263,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .floor = atoi(floor_label),
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
+            .barometer_distance = barometer_distance,
         };
 
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
