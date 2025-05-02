@@ -539,7 +539,10 @@ int uviot_release(struct uviot* self) {
     HR_LOGE("%s(%d): iot:%p uviot_impl:%p\n", __FUNCTION__, __LINE__, &iot->self, iot);
 
     loop = iot->poll.loop;
-    uv_poll_stop(&iot->poll);
+    // we must verify, because iot->poll maybe close in running
+    if (!uv_is_closing((const uv_handle_t*)&iot->poll)) {
+        uv_poll_stop(&iot->poll);
+    }
     uv_timer_stop(&iot->timer);
 
     mosquitto_disconnect(iot->mosq);
@@ -560,7 +563,11 @@ int uviot_release(struct uviot* self) {
     iot->refs = 2;
     iot->poll.data = iot;
     iot->timer.data = iot;
-    uv_close((uv_handle_t*)&iot->poll, uviot__close_uv_dynamic_handle);
+    if (!uv_is_closing((const uv_handle_t*)&iot->poll)) {
+        uv_close((uv_handle_t*)&iot->poll, uviot__close_uv_dynamic_handle);
+    } else {
+        iot->refs--;
+    }
     uv_close((uv_handle_t*)&iot->timer, uviot__close_uv_dynamic_handle);
     // do not call free directly
     // it will auto release in uviot__close_uv_dynamic_handle
