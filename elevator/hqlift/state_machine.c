@@ -5,13 +5,12 @@
 #include "state_machine.h"
 
 #define DOOR_OPEN_TIMEOUT_AFTER_STOPPED 3000  // 3s
+#define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 20000  // 3s
 
 static int _pipefd[2] = {-1};
 
 static enum state_machine_state _state;
 static uv_poll_t _state_machine_poll;
-static uv_work_t _background_detector_work;
-
 static uv_timer_t _timer;
 
 // Fault:
@@ -43,6 +42,12 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     if (!handle)
         return;
     printf("%s(%d): come in door not opened after stopped...\n", __FUNCTION__, __LINE__);
+}
+
+static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
+    if (!handle)
+        return;
+    printf("%s(%d): come in door closed and we are stopped but some one is still in elevator...\n", __FUNCTION__, __LINE__);
 }
 static void _statemachine_message_handle(uv_poll_t* handle, int status, int events) {
     (void)handle;
@@ -79,6 +84,8 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
         case SM_ELEVATOR_STOPPED_DOOR_OPENED:
             switch (message) {
                 case SM_ELEVATOR_STOPPED_DOOR_CLOSED:
+                    // check anyone is still in elevator but elevator is not running
+                    uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT, 0);  // 每1000ms触发一次
                     break;
                 case SM_ELEVATOR_RUNNING:
                     printf("%s(%d): fault! running but door opened! current state:%d, not support directly to state %d\n", __FUNCTION__, __LINE__, _state, message);
@@ -117,22 +124,6 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
     
     // _state = message;
 }
-static void detector_work(uv_work_t* req) {
-    (void)req;
-}
-static void detector_work_finished(uv_work_t* req, int status) {
-    (void)req;
-    (void)status;
-}
-
-static void detector_timer_handler(uv_timer_t* handler) {
-    if (!handler) {
-        return;
-    }
-
-    uv_queue_work(handler->loop, &_background_detector_work, detector_work, detector_work_finished);
-}
-
 int statemachine_init(uv_loop_t* loop) {
     if (0 != pipe(_pipefd)) {
         return -1;

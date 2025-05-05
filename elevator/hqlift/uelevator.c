@@ -20,6 +20,8 @@
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
+#define ELEVATOR_SPEED_THRESHOLD 3.0
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -141,6 +143,11 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         // cast from uint32_t
         if (tb[RT_FLOOR])
             _status.current_floor = (int)blobmsg_get_u32(tb[RT_FLOOR]);
+
+        if (_status.speed > ELEVATOR_SPEED_THRESHOLD) {
+            printf("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
+            // topic_houqi_liftfault_post
+        }
 
         HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
                 _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
