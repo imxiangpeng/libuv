@@ -36,9 +36,6 @@ set(SOURCES main.c
     sensors/sensor_bmi270.c
     sensors/sensor_bmp388.c
     tui/tui.c 
-    utils/time_utils.c
-    utils/file_util.c
-    utils/hr_log.c 
     iot/iot.c
     #iot/iot_mosquitto.c
     iot/iot_topic.c
@@ -47,7 +44,6 @@ set(SOURCES main.c
     ubus/uelevatord.c
     ubus/uobject_elevatord.c
     butterworth_filter.c
-    hr_buffer.c
     moving_window.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
@@ -77,6 +73,6 @@ TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(elevatord -lfftw3)
 TARGET_LINK_LIBRARIES(elevatord ${ubox_library} ${ubus_library} ${blob_library})
 TARGET_LINK_LIBRARIES(elevatord uviot)
-
+TARGET_LINK_LIBRARIES(elevatord iutils)
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

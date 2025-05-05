@@ -17,9 +17,6 @@ INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 
 set(SOURCES main.c
-    time_utils.c
-    file_util.c
-    hr_log.c 
     iot.c
     #iot_mosquitto.c
     iot_topic.c
@@ -30,8 +27,7 @@ set(SOURCES main.c
                 topic_houqi_liftruninfo
     uelevator.c
     platform.c
-    elevator.c
-    hr_buffer.c)
+    elevator.c)
 
 ADD_EXECUTABLE(hqlift ${SOURCES})
 
