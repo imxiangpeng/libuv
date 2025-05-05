@@ -12,6 +12,7 @@
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
 #include "libubus.h"
+#include "state_machine.h"
 #include "time_utils.h"
 
 #define ELEVATORD_NAME "elevatord"
@@ -39,7 +40,7 @@ enum {
 static struct ubus_context* _ubus_ctx = NULL;
 
 static pthread_t _uobject_tid = 0;
-static int _pipefd[2];  // [0]=read, [1]=write
+static int _pipefd[2] = {-1, -1};  // [0]=read, [1]=write
 
 static struct ubus_subscriber _elevatord_subscriber;
 static uint32_t _elevatord_object_id = 0;
@@ -95,6 +96,15 @@ static const struct blobmsg_policy historical_policy[__HI_MAX] = {
     [HI_JITTER_ACCEL_ARRAY] = {.name = "jitter_accels", .type = BLOBMSG_TYPE_ARRAY},
 };
 
+enum {
+    M_STATE,
+    __M_MAX
+};
+
+static const struct blobmsg_policy motion_policy[__M_MAX] = {
+    [M_STATE] = {.name = "state", .type = BLOBMSG_TYPE_INT32},
+};
+
 static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
     (void)ctx;
     (void)obj;
@@ -137,7 +147,21 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
     } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
         HR_LOGE("%s(%d): motion come in \n", __FUNCTION__, __LINE__);
-    
+        struct blob_attr* tb[__M_MAX] = {NULL};
+        blobmsg_parse(motion_policy, __M_MAX, tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+
+        if (!tb[M_STATE]) {
+            return -1;
+        }
+
+        int state = blobmsg_get_u32(tb[M_STATE]);
+        if (state == 0) {
+            statemachine_post(SM_ELEVATOR_STOPPED);
+        } else {
+            statemachine_post(SM_ELEVATOR_RUNNING);
+        }
+
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // 运行历史记录对应 LiftRunInfo
         // directly pass
@@ -400,7 +424,7 @@ void* uobject_elevator_thread_routin(void* args) {
 
     return NULL;
 }
-int elevator_ubus_init(void) {
+int uelevator_init(void) {
     int ret = -1;
     pthread_attr_t attr;
 
@@ -436,7 +460,7 @@ int elevator_ubus_init(void) {
 struct ubus_context* uelevator_get_ubus_ctx() {
     return _ubus_ctx;
 }
-int elevator_ubus_deinit(void) {
+int uelevator_deinit(void) {
     if (_uobject_tid != 0) {
         HR_LOGD("uobject send exit ...\n");
         post_message(MSG_QUIT);

@@ -8,6 +8,7 @@
 #include "hr_log.h"
 #include "iot.h"
 #include "uelevator.h"
+#include "state_machine.h"
 
 /*static void dummy_cb(uv_async_t* handle) {
     (void)handle;
@@ -59,19 +60,22 @@ int main(int argc, char** argv) {
 
 
 
-    elevator_ubus_init();
+    uelevator_init();
     
     // block until connected
     iot_init(uv_default_loop());
     
+    //detector_init(uv_default_loop());
+    statemachine_init(uv_default_loop());
    // uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
+    statemachine_deinit();
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     iot_deinit();
 
-    elevator_ubus_deinit();
+    uelevator_deinit();
     printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

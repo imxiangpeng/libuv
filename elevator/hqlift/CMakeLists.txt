@@ -16,18 +16,18 @@ ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 
-set(SOURCES main.c
-    iot.c
-    #iot_mosquitto.c
-    iot_topic.c
-                topic_houqi_heartbeat
-                topic_houqi_command
-                topic_houqi_liftstate
-                topic_houqi_liftfault
-                topic_houqi_liftruninfo
-    uelevator.c
-    platform.c
-    elevator.c)
+set(SOURCES main
+    iot
+    iot_topic
+    topic_houqi_heartbeat
+    topic_houqi_command
+    topic_houqi_liftstate
+    topic_houqi_liftfault
+    topic_houqi_liftruninfo
+    uelevator
+    platform
+    elevator
+    state_machine)
 
 ADD_EXECUTABLE(hqlift ${SOURCES})
 

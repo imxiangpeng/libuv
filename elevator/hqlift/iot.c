@@ -12,8 +12,9 @@
 #include <openssl/hmac.h>
 #include <uv.h>
 
+#include "iot_topic.h"
+
 #include "hr_log.h"
-#include "iot_mosquitto.h"
 
 #define BROKER_DEFAULT_SERVER "localhost" //"a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883

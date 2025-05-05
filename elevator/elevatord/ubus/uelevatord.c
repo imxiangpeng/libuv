@@ -39,7 +39,7 @@ static struct ubus_context* _ubus_ctx = NULL;
 
 struct uloop_timeout _loop_thread_notify_timer;
 
-static int _pipefd[2] = {-1};  // [0]=read, [1]=write
+static int _pipefd[2] = {-1, -1};  // [0]=read, [1]=write
 static pthread_t _uobject_tid = 0;
 
 extern struct ubus_object _elevatord_object;
@@ -180,36 +180,6 @@ struct ubus_object _elevatord_object = {
     .n_methods = ARRAY_SIZE(_object_methods),
 };
 
-static void _reconnect_timer(struct uloop_timeout* timeout) {
-    (void)timeout;
-    int t = _UBUS_RETRY_TIMEOUT;
-
-    static struct uloop_timeout retry = {
-        .cb = _reconnect_timer,
-    };
-
-    if (!_ubus_ctx)
-        return;
-
-    if (ubus_reconnect(_ubus_ctx, UBUS_SOCK) != 0) {
-        printf("failed to reconnect, trying again in %d seconds\n", t);
-        uloop_timeout_set(&retry, t * 1000);
-        return;
-    }
-
-    printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
-    ubus_add_uloop(_ubus_ctx);
-
-#ifdef FD_CLOEXEC
-    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
-#endif
-}
-
-static void _connection_lost(struct ubus_context* ctx) {
-    (void)ctx;
-    _reconnect_timer(NULL);
-}
-
 static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
     (void)u;
     (void)events;
@@ -242,6 +212,37 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 static void uevelatord_post_message(int which) {
     write(_pipefd[1], &which, sizeof(which));
 }
+
+static void _reconnect_timer(struct uloop_timeout* timeout) {
+    (void)timeout;
+    int t = _UBUS_RETRY_TIMEOUT;
+
+    static struct uloop_timeout retry = {
+        .cb = _reconnect_timer,
+    };
+
+    if (!_ubus_ctx)
+        return;
+
+    if (ubus_reconnect(_ubus_ctx, UBUS_SOCK) != 0) {
+        printf("failed to reconnect, trying again in %d seconds\n", t);
+        uloop_timeout_set(&retry, t * 1000);
+        return;
+    }
+
+    printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
+    ubus_add_uloop(_ubus_ctx);
+
+#ifdef FD_CLOEXEC
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+#endif
+}
+
+static void _connection_lost(struct ubus_context* ctx) {
+    (void)ctx;
+    _reconnect_timer(NULL);
+}
+
 void* uobject_elevator_thread_routin(void* args) {
     (void)args;
     int rc = -1;
