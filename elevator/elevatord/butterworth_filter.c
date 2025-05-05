@@ -6,7 +6,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void calculate_butterworth_coefficients(ButterworthFilter* filter) {
+struct butterworth_filter{
+    int order;          // 滤波器阶数 (这里固定为 2)
+    double cutoff_freq; // 截止频率 (Hz)
+    double sample_rate; // 采样率 (Hz)
+    double b0, b1, b2;  // 前向系数 (numerator coefficients)
+    double a1, a2;  // 反馈系数 (denominator coefficients)
+    double x_history[2]; // 输入历史 (x[n-1], x[n-2])
+    double y_history[2]; // 输出历史 (y[n-1], y[n-2])
+};
+
+static void calculate_butterworth_coefficients(struct butterworth_filter* filter) {
     double omega_c = 2.0 * M_PI * filter->cutoff_freq;
     double T = 1.0 / filter->sample_rate;
     double tan_val = tan(omega_c * T / 2.0);
@@ -22,10 +32,10 @@ static void calculate_butterworth_coefficients(ButterworthFilter* filter) {
     filter->a2 = (1.0 - sqrt2_tan + tan_sq) / denominator;
 }
 
-ButterworthFilter* butterworth_filter_init(double cutoff_freq, double sample_rate) {
-    ButterworthFilter* filter = (ButterworthFilter*)malloc(sizeof(ButterworthFilter));
+struct butterworth_filter* butterworth_filter_init(double cutoff_freq, double sample_rate) {
+    struct butterworth_filter* filter = (struct butterworth_filter*)malloc(sizeof(struct butterworth_filter));
     if (filter == NULL) {
-        perror("Failed to allocate memory for ButterworthFilter");
+        perror("Failed to allocate memory for struct butterworth_filter");
         return NULL;
     }
 
@@ -43,7 +53,7 @@ ButterworthFilter* butterworth_filter_init(double cutoff_freq, double sample_rat
     return filter;
 }
 
-double butterworth_filter_process(ButterworthFilter* filter, double input) {
+double butterworth_filter_process(struct butterworth_filter* filter, double input) {
     double output;
 
     output = filter->b0 * input +
@@ -60,7 +70,7 @@ double butterworth_filter_process(ButterworthFilter* filter, double input) {
     return output;
 }
 
-void butterworth_filter_deinit(ButterworthFilter* filter) {
+void butterworth_filter_deinit(struct butterworth_filter* filter) {
     if (filter != NULL) {
         free(filter);
     }

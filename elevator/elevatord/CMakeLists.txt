@@ -35,14 +35,13 @@ set(SOURCES main.c
     sensors/sensor.c
     sensors/sensor_bmi270.c
     sensors/sensor_bmp388.c
-    tui/tui.c 
+    tui.c 
     iot/iot.c
     #iot/iot_mosquitto.c
     iot/iot_topic.c
     iot/iot_topic_property.c
     iot/iot_topic_calibration.c
     ubus/uelevatord.c
-    ubus/uobject_elevatord.c
     butterworth_filter.c
     moving_window.c)
 

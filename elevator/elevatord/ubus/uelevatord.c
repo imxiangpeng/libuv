@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include <math.h>
+#include "floor.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
 #include "libubox/blob.h"
@@ -14,6 +15,7 @@
 #include "time_utils.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
+#define OBJECT_NAME "elevatord"
 
 #define DATA_SAMPLE_INTERVAL_MS 200  // houqi data array elements interval 200ms
 #define DATA_SAMPLE_SIZE_MAX 7200    // limit 3min, too much data: 8*5*60*3
@@ -43,8 +45,8 @@ static pthread_t _uobject_tid = 0;
 extern struct ubus_object _elevatord_object;
 
 static int64_t _now = 0;
-static struct blob_buf _b;
-static int _b_is_busy = 0;
+static struct blob_buf _historical_b;
+static int _historical_b_is_busy = 0;
 static struct blob_buf _realtime_b;
 static int _realtime_b_is_busy = 0;
 static struct blob_buf _motion_b;
@@ -52,9 +54,6 @@ static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
 static struct hrbuffer _jitter_accel_buffer;
 static struct hrbuffer _jitter_freq_buffer;
-// static struct blob_buf _velocity_array;
-//  static void* _velocity_array_handle;
-//  static struct blob_buf _accel_array;
 
 // 500ms or 1s report to ubus client
 static int _realtime_report_times = 0;
@@ -70,6 +69,115 @@ static void _observer_on_event(struct motion_event* data);
 static struct motion_observer _ubus_observer = {
     .on_status = _observer_on_status,
     .on_event = _observer_on_event,
+};
+
+struct ubus_context* uelevatord_get_ubus_ctx() {
+    return _ubus_ctx;
+}
+
+enum {
+    FC_FLOOR_BASE,
+    FC_FLOORS_BELOW,
+    FC_FLOORS_ABOVE,
+    __FC_MAX
+};
+static const struct blobmsg_policy _floor_calibration_policy[__FC_MAX] = {
+    [FC_FLOOR_BASE] = {.name = "BaseFloor", .type = BLOBMSG_TYPE_INT32},
+    [FC_FLOORS_BELOW] = {.name = "FloorsBelow", .type = BLOBMSG_TYPE_INT32},
+    [FC_FLOORS_ABOVE] = {.name = "FloorsAbove", .type = BLOBMSG_TYPE_INT32},
+};
+// maybe we can read/write json file directly not using j2sobject
+static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
+    (void)ctx;
+    (void)req;
+    (void)msg;
+    struct blob_buf b;
+
+    if (!obj || !method) {
+        return -1;
+    }
+
+    HR_LOGD("%s(%d): method:%s\n", method);
+    if (0 == strcmp("get", method)) {
+        memset((void*)&b, 0, sizeof(b));
+        blob_buf_init(&b, 0);
+
+        ubus_send_reply(ctx, req, b.head);
+
+        blob_buf_free(&b);
+
+        return 0;
+    }
+    // not support
+
+    return UBUS_STATUS_INVALID_ARGUMENT;
+}
+
+// ubus -s /tmp/ubus.sock subscribe elevatord
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
+  (void)completed;
+    struct ubus_context* ctx = uelevatord_get_ubus_ctx();
+    if (!ctx) {
+        return;
+    }
+
+    struct blob_buf b;
+
+    memset((void*)&b, 0, sizeof(b));
+
+    blob_buf_init(&b, 0);
+    blobmsg_add_u32(&b, "Id", id);
+    blobmsg_add_u32(&b, "Floor", floor);
+    blobmsg_add_string(&b, "Label", label);
+    blobmsg_add_double(&b, "Height", height);
+
+    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1/*no block*/);
+}
+
+// ubus call elevatord startAutoFloorCalibration '{"BaseFloor":1, "FloorsBelow":1, "FloorsAbove":22}'
+// ubus -s /tmp/ubus.sock subscribe elevatord
+static int _start_auto_floor_calibration(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
+    (void)ctx;
+    (void)obj;
+    (void)req;
+    (void)msg;
+    (void)method;
+
+    int floor_base = 1;
+    int floors_below_base = 0;
+    int floors_above_base = 0;
+
+    struct blob_attr* tb[__FC_MAX] = {0};
+
+    int rc = blobmsg_parse(_floor_calibration_policy, __FC_MAX, tb, blob_data(msg), blob_len(msg));
+
+    HR_LOGD("parse:%d\n", rc);
+    if (!tb[FC_FLOOR_BASE] || !tb[FC_FLOORS_BELOW] || !tb[FC_FLOORS_ABOVE]) {
+        HR_LOGD("%s(%d): invalid ...\n", __FUNCTION__, __LINE__);
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    floor_base = blobmsg_get_u32(tb[FC_FLOOR_BASE]);
+    floors_below_base = blobmsg_get_u32(tb[FC_FLOORS_BELOW]);
+    floors_above_base = blobmsg_get_u32(tb[FC_FLOORS_ABOVE]);
+
+    HR_LOGD("%s(%d): start auto calibration:%d %d %d\n", __FUNCTION__, __LINE__, floor_base, floors_below_base, floors_above_base);
+    floor_enter_calibration_with_callback(floor_base, floors_below_base, floors_above_base, _on_floor_calibration_event);
+    return 0;
+}
+static const struct ubus_method _object_methods[] = {
+    UBUS_METHOD_NOARG("get", uobject_elevatord_property_handler),
+    UBUS_METHOD("startAutoFloorCalibration", _start_auto_floor_calibration, _floor_calibration_policy),
+};
+
+static struct ubus_object_type _object_type =
+    UBUS_OBJECT_TYPE(OBJECT_NAME, _object_methods);
+
+struct ubus_object _elevatord_object = {
+    .name = OBJECT_NAME,
+    .type = &_object_type,
+    .methods = _object_methods,
+    .n_methods = ARRAY_SIZE(_object_methods),
 };
 
 static void _reconnect_timer(struct uloop_timeout* timeout) {
@@ -117,8 +225,8 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             break;
         case MSG_HISTORICAL:
             HR_LOGD("haha receive notify message \n");
-            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _b.head, -1 /*no block*/);
-            _b_is_busy = 0;
+            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _historical_b.head, -1 /*no block*/);
+            _historical_b_is_busy = 0;
             break;
         case MSG_MOTION_EVENT:
             HR_LOGD("haha receive motion event message \n");
@@ -131,7 +239,7 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
     }
 }
 
-static void post_message(int which) {
+static void uevelatord_post_message(int which) {
     write(_pipefd[1], &which, sizeof(which));
 }
 void* uobject_elevator_thread_routin(void* args) {
@@ -175,7 +283,7 @@ void* uobject_elevator_thread_routin(void* args) {
 
     return NULL;
 }
-int uobject_elevatord_init(void) {
+int uelevatord_init(void) {
     int ret = -1;
     pthread_attr_t attr;
 
@@ -197,10 +305,8 @@ int uobject_elevatord_init(void) {
     }
     pthread_attr_destroy(&attr);
 
-    blob_buf_init(&_b, 0);
-    blob_buf_grow(&_b, 4096);
-    // blob_buf_init(&_velocity_array, 0);
-    // blob_buf_grow(&_b, 4096);
+    blob_buf_init(&_historical_b, 0);
+    blob_buf_grow(&_historical_b, 4096);
     hrbuffer_alloc(&_accel_buffer, 1024 * sizeof(double));         // 1s -> 5 elements
     hrbuffer_alloc(&_velocity_buffer, 1024 * sizeof(double));      // 1s -> 5 elements
     hrbuffer_alloc(&_jitter_freq_buffer, 1024 * sizeof(double));   // 1s -> 5 elements
@@ -209,19 +315,16 @@ int uobject_elevatord_init(void) {
     return 0;
 }
 
-struct ubus_context* uelevatord_get_ubus_ctx() {
-    return _ubus_ctx;
-}
-int uobject_elevatord_deinit(void) {
+int uelevatord_deinit(void) {
     motion_unregister_observer(&_ubus_observer);
     if (_uobject_tid != 0) {
-        post_message(MSG_QUIT);
+        uevelatord_post_message(MSG_QUIT);
         // pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
         _uobject_tid = 0;
 
-        blob_buf_free(&_b);
+        blob_buf_free(&_historical_b);
         blob_buf_free(&_realtime_b);
 
         hrbuffer_free(&_accel_buffer);
@@ -252,7 +355,7 @@ static void _observer_on_status(struct motion_status* st) {
             blobmsg_add_u32(&_realtime_b, "direction", _running_direction);
             blobmsg_add_u32(&_realtime_b, "floor", (uint32_t)st->floor);
 
-            post_message(MSG_REALTIME);
+            uevelatord_post_message(MSG_REALTIME);
             _realtime_report_times = 0;
         } else {
             HR_LOGE("drop .........\n");
@@ -311,7 +414,7 @@ static void _observer_on_event(struct motion_event* data) {
 
         blob_buf_init(&_motion_b, 0);
         blobmsg_add_u32(&_motion_b, "state", data->state);
-        post_message(MSG_MOTION_EVENT);
+        uevelatord_post_message(MSG_MOTION_EVENT);
 
         HR_LOGD("stopped --> running, direction:%d, distance:%f\n", data->direction, data->distance);
     } else if (data->state == STOPPED) {
@@ -319,60 +422,60 @@ static void _observer_on_event(struct motion_event* data) {
 
         blob_buf_init(&_motion_b, 0);
         blobmsg_add_u32(&_motion_b, "state", data->state);
-        post_message(MSG_MOTION_EVENT);
+        uevelatord_post_message(MSG_MOTION_EVENT);
 
        
-        if (!_b_is_busy) {
+        if (!_historical_b_is_busy) {
             HR_LOGE("_b is busy maybe we should drop or wait.........\n");
 
-            blob_buf_init(&_b, 0);
+            blob_buf_init(&_historical_b, 0);
 
-            blobmsg_add_double(&_b, "distance", fabs(data->distance));
-            blobmsg_add_u32(&_b, "direction", data->direction);
-            blobmsg_add_u64(&_b, "timestamp_begin", data->timestamp_begin);
-            blobmsg_add_u64(&_b, "timestamp_end", data->timestamp_end);
-            blobmsg_add_u32(&_b, "floor_begin", data->floor_begin);
-            blobmsg_add_u32(&_b, "floor_end", data->floor);
+            blobmsg_add_double(&_historical_b, "distance", fabs(data->distance));
+            blobmsg_add_u32(&_historical_b, "direction", data->direction);
+            blobmsg_add_u64(&_historical_b, "timestamp_begin", data->timestamp_begin);
+            blobmsg_add_u64(&_historical_b, "timestamp_end", data->timestamp_end);
+            blobmsg_add_u32(&_historical_b, "floor_begin", data->floor_begin);
+            blobmsg_add_u32(&_historical_b, "floor_end", data->floor);
 
-            void* root = blobmsg_open_array(&_b, "accels");
+            void* root = blobmsg_open_array(&_historical_b, "accels");
 
             for (size_t i = 0; i < _accel_buffer.offset;) {
                 double* v = (double*)(_accel_buffer.data + i);
-                blobmsg_add_double(&_b, NULL, *v);
+                blobmsg_add_double(&_historical_b, NULL, *v);
                 i += sizeof(double);
             }
-            blobmsg_close_array(&_b, root);
-            root = blobmsg_open_array(&_b, "speeds");
+            blobmsg_close_array(&_historical_b, root);
+            root = blobmsg_open_array(&_historical_b, "speeds");
 
             for (size_t i = 0; i < _velocity_buffer.offset;) {
                 double* v = (double*)(_velocity_buffer.data + i);
-                blobmsg_add_double(&_b, NULL, *v);
+                blobmsg_add_double(&_historical_b, NULL, *v);
                 i += sizeof(double);
             }
-            blobmsg_close_array(&_b, root);
+            blobmsg_close_array(&_historical_b, root);
 
-            root = blobmsg_open_array(&_b, "jitter_freqs");
+            root = blobmsg_open_array(&_historical_b, "jitter_freqs");
 
             for (size_t i = 0; i < _jitter_freq_buffer.offset;) {
                 double* v = (double*)(_jitter_freq_buffer.data + i);
-                blobmsg_add_double(&_b, NULL, *v);
+                blobmsg_add_double(&_historical_b, NULL, *v);
                 i += sizeof(double);
             }
-            blobmsg_close_array(&_b, root);
-            root = blobmsg_open_array(&_b, "jitter_accels");
+            blobmsg_close_array(&_historical_b, root);
+            root = blobmsg_open_array(&_historical_b, "jitter_accels");
 
             for (size_t i = 0; i < _jitter_accel_buffer.offset;) {
                 double* v = (double*)(_jitter_accel_buffer.data + i);
-                blobmsg_add_double(&_b, NULL, *v);
+                blobmsg_add_double(&_historical_b, NULL, *v);
                 i += sizeof(double);
             }
-            blobmsg_close_array(&_b, root);
+            blobmsg_close_array(&_historical_b, root);
 
-            char* str = blobmsg_format_json(_b.head, true);
+            char* str = blobmsg_format_json(_historical_b.head, true);
             HR_LOGD("%s\n", str);
             free(str);
 
-            post_message(MSG_HISTORICAL);
+            uevelatord_post_message(MSG_HISTORICAL);
 
             hrbuffer_reset(&_accel_buffer);
             hrbuffer_reset(&_velocity_buffer);
