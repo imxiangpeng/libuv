@@ -64,7 +64,7 @@ int iot_init(struct uv_loop_s* loop) {
     asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, ts);
 
     HR_LOGD("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
-    HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
+    //HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
 
     assert(sizeof(_iot->password) >= EVP_MAX_MD_SIZE * 2 + 1);
 

@@ -1,3 +1,15 @@
+
+// mxp, 20250502, a smiple mqtt iot framework based on libuv library
+// you should implement your topic only, do not care any other logic
+// who to use:
+// 1. call uviot_alloc to allocate struct uviot object;(you should pass your uv_loop handle)
+// 2. fill information into struct uviot; (such as clientid, server url, port, alive time, username and password)
+// 3. using uviot_topic_register to register your topics
+// 4. call uviot_prepare connect your mqtt platform and poll to loop, then you can call uv_run
+// 5. when you want to publish message, call uviot_publish_async, then you on_publish callback will be called;(uviot_publish_async is thread safe)
+// 6. finally call uviot_release to release all resource
+// 7. what's more, uviot_get_connection_ipv4/mac_address can be used to obtion mqtt connection information such as ip & mac
+
 #ifndef UVIOT_H
 #define UVIOT_H
 

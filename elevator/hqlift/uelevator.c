@@ -34,6 +34,7 @@ enum {
 // Historical
 #define ELEVATORD_EVENT_REALTIME "RealTime"
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
+#define ELEVATORD_EVENT_MOTION "Motion"
 
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -134,11 +135,14 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
                 _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
 
+    } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
+        HR_LOGE("%s(%d): motion come in \n", __FUNCTION__, __LINE__);
+    
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // 运行历史记录对应 LiftRunInfo
         // directly pass
 
-        HR_LOGE("%s(%d): come in \n", __FUNCTION__, __LINE__);
+        HR_LOGE("%s(%d): historical come in \n", __FUNCTION__, __LINE__);
         struct blob_attr* cur = NULL;
         size_t rem;
         struct blob_attr* tb[__HI_MAX] = {NULL};

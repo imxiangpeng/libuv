@@ -21,7 +21,7 @@
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
 #define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
 #define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
-#define TIHUIYAN_DEVICE_NAME "LC123456789"
+#define TIHUIYAN_DEVICE_NAME "LC123456789" // usid serial
 
 static struct uviot* _iot = NULL;
 

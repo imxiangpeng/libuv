@@ -317,6 +317,11 @@ static void _observer_on_event(struct motion_event* data) {
     } else if (data->state == STOPPED) {
         HR_LOGD("running --> stopped, direction:%d, distance:%f\n", data->direction, data->distance);
 
+        blob_buf_init(&_motion_b, 0);
+        blobmsg_add_u32(&_motion_b, "state", data->state);
+        post_message(MSG_MOTION_EVENT);
+
+       
         if (!_b_is_busy) {
             HR_LOGE("_b is busy maybe we should drop or wait.........\n");
 
