@@ -1,3 +1,5 @@
+// mxp, 20250412, a simple moving window which auto calc mean & stddev
+
 #include "moving_window.h"
 
 #include <float.h>

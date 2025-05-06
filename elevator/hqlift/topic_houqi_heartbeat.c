@@ -1,3 +1,6 @@
+// mxp, 20250502, implement houqi topic: /API/V1/Up/HeartBeat
+// auto publish every 10s
+
 
 #include <math.h>
 #include <stdio.h>

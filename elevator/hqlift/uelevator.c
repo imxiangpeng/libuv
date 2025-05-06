@@ -1,3 +1,6 @@
+// mxp, 20250501, ubus interface obtains data by communicating with the uelevatord module
+// also subscribe some broadcast events such ubus.object.* and elevator.event.*
+
 #include "uelevator.h"
 
 #include <pthread.h>

@@ -6,6 +6,8 @@ project(iutils LANGUAGES C)
 INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 
+option(HRLOG_OUTPUT_FILE "output fille output to file not default stdout" OFF)
+
 set(SOURCES file_util.c
     hr_buffer.c
     hr_log.c

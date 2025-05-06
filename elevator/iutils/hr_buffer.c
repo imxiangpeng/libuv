@@ -1,4 +1,5 @@
 
+// mxp, 20250420, a simple dynamic buffer
 #include "hr_buffer.h"
 #include <stdio.h>
 #include <stdlib.h>

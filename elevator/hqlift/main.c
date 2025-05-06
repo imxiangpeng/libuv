@@ -65,18 +65,14 @@ int main(int argc, char** argv) {
     // block until connected
     iot_init(uv_default_loop());
     
-    //detector_init(uv_default_loop());
     statemachine_init(uv_default_loop());
    // uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     statemachine_deinit();
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     iot_deinit();
 
     uelevator_deinit();
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 

@@ -1,3 +1,4 @@
+// mxp, 20250415, floor model
 
 #include <math.h>
 #include <pthread.h>
@@ -15,6 +16,7 @@
 #include "motion.h"
 #include "uviot.h"
 
+// defined in iot_topic_property.c
 extern void report_floor_model_property();
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))

@@ -1,3 +1,6 @@
+
+// mxp, 20250418, support detect jiceng gpio
+
 #include <gpiod.h>
 #include <sched.h>
 #include <stdio.h>

@@ -1,4 +1,5 @@
-
+// mxp, 20250502, implement houqi topic: /API/V1/Up/LiftRunInfo
+// all data is subscribed from elevatord's event
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,3 +1,10 @@
+// mxp, 20250505, a simple "state machine"
+// used to verify some state exception
+// such as door not opened after stopped
+// door not closed before running
+// not it's verify simple !
+// there is a lot of work to be done
+
 #include "state_machine.h"
 #include <stdlib.h>
 #include <unistd.h>

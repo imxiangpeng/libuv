@@ -1,3 +1,5 @@
+// mxp, 202504, accelerometer stream, which can filter data and provide motion data
+
 #include "accelerometer_stream.h"
 
 #include <assert.h>

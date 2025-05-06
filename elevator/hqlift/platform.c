@@ -36,7 +36,8 @@ struct key_item_info_t {
 static char* _prop_tbl[_PROPERTY_MAX] = {
     "usid",  // serial
     "mac",   // macaddr
-    "deviceid"};
+    "deviceid",
+	"device_secret"};
 
 static int _aml_unifykey_read(const char* name, char* data, size_t len) {
     int fd = -1;

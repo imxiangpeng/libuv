@@ -26,15 +26,19 @@
 
 #define LOG_BUF_SIZE 1024 * 2
 
-static FILE* persist_fp = NULL;
+#define HRLOG_OUTPUT_FILE 1
 
-int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
+#if HRLOG_OUTPUT_FILE
+static FILE* persist_fp = NULL;
+#endif
+
+int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     int ret = -1;
     (void)prio;
 
     va_list ap;
     char buf[LOG_BUF_SIZE] = {0};
-    char *ptr = buf;
+    char* ptr = buf;
     size_t available = LOG_BUF_SIZE;
     struct tm tm;
     struct timespec ts;
@@ -48,20 +52,23 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     ptr += size;
     // append ms
     ret = snprintf(ptr, available, ".%03ld ", ts.tv_nsec / 1000000);
-    if (ret < 0) ret = 0;
+    if (ret < 0)
+        ret = 0;
     available -= (size_t)ret;
     ptr += ret;
 
     // pid & tid
     ret = snprintf(ptr, available, "%5d %5ld ", getpid(), syscall(SYS_gettid) /*gettid()*/);
-    if (ret < 0) ret = 0;
+    if (ret < 0)
+        ret = 0;
     available -= (size_t)ret;
     ptr += ret;
 
     // tag
     if (tag) {
         ret = snprintf(ptr, available, "%-8s: ", tag);
-        if (ret < 0) ret = 0;
+        if (ret < 0)
+            ret = 0;
         available -= (size_t)ret;
         ptr += ret;
     }
@@ -69,7 +76,7 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     va_start(ap, fmt);
     ret = vsnprintf(ptr, available, fmt, ap);
     // when it's too long, trunk and using ...
-    if ( ret > 0 && (size_t)ret > available) {
+    if (ret > 0 && (size_t)ret > available) {
         // overflow
         buf[LOG_BUF_SIZE - 2] = '\n';
         buf[LOG_BUF_SIZE - 3] = '.';
@@ -78,13 +85,21 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
     }
     va_end(ap);
 
-#if 0
-    printf("%s", buf);
-#else
+#if HRLOG_OUTPUT_FILE
     // syslog(LOG_SYSLOG, "%s", buf);
     if (!persist_fp) {
         char path[256] = "./hrlog-";
         char* ptr = path + strlen(path);
+        FILE* f = fopen("/proc/self/comm", "r");
+        if (f) {
+            fscanf(f, "%s", ptr);
+            printf("Process name: %s\n", ptr);
+            fclose(f);
+        }
+
+        ptr = path + strlen(path);
+        sprintf(ptr, "-%d-", getpid());
+        ptr = path + strlen(path);
         strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M", &tm);
         strcat(path, ".log");
         printf("path:%s\n", path);
@@ -95,10 +110,13 @@ int _hr_log_printf(int prio, const char *tag, const char *fmt, ...) {
 
         setbuf(persist_fp, NULL);
     }
-    
+
     if (persist_fp) {
         fprintf(persist_fp, "%s", buf);
     }
+#else
+    printf("%s", buf);
+	// syslog(LOG_SYSLOG, "%s", buf);
 #endif
 
     return 0;

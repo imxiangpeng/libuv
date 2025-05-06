@@ -1,3 +1,5 @@
+// mxp, 20250505, implement houqi topic: /API/V1/Up/LiftFault
+// need implement ...
 
 #include <stdio.h>
 #include <string.h>
@@ -5,7 +7,6 @@
 
 #include "elevator.h"
 #include "uviot.h"
-/// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
 #include "platform.h"

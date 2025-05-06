@@ -130,7 +130,6 @@ static void* _accelerometer_thread_routin(void* args) {
 
     _accelerometer_motion.is_calibration = -1;
     struct motion_stream* input = _accelerometer_motion.stream;
-    // double result[8] = {0};
     struct accelerometer_stream_data result;
     for (;;) {
         struct timespec spec;
@@ -165,7 +164,6 @@ static void* _accelerometer_thread_routin(void* args) {
             ev.type = SENSOR_ACCELEROMETER;
             ev.is_calibration = 0;
             ev.value[0] = result.G;  // id 4 --> local G
-                                HR_LOGD("calibration event: G:%f vs %f\n", result.G, ev.value[0]);
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 

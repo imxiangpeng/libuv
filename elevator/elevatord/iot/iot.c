@@ -1,3 +1,4 @@
+// mxp, 20250421, support ali iot platform
 #define _GNU_SOURCE
 #include "iot.h"
 #include "uviot.h"

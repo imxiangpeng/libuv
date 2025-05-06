@@ -4,7 +4,6 @@ project(hqlift LANGUAGES C)
 
 FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(cjson_library NAMES cjson)
-FIND_LIBRARY(libiio_library NAMES iio)
 FIND_LIBRARY(libuv_library NAMES uv)
 FIND_LIBRARY(libmosquitto_library NAMES mosquitto)
 FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
@@ -37,9 +36,8 @@ TARGET_COMPILE_OPTIONS(hqlift PRIVATE -Wall -Wextra -Werror -Wno-unused-function
 target_include_directories(hqlift PUBLIC /opt/3rdparty/include)
 
 TARGET_LINK_LIBRARIES(hqlift ${cjson_library})
-TARGET_LINK_LIBRARIES(hqlift ${libmosquitto_library})
+#TARGET_LINK_LIBRARIES(hqlift ${libmosquitto_library})
 TARGET_LINK_LIBRARIES(hqlift ${libuv_library})
-TARGET_LINK_LIBRARIES(hqlift ${libiio_library})
 
 TARGET_LINK_LIBRARIES(hqlift m)
 TARGET_LINK_LIBRARIES(hqlift pthread)
@@ -47,5 +45,6 @@ TARGET_LINK_LIBRARIES(hqlift -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(hqlift ${ubox_library} ${ubus_library} ${blob_library})
 
 TARGET_LINK_LIBRARIES(hqlift uviot)
+TARGET_LINK_LIBRARIES(hqlift iutils)
 
 #INSTALL(TARGETS hqlift RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

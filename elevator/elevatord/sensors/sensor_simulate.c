@@ -1,3 +1,9 @@
+
+// mxp, support simulate sensor, you can capture data and store it in csv format
+// then you can build with following command to enable simulate sensor:
+// cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DUSE_LOCAL_SIMULATE_DATA=1 -B build
+// 
+
 #include <assert.h>
 #include <iio.h>
 #include <openssl/ossl_typ.h>

@@ -17,7 +17,7 @@ target_include_directories(uviot PUBLIC .)
 target_compile_options(uviot PRIVATE -fvisibility=hidden)
 TARGET_LINK_LIBRARIES(uviot ${libmosquitto_library})
 TARGET_LINK_LIBRARIES(uviot ${libuv_library})
-TARGET_LINK_LIBRARIES(uviot iutils)
+# TARGET_LINK_LIBRARIES(uviot iutils)
 
 
 add_subdirectory(examples)

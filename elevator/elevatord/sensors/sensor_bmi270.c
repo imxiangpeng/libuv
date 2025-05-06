@@ -1,3 +1,6 @@
+
+// mxp, support bmi270 imu sensor which provide accelerometer and gyroscope
+
 #include <assert.h>
 #include <iio.h>
 

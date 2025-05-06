@@ -1,3 +1,5 @@
+// mxp, support bmp388 barometer sensor
+
 #include <iio.h>
 
 #include "hr_log.h"

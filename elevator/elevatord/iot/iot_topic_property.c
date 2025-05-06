@@ -7,7 +7,6 @@
 
 #include "file_util.h"
 #include "iot_topic.h"
-/// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
 

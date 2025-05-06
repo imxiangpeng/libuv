@@ -1,6 +1,7 @@
+#include "iot_topic.h"
+
 #include <stdio.h>
 #include "uviot.h"
-#include "iot_topic.h"
 
 extern int topic_houqi_heartbeat_init(struct uviot* iot, const char* public_key, const char* device_name);
 extern int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name);
