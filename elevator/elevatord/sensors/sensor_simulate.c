@@ -90,6 +90,7 @@ static int accelerometer_init() {
         char line[MAX_LINE_LENGTH] = {0};
         FILE* fp = fopen(path, "r");
         if (!fp) {
+            HR_LOGE("can not open simulate data file\n");
             return -1;
         }
 

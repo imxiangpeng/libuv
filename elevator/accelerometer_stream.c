@@ -1,5 +1,3 @@
-// mxp, 202504, accelerometer stream, which can filter data and provide motion data
-
 #include "accelerometer_stream.h"
 
 #include <assert.h>
@@ -464,13 +462,13 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
         // Q[ EKF_N + 1] = 1e-6;  // 降低速度噪声
         // F[1] = 0;
         // F[EKF_N + 1] = 0;
+        // _velocity = 0;
     }
 
     // HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
     // HR_LOGD("x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
     ekf_predict(ekf, fx, F, Q);
 
-    // 0.35 ?
     if (fabs(linear_accel) < 0.05) {
         linear_accel = 0;
     }

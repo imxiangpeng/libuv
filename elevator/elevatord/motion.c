@@ -52,7 +52,7 @@ static pthread_t _barometer_tid = 0;
 
 #define MAX_LINE_LENGTH 1000
 
-#define DUMP_DATA_TO_FILE 1
+#define DUMP_DATA_TO_FILE 0
 // simulate using local csv files
 #if DUMP_DATA_TO_FILE
 static FILE* _dump_fp = NULL;
@@ -115,13 +115,14 @@ static double calculate_height_difference(double p0, double p1, double temperatu
 
 static void* _accelerometer_thread_routin(void* args) {
     (void)args;
-    char buf[MAX_LINE_LENGTH] = {0};
+
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
 
     int floor_num = 0;
     char floor_label[64] = {0};
 
 #if DUMP_DATA_TO_FILE
+    char buf[MAX_LINE_LENGTH] = {0};
     if (_dump_fp) {
         snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
