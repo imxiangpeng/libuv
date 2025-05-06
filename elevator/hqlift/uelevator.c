@@ -16,6 +16,7 @@
 #include "time_utils.h"
 
 #define ELEVATORD_NAME "elevatord"
+#define ELEVATOR_EVENT_PREFIX "elevator.event."
 #define UBUS_SOCK "/tmp/ubus.sock"
 
 #define _UBUS_RETRY_TIMEOUT (2)
@@ -319,6 +320,9 @@ static void ubus_object_event_handler(struct ubus_context* ctx,
                 ubus_unsubscribe(ctx, &_elevatord_subscriber, id);
             }
         }
+    } else if (strncmp(type, ELEVATOR_EVENT_PREFIX, strlen(ELEVATOR_EVENT_PREFIX)) == 0) {
+        const char* event = type + strlen(ELEVATOR_EVENT_PREFIX);
+        printf("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
     }
 }
 static void _reconnect_timer(struct uloop_timeout* timeout) {
@@ -410,6 +414,7 @@ void* uobject_elevator_thread_routin(void* args) {
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
     ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
+    ubus_register_event_handler(_ubus_ctx, &_object_event, "elevator.event.*");
 
     subscriber_elevatord_event();
 
