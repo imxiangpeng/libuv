@@ -11,6 +11,7 @@
  * source code was originally received.
  */
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -38,12 +39,16 @@ static int _on_publish(void** payload, int* len) {
 
     uelevator_get_status(&st);
 
+    printf("liftstate: door:%d\n", st.door_state);
     // only update direction when running
     // it's no stationary on houqi platform
-    if (st.direction != ELEVATOR_DIR_STATIONARY) {
+    //if (st.direction != ELEVATOR_DIR_STATIONARY) {
         _running_direction = st.direction;
-    }
+    //}
 
+    if (st.speed == 0) {
+        _running_direction = 3;
+    }
     cJSON* root = cJSON_CreateObject();
     if (!root)
         return -1;
@@ -63,8 +68,17 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
     cJSON_AddNumberToObject(root, "runningDirection", _running_direction);
-    cJSON_AddNumberToObject(root, "doorStatus", st.current_floor);
+    cJSON_AddNumberToObject(root, "doorStatus", st.door_state);
+    printf("liftstate: door2:%d\n", st.door_state);
     cJSON_AddNumberToObject(root, "personInLift", elevator_passenger_count());
+
+    cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
+
+    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_variant_amplitude());
+    cJSON_AddNumberToObject(root, "acceleration", round(st.accel * 100) / 100);
+    cJSON_AddNumberToObject(root, "jitterFrequency", round(st.jitter_freq * 10) / 10);
+    cJSON_AddNumberToObject(root, "jitterAcceleration", round(st.jitter_accel * 100) / 100);
+
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -73,6 +87,7 @@ static int _on_publish(void** payload, int* len) {
     }
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
+    printf("publish: %s\n", (char*)*payload);
 #if 0
     *payload = strdup("{\"name\":\"xiaohua\"}");
     *len = strlen(*payload);

@@ -1,6 +1,9 @@
 // mxp, 20250428, mqtt to houqi platform
 
 #define _GNU_SOURCE
+
+#include "elevator.h"
+
 #include "iot.h"
 #include "uviot.h"
 #include <assert.h>
@@ -18,7 +21,7 @@
 
 #include "hr_log.h"
 
-#define BROKER_DEFAULT_SERVER "localhost" //"a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
+#define BROKER_DEFAULT_SERVER "mq.hqszjs.com" //"a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883
 #define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
@@ -79,8 +82,9 @@ int iot_init(struct uv_loop_s* loop) {
 
     // force reset password
 
-    sprintf(_iot->username, "%s", "who");
-    sprintf(_iot->password, "%s", "me");
+    sprintf(_iot->id, "%s", elevator_serialno() /*"244200000E48"*/);
+    sprintf(_iot->username, "%s", "inspur");
+    sprintf(_iot->password, "%s", "inspur88*");
     // free memory
     free(iot_content);
     iot_content = NULL;

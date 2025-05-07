@@ -733,5 +733,6 @@ const char* uviot_get_connection_mac_address(struct uviot* self) {
         return "";
     }
 
+    //return "D4430EF3063A";
     return iot->status.mac;
 }

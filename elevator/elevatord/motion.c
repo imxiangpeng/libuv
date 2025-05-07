@@ -19,7 +19,7 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
-// #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
+#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
 
 // 海平面标准气压 (Pa)
 #define P0 101325.0
@@ -52,7 +52,7 @@ static pthread_t _barometer_tid = 0;
 
 #define MAX_LINE_LENGTH 1000
 
-#define DUMP_DATA_TO_FILE 0
+#define DUMP_DATA_TO_FILE 1
 // simulate using local csv files
 #if DUMP_DATA_TO_FILE
 static FILE* _dump_fp = NULL;
@@ -168,7 +168,7 @@ static void* _accelerometer_thread_routin(void* args) {
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 
-        double accel = fabs(result.accel);
+        double accel = round(result.accel * 100)/100;
         double velocity = round(result.velocity * 100) / 100;
         double distance = round(result.distance * 1000) / 1000;
 

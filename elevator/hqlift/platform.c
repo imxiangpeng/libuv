@@ -211,6 +211,7 @@ int platform_set_connection_mac_address(char* data) {
     if (!data)
         return -1;
     snprintf(_connection_mac_address, sizeof(_connection_mac_address), "%s", data);
+    snprintf(_connection_mac_address, sizeof(_connection_mac_address), "%s", "244200000E48");
 
     return 0;
 }

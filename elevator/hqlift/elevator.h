@@ -11,8 +11,8 @@ enum elevator_direction {
 };
 
 enum elevator_door_state{
-    ELEVATROR_DOOR_CLOSE = 0,
-    ELEVATOR_DOOR_OPEN
+    ELEVATOR_DOOR_OPEN = 0,
+    ELEVATROR_DOOR_CLOSE
 };
 
 struct elevator_status {
@@ -23,6 +23,8 @@ struct elevator_status {
     double distance;
     int current_floor;
     int passenger_count;
+    double jitter_freq;
+    double jitter_accel;
 };
 
 struct elevator_historical {
@@ -39,6 +41,9 @@ struct elevator_historical {
 };
 
 int elevator_init(void);
+
+const char* elevator_serialno(void);
+const char* elevator_mac(void);
 const char* elevator_deviceid(void);
 int elevator_get_status(struct elevator_status *st);
 int elevator_direction(void);
@@ -51,4 +56,5 @@ int elevator_passenger_count_in(void);
 int elevator_passenger_count_out(void);
 float elevator_temperature(void);
 
+int elevator_light_variant_amplitude();
 #endif

@@ -289,8 +289,6 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         }
     }
 
-    _fft_process(s, accel_filtered, 3);
-
     // it indicates that the camera is inverted, when z < 0
     // accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
     accel_union = calculate_stationary_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
@@ -319,30 +317,60 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     }
 #endif
 
-    accel_filtered[0] = s->ekf.x[3];
-    accel_filtered[1] = s->ekf.x[4];
-    accel_filtered[2] = s->ekf.x[5];
-    calibration(s, accel_filtered);
+    //accel_filtered[0] = s->ekf.x[3];
+    //accel_filtered[1] = s->ekf.x[4];
+    //accel_filtered[2] = s->ekf.x[5];
+    double ca[IMU_AXES] = {
+       s->ekf.x[3] ,
+       s->ekf.x[4] ,
+       s->ekf.x[5]    };
+    calibration(s, ca);
 
     // capture data after calibration, otherwise G is not correct
     p->accel = s->ekf.x[2];
+    //p->accel = calculate_veritical_acceleration(accel.x[0] - s->zero_bias_accels[0],
+    //                                                    accel.x[1] - s->zero_bias_accels[1],
+    //                                                    accel.x[2] - s->zero_bias_accels[2], s->zero_bias_pitch, s->zero_bias_roll);   
     p->velocity = s->ekf.x[1];
     p->distance = s->ekf.x[0];
     p->G = s->G;
+    
+
+    if (s->calibration) {
+        double fft_accels[IMU_AXES] = {
+            accel_filtered[0] - s->zero_bias_accels[0] - s->ekf.x[3],
+            accel_filtered[1] - s->zero_bias_accels[1] - s->ekf.x[4],
+            accel_filtered[2] - s->zero_bias_accels[2] - s->ekf.x[5],
+        };
+        _fft_process(s, fft_accels, IMU_AXES);
+    }
+
+
+    
     p->jitter_accel = s->fft[0].jitter_accel;
     p->jitter_frequency = s->fft[0].jitter_frequency;
-
+#if 1
     for (size_t i = 1; i < ARRAY_SIZE(s->fft); i++) {
         if (s->fft[i].jitter_accel > p->jitter_accel) {
             p->jitter_accel = s->fft[i].jitter_accel;
             p->jitter_frequency = s->fft[i].jitter_frequency;
         }
     }
+#endif
+
+    p->jitter_accel = round(p->jitter_accel * 100) / 100;
+    //if (p->jitter_accel == 0) {
+    //    p->jitter_frequency = 0;
+    //}
+
+    //p->jitter_accel = round(s->ekf.x[5] - accel_filtered[2]);
+    // p->jitter_frequency = round(p->jitter_frequency * 100) / 100;
 
     HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
             __FUNCTION__, __LINE__,
             accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
 
+    HR_LOGD("%s(%d): accel:%f, jitter freq:%f, jitter accel:%f\n", __FUNCTION__, __LINE__, p->accel, p->jitter_frequency, p->jitter_accel);
     if (s->calibration != 1) {
         return -2;  // we are calibration
     }
@@ -396,7 +424,7 @@ static int accelerometer_stream_reset(struct motion_stream* self) {
 
     ms->ekf.x[2] = 0;
     ekf->P[EKF_N * 2 + 1] = 1e-10;
-    
+
     return 0;
 }
 
@@ -439,7 +467,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
         s->fft[i].count = 0;
         s->fft[i].sum = 0;
-        s->fft[i].sampling_size = sampling_frequency;
+        s->fft[i].sampling_size = 256 /*sampling_frequency*/;
         s->fft[i].in = (double*)fftw_malloc(sizeof(double) * s->fft[i].sampling_size);
         s->fft[i].out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (s->fft[i].sampling_size / 2 + 1));
 
@@ -493,10 +521,17 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], d
     if (self->calibration == 0) {
         linear_accel = 0;
     } else {
-        // linear_accel = calculate_veritical_acceleration(accel[0], accel[1], accel[2], self->zero_bias_pitch, self->zero_bias_roll) - self->G;
+// linear_accel = calculate_veritical_acceleration(accel[0], accel[1], accel[2], self->zero_bias_pitch, self->zero_bias_roll) - self->G;
+#if 0
         linear_accel = calculate_veritical_acceleration(accel[0] - self->zero_bias_accels[0],
                                                         accel[1] - self->zero_bias_accels[1],
                                                         accel[2] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
+#else
+
+        linear_accel = calculate_veritical_acceleration(self->ekf.x[3] - self->zero_bias_accels[0],
+                                                        self->ekf.x[4] - self->zero_bias_accels[1],
+                                                        self->ekf.x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
+#endif
         // HR_LOGD("%s(%d): linear %f vs %f = %f\n", __FUNCTION__, __LINE__, linear_accel, linear, linear_accel - linear);
     }
     // clang-format off

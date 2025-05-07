@@ -105,7 +105,7 @@ struct uviot_topic topic_command = {
 int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
-    const char* serialno = elevator_deviceid();
+    const char* serialno = elevator_serialno();//"244200000E480001"; //elevator_deviceid();
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);
     return 0;

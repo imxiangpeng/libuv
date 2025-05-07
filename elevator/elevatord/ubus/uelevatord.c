@@ -1,3 +1,4 @@
+#include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include "libubus.h"
 #include "motion.h"
 #include "time_utils.h"
+#include "ubusmsg.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 #define OBJECT_NAME "elevatord"
@@ -75,17 +77,6 @@ struct ubus_context* uelevatord_get_ubus_ctx() {
     return _ubus_ctx;
 }
 
-enum {
-    FC_FLOOR_BASE,
-    FC_FLOORS_BELOW,
-    FC_FLOORS_ABOVE,
-    __FC_MAX
-};
-static const struct blobmsg_policy _floor_calibration_policy[__FC_MAX] = {
-    [FC_FLOOR_BASE] = {.name = "BaseFloor", .type = BLOBMSG_TYPE_INT32},
-    [FC_FLOORS_BELOW] = {.name = "FloorsBelow", .type = BLOBMSG_TYPE_INT32},
-    [FC_FLOORS_ABOVE] = {.name = "FloorsAbove", .type = BLOBMSG_TYPE_INT32},
-};
 // maybe we can read/write json file directly not using j2sobject
 static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
     (void)ctx;
@@ -115,7 +106,7 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
 
 // ubus -s /tmp/ubus.sock subscribe elevatord
 static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
-  (void)completed;
+    (void)completed;
     struct ubus_context* ctx = uelevatord_get_ubus_ctx();
     if (!ctx) {
         return;
@@ -131,8 +122,19 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     blobmsg_add_string(&b, "Label", label);
     blobmsg_add_double(&b, "Height", height);
 
-    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1/*no block*/);
+    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1 /*no block*/);
 }
+enum {
+    FC_FLOOR_BASE,
+    FC_FLOORS_BELOW,
+    FC_FLOORS_ABOVE,
+    __FC_MAX
+};
+static const struct blobmsg_policy _floor_calibration_policy[__FC_MAX] = {
+    [FC_FLOOR_BASE] = {.name = "BaseFloor", .type = BLOBMSG_TYPE_INT32},
+    [FC_FLOORS_BELOW] = {.name = "FloorsBelow", .type = BLOBMSG_TYPE_INT32},
+    [FC_FLOORS_ABOVE] = {.name = "FloorsAbove", .type = BLOBMSG_TYPE_INT32},
+};
 
 // ubus call elevatord startAutoFloorCalibration '{"BaseFloor":1, "FloorsBelow":1, "FloorsAbove":22}'
 // ubus -s /tmp/ubus.sock subscribe elevatord
@@ -165,9 +167,59 @@ static int _start_auto_floor_calibration(struct ubus_context* ctx, struct ubus_o
     floor_enter_calibration_with_callback(floor_base, floors_below_base, floors_above_base, _on_floor_calibration_event);
     return 0;
 }
+enum {
+    CFM_FLOOR,
+    CFM_HEIGHT,
+    __CFM_MAX
+};
+static const struct blobmsg_policy _calibrate_at_floor_or_height_policy[__CFM_MAX] = {
+    [CFM_FLOOR] = {.name = "Floor", .type = BLOBMSG_TYPE_INT32},
+    [CFM_HEIGHT] = {.name = "Height", .type = BLOBMSG_TYPE_DOUBLE},
+};
+
+static int _calibrate_at_floor_or_height_manually(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
+    (void)ctx;
+    (void)obj;
+    (void)req;
+    (void)msg;
+    (void)method;
+
+    struct blob_attr* tb[__FC_MAX] = {0};
+
+    int rc = blobmsg_parse(_calibrate_at_floor_or_height_policy, __CFM_MAX, tb, blob_data(msg), blob_len(msg));
+
+    if (rc != 0) {
+        HR_LOGD("%s(%d): invalid ...\n", __FUNCTION__, __LINE__);
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (0 == strcmp("CalibrateAtFloorManually", method)) {
+        if (tb[CFM_FLOOR]) {
+            int floor = 1;
+            floor = blobmsg_get_u32(tb[CFM_FLOOR]);
+            motion_calibrate_at_floor(floor);
+            return 0;
+        }
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    if (0 == strcmp("CalibrateAtHeightManually", method)) {
+        if (tb[CFM_HEIGHT]) {
+            double height = blobmsg_get_double(tb[CFM_HEIGHT]);
+            motion_calibrate_at_height(height);
+            return 0;
+        }
+
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+
+    return UBUS_STATUS_INVALID_ARGUMENT;
+}
+
 static const struct ubus_method _object_methods[] = {
     UBUS_METHOD_NOARG("get", uobject_elevatord_property_handler),
     UBUS_METHOD("startAutoFloorCalibration", _start_auto_floor_calibration, _floor_calibration_policy),
+    UBUS_METHOD("CalibrateAtFloorManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
+    UBUS_METHOD("CalibrateAtHeightManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
 };
 
 static struct ubus_object_type _object_type =
@@ -355,6 +407,8 @@ static void _observer_on_status(struct motion_status* st) {
             blobmsg_add_double(&_realtime_b, "distance", st->distance);
             blobmsg_add_u32(&_realtime_b, "direction", _running_direction);
             blobmsg_add_u32(&_realtime_b, "floor", (uint32_t)st->floor);
+            blobmsg_add_double(&_realtime_b, "jitter_freq", st->jitter_frequency);
+            blobmsg_add_double(&_realtime_b, "jitter_accel", st->jitter_accel);
 
             uevelatord_post_message(MSG_REALTIME);
             _realtime_report_times = 0;
@@ -425,7 +479,6 @@ static void _observer_on_event(struct motion_event* data) {
         blobmsg_add_u32(&_motion_b, "state", data->state);
         uevelatord_post_message(MSG_MOTION_EVENT);
 
-       
         if (!_historical_b_is_busy) {
             blob_buf_init(&_historical_b, 0);
 

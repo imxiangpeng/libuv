@@ -52,7 +52,7 @@ static struct ubus_subscriber _elevatord_subscriber;
 static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
 
-static struct elevator_status _status;
+static struct elevator_status _status = {.door_state = ELEVATROR_DOOR_CLOSE};
 
 static struct elevator_historical _historical;
 
@@ -64,6 +64,8 @@ enum {
     RT_DISTANCE,
     RT_DIRECTION,
     RT_FLOOR,
+    RT_JITTER_FREQ,
+    RT_JITTER_ACCEL,
     __RT_MAX
 };
 
@@ -73,6 +75,8 @@ static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
     [RT_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
     [RT_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
     [RT_FLOOR] = {.name = "floor", .type = BLOBMSG_TYPE_INT32},
+    [RT_JITTER_FREQ] = {.name = "jitter_freq", .type = BLOBMSG_TYPE_DOUBLE},
+    [RT_JITTER_ACCEL] = {.name = "jitter_accel", .type = BLOBMSG_TYPE_DOUBLE},
 };
 
 enum {
@@ -148,6 +152,11 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         if (tb[RT_FLOOR])
             _status.current_floor = (int)blobmsg_get_u32(tb[RT_FLOOR]);
 
+        if (tb[RT_JITTER_FREQ])
+            _status.jitter_freq = blobmsg_get_double(tb[RT_JITTER_FREQ]);
+        if (tb[RT_JITTER_ACCEL])
+            _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
+    
         if (_status.speed > ELEVATOR_SPEED_THRESHOLD) {
             printf("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
             // topic_houqi_liftfault_post
@@ -447,6 +456,8 @@ int uelevator_init(void) {
         return -1;
     }
 
+    _status.door_state = ELEVATROR_DOOR_CLOSE;
+    
     blob_buf_init(&_b, 0);
     blob_buf_grow(&_b, 1024);
 
