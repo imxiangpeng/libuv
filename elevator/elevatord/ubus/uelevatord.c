@@ -427,8 +427,6 @@ static void _observer_on_event(struct motion_event* data) {
 
        
         if (!_historical_b_is_busy) {
-            HR_LOGE("_b is busy maybe we should drop or wait.........\n");
-
             blob_buf_init(&_historical_b, 0);
 
             blobmsg_add_double(&_historical_b, "distance", fabs(data->distance));

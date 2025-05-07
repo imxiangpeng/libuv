@@ -22,8 +22,10 @@
 // force cut 10Hz
 #define BUTTERWORTH_CUTOFF_FREQUENCY 10
 
-#define EKF_N 4  // only accel
-#define EKF_M 2  // only accel
+#define ACCEL_JITTER_THRESHOLD 0.35
+
+#define EKF_N 6  // [v,s,a,ax,ay,az]
+#define EKF_M 4  // [a, ax, dy, ax]
 
 #define _float_t double
 #include "tinyekf.h"
@@ -52,7 +54,7 @@ struct accelerometer_stream {
 
     int sampling_frequency;
     struct sensor* sensor;
-    struct butterworth_filter* filter[3];
+    struct butterworth_filter* filter[IMU_AXES];
 
     double distance;
     double velocity;
@@ -65,24 +67,39 @@ struct accelerometer_stream {
     int calibration;
     int calibration_retries;
     int calibration_retries_max;
-    double* calibration_data;
+    struct axis_mean {
+        double x[IMU_AXES];
+    }* calibration_data;
     ekf_t ekf;
-    struct moving_window* mw;
+    struct moving_window* calibration_mw[IMU_AXES];
+    // should store
+    double zero_bias_accels[IMU_AXES];
+    double zero_bias_pitch;
+    double zero_bias_roll;
 
     int64_t now;
 
-    struct fft_stream fft[3];
+    struct fft_stream fft[IMU_AXES];
 };
-
-static const _float_t pdiag[EKF_N] = {1.0, 1.0, 1.0, 1.0};
+// clang-format off
+static const _float_t pdiag[EKF_N] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
 
 double Q[EKF_N * EKF_N] = {
-    1e-1, 0, 0, 0,
-    0, 1e-1, 0, 0,
-    0, 0, 1e-1, 0,
-    0, 0, 0, 1e-3};
+    1e-1, 0, 0, 0, 0, 0,
+    0, 1e-1, 0, 0, 0, 0,
+    0, 0, 1e-1, 0, 0, 0,
+    0, 0, 0, 1e-3, 0, 0,
+    0, 0, 0, 0, 1e-3, 0,
+    0, 0, 0, 0, 0, 1e-3,
+};
 
-static const double R[EKF_M * EKF_M] = {1e-1, 0, 0, 1e-3};
+static const double R[EKF_M * EKF_M] = {
+    1e-1, 0, 0, 0,
+    0, 1e-3, 0, 0,
+    0, 0, 1e-3, 0,
+    0, 0, 0, 1e-3,
+};
+// clang-format on
 
 static const double ACCEL_JITTER_STD_THRESHOLD = 0.03;
 static const double G = 9.81;
@@ -93,7 +110,7 @@ static const double G = 9.81;
 // static double _bw_velocity = 0;
 // static double _bw_distance = 0;
 
-static void _ekf_run_model(struct accelerometer_stream* self, double input, double dt);
+static void _ekf_run_model(struct accelerometer_stream* self, double input[3], double dt);
 static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
 double hanning_window(int i, int N) {
@@ -113,39 +130,73 @@ static void apply_hanning_window(struct fft_stream* f) {
         f->in[i] *= multiplier;
     }
 }
-static double calculate_veritical_acceleration(double x, double y, double z) {
+static double calculate_stationary_veritical_acceleration(double x, double y, double z) {
     return sqrt(x * x + y * y + z * z) * (z < 0 ? -1 : 1);
 }
+static double calculate_veritical_acceleration(double x, double y, double z, double pitch, double roll) {
+    return x * sin(pitch) - y * sin(roll) * cos(pitch) + z * cos(roll) * cos(pitch);
+}
 
-static void calibration(struct accelerometer_stream* self, double accel) {
+static void calibration(struct accelerometer_stream* self, double accel[3]) {
+    int ready = 1;
     if (self->calibration != 0) {
         return;
     }
 
-    int ret = moving_window_update(self->mw, accel);
-    HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->mw->stddev, self->mw->mean, self->calibration_retries_max);
-    if (ret == 0 && !isnan(self->mw->stddev)) {
-        if (self->mw->stddev < ACCEL_JITTER_STD_THRESHOLD) {
-            self->calibration_data[self->calibration_retries] = self->mw->mean;
-            self->calibration_retries++;
-            if (self->calibration_retries == self->calibration_retries_max) {
-                int i = 0;
-                double sum = 0;
-                self->calibration_retries = 0;
-                for (i = 0; i < self->calibration_retries_max; i++) {
-                    HR_LOGD("calibration: %f\n", self->calibration_data[i]);
-                    sum += self->calibration_data[i];
-                }
-                HR_LOGD("%s(%d):avg: -> %f\n", __FUNCTION__, __LINE__, sum / self->calibration_retries_max);
-                self->G = round(sum * 10000 / self->calibration_retries_max) / 10000;
-                HR_LOGD("%s(%d): it's still: %lf\n", __FUNCTION__, __LINE__, self->G);
-                self->calibration = 1;
-                return;
-            }
-        } else {
-            HR_LOGD("not still:\n");
-            self->calibration_retries = 0;
+    for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
+        int ret = moving_window_update(self->calibration_mw[i], accel[i]);
+        HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw[i]->stddev, self->calibration_mw[i]->mean, self->calibration_retries_max);
+        if (ret != 0 || isnan(self->calibration_mw[i]->stddev)) {
+            ready &= 0;
+            continue;
         }
+    }
+
+    if (ready != 1) {
+        self->calibration_retries = 0;
+        return;
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
+        if (self->calibration_mw[i]->stddev >= ACCEL_JITTER_STD_THRESHOLD) {
+            self->calibration_retries = 0;
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
+        self->calibration_data[self->calibration_retries].x[i] = self->calibration_mw[i]->mean;
+    }
+
+    self->calibration_retries++;
+    if (self->calibration_retries == self->calibration_retries_max) {
+        self->zero_bias_accels[0] = 0;
+        self->zero_bias_accels[1] = 0;
+        self->zero_bias_accels[2] = 0;
+        for (int i = 0; i < self->calibration_retries_max; i++) {
+            HR_LOGD("calibration: %f %f %f\n", self->calibration_data[i].x[0], self->calibration_data[i].x[1], self->calibration_data[i].x[2]);
+            for (size_t j = 0; j < ARRAY_SIZE(self->calibration_mw); j++) {
+                self->zero_bias_accels[j] += self->calibration_data[i].x[j];
+            }
+        }
+        self->zero_bias_accels[0] /= self->calibration_retries_max;
+        self->zero_bias_accels[1] /= self->calibration_retries_max;
+        self->zero_bias_accels[2] /= self->calibration_retries_max;
+
+        self->G = calculate_stationary_veritical_acceleration(self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2]);
+        self->zero_bias_roll = atan2(-self->zero_bias_accels[1] /*y*/, self->zero_bias_accels[2] /*z*/);
+        self->zero_bias_pitch = atan2(self->zero_bias_accels[0] /*x*/,
+                                      sqrt(self->zero_bias_accels[0] * self->zero_bias_accels[0] + self->zero_bias_accels[1] * self->zero_bias_accels[1] + self->zero_bias_accels[2] * self->zero_bias_accels[2]));
+
+        float az_world = self->zero_bias_accels[0] * sin(self->zero_bias_pitch) - self->zero_bias_accels[1] * sin(self->zero_bias_roll) * cos(self->zero_bias_pitch) + self->zero_bias_accels[2] * cos(self->zero_bias_roll) * cos(self->zero_bias_pitch);
+        // self->G = calculate_veritical_acceleration(self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2],
+        //                                           self->zero_bias_pitch, self->zero_bias_roll);
+        HR_LOGD("%s(%d) G:%f vs %f\n", __FUNCTION__, __LINE__, self->G, az_world);
+        self->calibration_retries = 0;
+        // self->G = round(sum * 10000 / self->calibration_retries_max) / 10000;
+        HR_LOGD("%s(%d): it's still: %lf, zero offset: %f %f %f\n", __FUNCTION__, __LINE__, self->G, self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2]);
+        self->calibration = 1;
+        return;
     }
 }
 
@@ -173,17 +224,20 @@ static int accelerometer_stream_open(struct motion_stream* self) {
         s->inverted = 1;
     }
 
-    s->G = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    s->G = calculate_stationary_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
     if (s->inverted) {
         s->G *= -1.0;
     }
 
     // update ekf status
-    s->ekf.x[3] = s->G;
+    s->ekf.x[3] = accel.x[0];
+    s->ekf.x[4] = accel.x[1];
+    s->ekf.x[5] = accel.x[2];
 
     s->calibration = 0;
     s->calibration_retries_max = s->sampling_frequency * 2;
-    s->calibration_data = (double*)calloc(sizeof(double), s->calibration_retries_max);
+    // s->calibration_data = (double*)calloc(sizeof(double), s->calibration_retries_max);
+    s->calibration_data = (struct axis_mean*)calloc(sizeof(*s->calibration_data), s->calibration_retries_max);
 
     return 0;
 }
@@ -224,23 +278,27 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #endif
 
     HR_LOGD("dt:%f\n", dt);
-    double accel_filtered[3] = {0};
+    double accel_filtered[IMU_AXES] = {0};
 
     // butter worth filter cutoff 10hz
     for (size_t i = 0; i < ARRAY_SIZE(accel_filtered); i++) {
         accel_filtered[i] = butterworth_filter_process(s->filter[i], accel.x[i]);
+        double v = accel.x[i] - accel_filtered[i];
+        if (fabs(v) > ACCEL_JITTER_THRESHOLD) {
+            HR_LOGE("%d -> jitter:%f ....\n", i, v);
+        }
     }
 
     _fft_process(s, accel_filtered, 3);
 
     // it indicates that the camera is inverted, when z < 0
     // accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
-    accel_union = calculate_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
+    accel_union = calculate_stationary_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
     if (s->inverted) {
         accel_union *= -1.0;
     }
 
-    _ekf_run_model(s, accel_union, dt);
+    _ekf_run_model(s, accel_filtered, dt);
 
     s->distance = s->ekf.x[0];
     s->velocity = s->ekf.x[1];
@@ -261,7 +319,10 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     }
 #endif
 
-    calibration(s, s->ekf.x[3]);
+    accel_filtered[0] = s->ekf.x[3];
+    accel_filtered[1] = s->ekf.x[4];
+    accel_filtered[2] = s->ekf.x[5];
+    calibration(s, accel_filtered);
 
     // capture data after calibration, otherwise G is not correct
     p->accel = s->ekf.x[2];
@@ -286,6 +347,15 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         return -2;  // we are calibration
     }
 
+    if (fabs(s->ekf.x[3] - accel_filtered[0]) > ACCEL_JITTER_THRESHOLD) {
+        HR_LOGE("x -> jitter:%f vs %f = (%f)....\n", s->ekf.x[3], accel_filtered[0], s->ekf.x[3] - accel_filtered[0]);
+    }
+    if (fabs(s->ekf.x[4] - accel_filtered[1]) > ACCEL_JITTER_THRESHOLD) {
+        HR_LOGE("y -> jitter:%f vs %f = (%f)....\n", s->ekf.x[4], accel_filtered[1], s->ekf.x[4] - accel_filtered[1]);
+    }
+    if (fabs(s->ekf.x[5] - accel_filtered[2]) > ACCEL_JITTER_THRESHOLD) {
+        HR_LOGE("z -> jitter:%f vs %f = (%f)....\n", s->ekf.x[5], accel_filtered[2], s->ekf.x[5] - accel_filtered[2]);
+    }
     return 0;
 }
 
@@ -320,10 +390,13 @@ static int accelerometer_stream_reset(struct motion_stream* self) {
 
     // clear distance & speed
     ms->ekf.x[0] = 0;
-    ekf->P[0] = 1e-6;
+    ekf->P[0] = 1e-10;
     ms->ekf.x[1] = 0;
-    ekf->P[EKF_N + 1] = 1e-6;
+    ekf->P[EKF_N + 1] = 1e-10;
 
+    ms->ekf.x[2] = 0;
+    ekf->P[EKF_N * 2 + 1] = 1e-10;
+    
     return 0;
 }
 
@@ -359,7 +432,9 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
         }
     }
 
-    s->mw = moving_window_init(sampling_frequency / 2);
+    for (size_t i = 0; i < ARRAY_SIZE(s->calibration_mw); i++) {
+        s->calibration_mw[i] = moving_window_init(sampling_frequency / 2);
+    }
 
     for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
         s->fft[i].count = 0;
@@ -380,9 +455,9 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
         return -1;
     }
 
-    if (s->mw) {
-        moving_window_release(s->mw);
-        s->mw = NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(s->calibration_mw); i++) {
+        moving_window_release(s->calibration_mw[i]);
+        s->calibration_mw[i] = NULL;
     }
 
     if (s->calibration_data) {
@@ -405,7 +480,7 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
     return 0;
 }
 
-static void _ekf_run_model(struct accelerometer_stream* self, double accel, double dt) {
+static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], double dt) {
     ekf_t* ekf = NULL;
     double linear_accel = 0;
 
@@ -415,26 +490,43 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
 
     ekf = &self->ekf;
 
-    linear_accel = accel - self->G;
-
+    if (self->calibration == 0) {
+        linear_accel = 0;
+    } else {
+        // linear_accel = calculate_veritical_acceleration(accel[0], accel[1], accel[2], self->zero_bias_pitch, self->zero_bias_roll) - self->G;
+        linear_accel = calculate_veritical_acceleration(accel[0] - self->zero_bias_accels[0],
+                                                        accel[1] - self->zero_bias_accels[1],
+                                                        accel[2] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
+        // HR_LOGD("%s(%d): linear %f vs %f = %f\n", __FUNCTION__, __LINE__, linear_accel, linear, linear_accel - linear);
+    }
+    // clang-format off
     // F_k
     double F[EKF_N * EKF_N] = {
-        1, dt, 0.5 * dt * dt, 0,
-        0, 1, dt, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1};
+        1, dt, 0.5 * dt * dt, 0, 0, 0,
+        0, 1, dt, 0, 0, 0,
+        0, 0, 1, 0, 0, 0,
+        0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 1, 0,
+        0, 0, 0, 0, 0, 1,
+    };
 
     // H_k
     const double H[EKF_M * EKF_N] = {
-        0, 0, 1, 0,
-        0, 0, 0, 1};
+        0, 0, 1, 0, 0, 0,
+        0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 1, 0,
+        0, 0, 0, 0, 0, 1,
+    };
 
     // predict
     double fx[EKF_N] = {
         ekf->x[0] + ekf->x[1] * dt + 0.5 * ekf->x[2] * dt * dt,
         ekf->x[1] + ekf->x[2] * dt,
         ekf->x[2],
-        ekf->x[3]};
+        ekf->x[3],
+        ekf->x[4],
+        ekf->x[5]};
+    // clang-format on
 
     // only date accel
     if (self->calibration != 1) {
@@ -445,11 +537,11 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
         F[EKF_N + 2] = 0;
 
         fx[0] = 0;
-        ekf->P[0] = 1e-6;
+        ekf->P[0] = 1e-10;
         fx[1] = 0;
-        ekf->P[EKF_N + 1] = 1e-6;
+        ekf->P[EKF_N + 1] = 1e-10;
         fx[2] = 0;
-        ekf->P[2 * EKF_N + 2] = 1e-6;
+        ekf->P[2 * EKF_N + 2] = 1e-10;
 
         linear_accel = 0;
     }
@@ -457,17 +549,26 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
     HR_LOGD("a:%f, x:%f-%f-%f-%f\n", accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
     if (self->calibration == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
-        HR_LOGD("ZUPT ...............\n");
+        HR_LOGD("ZUPT .............ekf->x[0]:%f, x[1]:%f, a:%f..\n", ekf->x[0], ekf->x[1], linear_accel);
+
+        linear_accel = 0;
+
         fx[1] = 0;
-        ekf->x[1] = 0;             // 速度置 0
-        ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
+        ekf->x[1] = 0;              // 速度置 0
+        ekf->P[EKF_N + 1] = 1e-10;  // 速度误差极小，避免恢复
+        fx[2] = 0;
+        ekf->x[2] = 0;  // reset delta accel
+        ekf->P[2 * EKF_N + 2] = 1e-10;
+
         // Q[ EKF_N + 1] = 1e-6;  // 降低速度噪声
         // F[1] = 0;
         // F[EKF_N + 1] = 0;
+        //}
     }
 
     // HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
-    // HR_LOGD("x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
+    HR_LOGD("x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
+    HR_LOGD("input: %f, %f, %f\n", accel[0], accel[1], accel[2]);
     ekf_predict(ekf, fx, F, Q);
 
     // 0.35 ?
@@ -475,15 +576,20 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
         linear_accel = 0;
     }
 
-    const double z[EKF_M] = {linear_accel, accel};
+    const double z[EKF_M] = {linear_accel, accel[0], accel[1], accel[2]};
 
-    const double hx[EKF_M] = {ekf->x[2], ekf->x[3]};
-
-    // HR_LOGD("z: [%f, %f]\n", z[0], z[1]);
-    // HR_LOGD("hx: [%f, %f]\n", hx[0], hx[1]);
+    HR_LOGD("delat a:%f vs %f, vs linear:%f\n", ekf->x[2], calculate_veritical_acceleration(ekf->x[3] - self->zero_bias_accels[0], ekf->x[4] - self->zero_bias_accels[1], ekf->x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll), linear_accel);
+    const double hx[EKF_M] = {ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]};
+    // if (self->calibration) {
+    //     hx[0] = calculate_veritical_acceleration(ekf->x[3] - self->zero_bias_accels[0], ekf->x[4] - self->zero_bias_accels[1], ekf->x[5] - self->zero_bias_accels[2],
+    //                                              self->zero_bias_pitch, self->zero_bias_roll);
+    // }
+    //  HR_LOGD("z: [%f, %f]\n", z[0], z[1]);
+    //  HR_LOGD("hx: [%f, %f]\n", hx[0], hx[1]);
     ekf_update(ekf, z, hx, H, R);
     // HR_LOGD("after x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
+    HR_LOGD("after x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
     //_distance += dt * _velocity + 0.5 * linear_accel * dt *dt;
     //_velocity += dt * linear_accel;
     // HR_LOGD("manual distance & velocity: [%f, %f]\n", _distance, _velocity);
@@ -540,7 +646,7 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
 
             double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
             double accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
-            HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
+            // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
             f->jitter_frequency = frequency;
             f->jitter_accel = accel_value;
             /*if (frequency == 0) {

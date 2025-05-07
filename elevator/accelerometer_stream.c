@@ -65,7 +65,7 @@ struct accelerometer_stream {
     int calibration_retries_max;
     double* calibration_data;
     ekf_t ekf;
-    struct moving_window* mw;
+    struct moving_window* calibration_mw;
 
     int64_t now;
 
@@ -111,7 +111,7 @@ static void apply_hanning_window(struct fft_stream* f) {
         f->in[i] *= multiplier;
     }
 }
-static double calculate_veritical_acceleration(double x, double y, double z) {
+static double calculate_stationary_veritical_acceleration(double x, double y, double z) {
     return sqrt(x * x + y * y + z * z) * (z < 0 ? -1 : 1);
 }
 
@@ -120,11 +120,11 @@ static void calibration(struct accelerometer_stream* self, double accel) {
         return;
     }
 
-    int ret = moving_window_update(self->mw, accel);
-    HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->mw->stddev, self->mw->mean, self->calibration_retries_max);
-    if (ret == 0 && !isnan(self->mw->stddev)) {
-        if (self->mw->stddev < ACCEL_JITTER_STD_THRESHOLD) {
-            self->calibration_data[self->calibration_retries] = self->mw->mean;
+    int ret = moving_window_update(self->calibration_mw, accel);
+    HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw->stddev, self->calibration_mw->mean, self->calibration_retries_max);
+    if (ret == 0 && !isnan(self->calibration_mw->stddev)) {
+        if (self->calibration_mw->stddev < ACCEL_JITTER_STD_THRESHOLD) {
+            self->calibration_data[self->calibration_retries] = self->calibration_mw->mean;
             self->calibration_retries++;
             if (self->calibration_retries == self->calibration_retries_max) {
                 int i = 0;
@@ -171,7 +171,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
         s->inverted = 1;
     }
 
-    s->G = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
+    s->G = calculate_stationary_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
     if (s->inverted) {
         s->G *= -1.0;
     }
@@ -233,7 +233,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     // it indicates that the camera is inverted, when z < 0
     // accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
-    accel_union = calculate_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
+    accel_union = calculate_stationary_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
     if (s->inverted) {
         accel_union *= -1.0;
     }
@@ -357,7 +357,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
         }
     }
 
-    s->mw = moving_window_init(sampling_frequency / 2);
+    s->calibration_mw = moving_window_init(sampling_frequency / 2);
 
     for (size_t i = 0; i < ARRAY_SIZE(s->fft); i++) {
         s->fft[i].count = 0;
@@ -378,9 +378,9 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
         return -1;
     }
 
-    if (s->mw) {
-        moving_window_release(s->mw);
-        s->mw = NULL;
+    if (s->calibration_mw) {
+        moving_window_release(s->calibration_mw);
+        s->calibration_mw = NULL;
     }
 
     if (s->calibration_data) {
