@@ -13,11 +13,11 @@
 #include "tui.h"
 #include "ubus/uelevatord.h"
 
+static uv_async_t _dummy_keep_loop;
+
 static void dummy_cb(uv_async_t* handle) {
     (void)handle;
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
 }
-static uv_async_t _dummy_keep_loop;
 
 /* Fully close a loop */
 static void close_walk_cb(uv_handle_t* handle, void* arg) {
@@ -48,6 +48,8 @@ static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
 
     if (SIGUSR1 == signum) {
         uv_stop(uv_default_loop());
+        uv_async_send(&_dummy_keep_loop);
+        uv_close((uv_handle_t*)&_dummy_keep_loop, NULL);
     }
 }
 
@@ -115,7 +117,7 @@ int main(int argc, char** argv) {
 
     uelevatord_init();
     
-   uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
+    uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     // iot block until connected
     //iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
