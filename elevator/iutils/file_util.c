@@ -34,7 +34,7 @@ ssize_t futil_read(const char *path, char **buf) {
         return -1;
     }
 
-    data = (char *)malloc(sb.st_size);
+    data = (char *)calloc(1, sb.st_size + 1); // reserve end \0, care!
     if (!data) {
         close(fd);
         return -1;
@@ -47,7 +47,7 @@ ssize_t futil_read(const char *path, char **buf) {
     while (remaining > 0) {
         ssize_t n = TEMP_FAILURE_RETRY(read(fd, ptr, remaining));
         if (n <= 0) {
-            free(ptr);
+            free(data);
             return -1;
         }
         ptr += n;

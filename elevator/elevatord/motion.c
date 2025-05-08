@@ -433,7 +433,7 @@ int motion_initalize(int argc, char** argv) {
     // which floor are we current stopping at?
     // should update height ?
     // or we should force wait base floor trigger
-    _accelerometer_motion.stream->enter_calibration(_accelerometer_motion.stream);
+    // _accelerometer_motion.stream->enter_calibration(_accelerometer_motion.stream);
 
     _barometer_motion.stream = barometer_stream_init(BAROMETER_SAMPLE_RATE_HZ);
     if (!_barometer_motion.stream) {

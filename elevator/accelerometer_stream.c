@@ -60,7 +60,7 @@ struct accelerometer_stream {
     double G;
     int inverted;
 
-    int calibration;
+    int is_calibration_completed;
     int calibration_retries;
     int calibration_retries_max;
     double* calibration_data;
@@ -115,8 +115,8 @@ static double calculate_stationary_veritical_acceleration(double x, double y, do
     return sqrt(x * x + y * y + z * z) * (z < 0 ? -1 : 1);
 }
 
-static void calibration(struct accelerometer_stream* self, double accel) {
-    if (self->calibration != 0) {
+static void do_calibration_when_needed(struct accelerometer_stream* self, double accel) {
+    if (self->is_calibration_completed != 0) {
         return;
     }
 
@@ -137,7 +137,7 @@ static void calibration(struct accelerometer_stream* self, double accel) {
                 HR_LOGD("%s(%d):avg: -> %f\n", __FUNCTION__, __LINE__, sum / self->calibration_retries_max);
                 self->G = round(sum * 10000 / self->calibration_retries_max) / 10000;
                 HR_LOGD("%s(%d): it's still: %lf\n", __FUNCTION__, __LINE__, self->G);
-                self->calibration = 1;
+                self->is_calibration_completed = 1;
                 return;
             }
         } else {
@@ -179,7 +179,7 @@ static int accelerometer_stream_open(struct motion_stream* self) {
     // update ekf status
     s->ekf.x[3] = s->G;
 
-    s->calibration = 0;
+    s->is_calibration_completed = 0;
     s->calibration_retries_max = s->sampling_frequency * 2;
     s->calibration_data = (double*)calloc(sizeof(double), s->calibration_retries_max);
 
@@ -259,7 +259,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     }
 #endif
 
-    calibration(s, s->ekf.x[3]);
+    do_calibration_when_needed(s, s->ekf.x[3]);
 
     // capture data after calibration, otherwise G is not correct
     p->accel = s->ekf.x[2];
@@ -280,7 +280,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
             __FUNCTION__, __LINE__,
             accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
 
-    if (s->calibration != 1) {
+    if (s->is_calibration_completed != 1) {
         return -2;  // we are calibration
     }
 
@@ -293,7 +293,7 @@ static int accelerometer_stream_calibration_enter(struct motion_stream* self) {
         return -1;
     }
 
-    s->calibration = 0;
+    s->is_calibration_completed = 0;
     s->calibration_retries = 0;
     return 0;
 }
@@ -303,7 +303,7 @@ static int accelerometer_stream_calibration_completed(struct motion_stream* self
         return -1;
     }
 
-    return s->calibration;
+    return s->is_calibration_completed;
 }
 
 static int accelerometer_stream_reset(struct motion_stream* self) {
@@ -435,7 +435,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
         ekf->x[3]};
 
     // only date accel
-    if (self->calibration != 1) {
+    if (self->is_calibration_completed != 1) {
         F[0] = 0;
         F[1] = 0;
         F[2] = 0;
@@ -454,7 +454,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel, doub
 
     HR_LOGD("a:%f, x:%f-%f-%f-%f\n", accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
-    if (self->calibration == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
+    if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
         HR_LOGD("ZUPT ...............\n");
         fx[1] = 0;
         ekf->x[1] = 0;             // 速度置 0

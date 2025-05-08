@@ -308,12 +308,16 @@ void* uobject_elevator_thread_routin(void* args) {
 
     uloop_init();
 
-    _ubus_ctx = ubus_connect(UBUS_SOCK);
-    if (!_ubus_ctx) {
+    while (1) {
+        _ubus_ctx = ubus_connect(UBUS_SOCK);
+        if (_ubus_ctx) {
+            break;
+        }
         HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
-        return NULL;
+        usleep(1000 * 1000);
+        // no need call testcancel because usleep is cancel point
+        pthread_testcancel();
     }
-
     _ubus_ctx->connection_lost = _connection_lost;
 
     ubus_add_uloop(_ubus_ctx);
@@ -360,6 +364,10 @@ int uelevatord_init(void) {
 
     blob_buf_init(&_historical_b, 0);
     blob_buf_grow(&_historical_b, 4096);
+
+    blob_buf_init(&_motion_b, 0);
+    blob_buf_init(&_realtime_b, 0);
+
     hrbuffer_alloc(&_accel_buffer, 1024 * sizeof(double));         // 1s -> 5 elements
     hrbuffer_alloc(&_velocity_buffer, 1024 * sizeof(double));      // 1s -> 5 elements
     hrbuffer_alloc(&_jitter_freq_buffer, 1024 * sizeof(double));   // 1s -> 5 elements
@@ -378,6 +386,7 @@ int uelevatord_deinit(void) {
         _uobject_tid = 0;
 
         blob_buf_free(&_historical_b);
+        blob_buf_free(&_motion_b);
         blob_buf_free(&_realtime_b);
 
         hrbuffer_free(&_accel_buffer);
