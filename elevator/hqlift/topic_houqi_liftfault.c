@@ -31,7 +31,7 @@ static int _on_publish(void **payload, int *len) {
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
     cJSON_AddNumberToObject(root, "runningDirection", st.direction);
-    cJSON_AddNumberToObject(root, "doorStatus", elevator_door());
+    cJSON_AddNumberToObject(root, "doorStatus", st.door_state);
     cJSON_AddNumberToObject(root, "personInLift", elevator_passenger_count());
     cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
 

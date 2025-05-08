@@ -4,5 +4,5 @@
 
 // pub
 int iot_topic_init(struct uviot*iot, const char* public_key, const char* device_name);
-
+int iot_generate_mid();
 #endif

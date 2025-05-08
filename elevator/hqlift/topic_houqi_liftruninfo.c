@@ -105,7 +105,7 @@ static int _on_publish(void** payload, int* len) {
 
 static struct uviot_topic _topic_liftruninfo = {
     .name = EVENT_RUNINFO_TOPIC_NAME,
-    .topic = "/ API/V1/Up/" EVENT_RUNINFO_TOPIC_NAME,
+    .topic = "/API/V1/Up/" EVENT_RUNINFO_TOPIC_NAME,
     .period = 0,
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,

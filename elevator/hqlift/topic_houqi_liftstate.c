@@ -39,7 +39,6 @@ static int _on_publish(void** payload, int* len) {
 
     uelevator_get_status(&st);
 
-    printf("liftstate: door:%d\n", st.door_state);
     // only update direction when running
     // it's no stationary on houqi platform
     //if (st.direction != ELEVATOR_DIR_STATIONARY) {
@@ -49,6 +48,7 @@ static int _on_publish(void** payload, int* len) {
     if (st.speed == 0) {
         _running_direction = 3;
     }
+
     cJSON* root = cJSON_CreateObject();
     if (!root)
         return -1;
@@ -69,12 +69,11 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
     cJSON_AddNumberToObject(root, "runningDirection", _running_direction);
     cJSON_AddNumberToObject(root, "doorStatus", st.door_state);
-    printf("liftstate: door2:%d\n", st.door_state);
     cJSON_AddNumberToObject(root, "personInLift", elevator_passenger_count());
 
     cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
 
-    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_variant_amplitude());
+    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_brightness());
     cJSON_AddNumberToObject(root, "acceleration", round(st.accel * 100) / 100);
     cJSON_AddNumberToObject(root, "jitterFrequency", round(st.jitter_freq * 10) / 10);
     cJSON_AddNumberToObject(root, "jitterAcceleration", round(st.jitter_accel * 100) / 100);
@@ -106,7 +105,6 @@ static struct uviot_topic _topic_liftstate = {
 int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
-    _running_direction = elevator_direction();
     _iot = iot;
     uviot_topic_register(iot, &_topic_liftstate);
 

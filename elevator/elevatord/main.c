@@ -39,7 +39,6 @@ static void close_loop(uv_loop_t* loop) {
         uv_library_shutdown();            \
     } while (0)
 
-
 static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     (void)siginfo;
     (void)sigcontext;

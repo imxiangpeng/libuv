@@ -158,7 +158,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
     
         if (_status.speed > ELEVATOR_SPEED_THRESHOLD) {
-            printf("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
+            HR_LOGD("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
             // topic_houqi_liftfault_post
         }
 
@@ -334,7 +334,9 @@ static void ubus_object_event_handler(struct ubus_context* ctx,
         }
     } else if (strncmp(type, ELEVATOR_EVENT_PREFIX, strlen(ELEVATOR_EVENT_PREFIX)) == 0) {
         const char* event = type + strlen(ELEVATOR_EVENT_PREFIX);
-        printf("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
+        HR_LOGD("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
+        // door
+        // person
     }
 }
 static void _reconnect_timer(struct uloop_timeout* timeout) {
