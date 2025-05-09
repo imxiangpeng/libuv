@@ -114,12 +114,13 @@ int conf_save_int64(const char* path, const char** fields, int64_t* result, size
         int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", fields[i], result[i]);
         ssize_t r = futil_write_fd(fd, buffer, len);
         if (r != len) {
+            close(fd);
             unlink(tmp);
             free(tmp);
-            close(fd);
             return -1;
         }
     }
+    fdatasync(fd);
     close(fd);
 
     unlink(path);

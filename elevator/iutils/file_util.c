@@ -91,6 +91,7 @@ ssize_t futil_write(const char* path, void *data, size_t count) {
     }
 
     result = futil_write_fd(fd, data, count);
+    fdatasync(fd);
     close(fd);
 
     return result;
