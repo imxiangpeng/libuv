@@ -14,7 +14,6 @@
 #include "libubus.h"
 #include "motion.h"
 #include "time_utils.h"
-#include "ubusmsg.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 #define OBJECT_NAME "elevatord"
@@ -295,7 +294,7 @@ static void _connection_lost(struct ubus_context* ctx) {
     _reconnect_timer(NULL);
 }
 
-void* uobject_elevator_thread_routin(void* args) {
+static void* uelevatord_thread_routin(void* args) {
     (void)args;
     int rc = -1;
     // adjust output line buffered mode
@@ -318,6 +317,7 @@ void* uobject_elevator_thread_routin(void* args) {
         // no need call testcancel because usleep is cancel point
         pthread_testcancel();
     }
+
     _ubus_ctx->connection_lost = _connection_lost;
 
     ubus_add_uloop(_ubus_ctx);
@@ -355,7 +355,7 @@ int uelevatord_init(void) {
 
     pthread_attr_init(&attr);
 
-    ret = pthread_create(&_uobject_tid, &attr, uobject_elevator_thread_routin, NULL);
+    ret = pthread_create(&_uobject_tid, &attr, uelevatord_thread_routin, NULL);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
         return -1;

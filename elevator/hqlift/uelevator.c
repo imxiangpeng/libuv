@@ -391,7 +391,7 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 static void post_message(int which) {
     write(_pipefd[1], &which, sizeof(which));
 }
-void* uobject_elevator_thread_routin(void* args) {
+static void* uelevator_thread_routin(void* args) {
     (void)args;
     // int rc = -1;
 
@@ -405,10 +405,15 @@ void* uobject_elevator_thread_routin(void* args) {
 
     uloop_init();
 
-    _ubus_ctx = ubus_connect(UBUS_SOCK);
-    if (!_ubus_ctx) {
+    while (1) {
+        _ubus_ctx = ubus_connect(UBUS_SOCK);
+        if (_ubus_ctx) {
+            break;
+        }
         HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
-        return NULL;
+        usleep(1000 * 1000);
+        // no need call testcancel because usleep is cancel point
+        pthread_testcancel();
     }
 
     _ubus_ctx->connection_lost = _connection_lost;
@@ -475,7 +480,7 @@ int uelevator_init(void) {
 
     pthread_attr_init(&attr);
 
-    ret = pthread_create(&_uobject_tid, &attr, uobject_elevator_thread_routin, NULL);
+    ret = pthread_create(&_uobject_tid, &attr, uelevator_thread_routin, NULL);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_create\n", __FUNCTION__, __LINE__);
         return -1;
