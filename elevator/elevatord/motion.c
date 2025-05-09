@@ -17,9 +17,15 @@
 #include "sensor.h"
 #include "time_utils.h"
 
+// 20200509, mxp, 添加启动初始化阶段使用气压传感器对 imu 进行重置
+// 启动阶段气压传感器用于识别是否是静止状态，然后通知 imu 模块执行校准或者归零
+// 因为 imu 模块自己保存了校准数据，所以在开机的时候可能不会再次进行校准，会直接使用当前采集的数据进行速度等计算，
+// 如果这个时候是运动状态（设备重启或者进程重启不知道当前是什么状态）那么我们的速度以及行程数据很可能就是不准确的。
+// 所以，需要利用气压来识别等待静止状态，然后让 imu 重置，在此之前 montion 不应该将数据向外部传递。
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
-#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
+#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 0
 
 // 海平面标准气压 (Pa)
 #define P0 101325.0
@@ -67,13 +73,20 @@ static double barometer_pressure = 0;
 
 static double barometer_height_discontinuous = 0;
 
+enum imu_calibration_state {
+    IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // wait signal from barometer
+    IMU_CALIB_ST_CALIBRATING,
+    IMU_CALIB_ST_CALIBRATED,
+};
 struct accelerometer_stream {
     struct motion_stream* stream;
     double height;    // --> physical height
     double distance;  // current running distance, maybe reset to zero when running finished
     double velocity;  // velocity, +-
-
-    int is_calibration;
+    // -1: wait signal from barometer
+    // 0: have received from barometer and reset imu
+    // 1: imu calibrated success or reset success
+    enum imu_calibration_state calib_state;
 
     enum motion_state state;
 
@@ -90,6 +103,9 @@ struct barometer_stream {
 
     struct moving_window* mw;
     int64_t delay_stop_ts_ns;
+
+    int stationary_pending;
+    int64_t stationary_detect_threshold_ns;
 } _barometer_motion;
 
 static int notify_observer(enum motion_observer_action action, void* data);
@@ -124,12 +140,12 @@ static void* _accelerometer_thread_routin(void* args) {
 #if DUMP_DATA_TO_FILE
     char buf[MAX_LINE_LENGTH] = {0};
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height\n");
+        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_mean,pressure_stddev\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
 
-    _accelerometer_motion.is_calibration = -1;
+    _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL;
     struct motion_stream* input = _accelerometer_motion.stream;
     struct accelerometer_stream_data result;
     for (;;) {
@@ -137,18 +153,23 @@ static void* _accelerometer_thread_routin(void* args) {
         int64_t now = get_monotonic_nanoseconds();
 
         int ret = input->read(input, (void*)&result, sizeof(result));
+        // support simulate, because simulate read data only in imu thread
+        if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
+            // HR_LOGD("we should wait barometer stationary signal ...\n");
+            goto next_iteration;
+        }
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2 || 1 != input->calibration_completed(input)) {
                 HR_LOGD("accelerometer is under calibration\n");
-                if (_accelerometer_motion.is_calibration != 1) {
-                    _accelerometer_motion.is_calibration = 1;
+                if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATING) {
+                    _accelerometer_motion.calib_state = IMU_CALIB_ST_CALIBRATING;
 
                     struct motion_sensor_calibration_event ev;
 
                     memset((void*)&ev, 0, sizeof(ev));
                     ev.type = SENSOR_ACCELEROMETER;
-                    ev.is_calibration = 1;
+                    ev.is_calibrating = 1;
                     notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
                 }
             }
@@ -156,19 +177,19 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 
         // read success it mean calibration is finished
-        if (_accelerometer_motion.is_calibration != 0) {
+        if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATED) {
             struct motion_sensor_calibration_event ev;
 
-            _accelerometer_motion.is_calibration = 0;
+            _accelerometer_motion.calib_state = IMU_CALIB_ST_CALIBRATED;
 
             memset((void*)&ev, 0, sizeof(ev));
             ev.type = SENSOR_ACCELEROMETER;
-            ev.is_calibration = 0;
+            ev.is_calibrating = 0;
             ev.value[0] = result.G;  // id 4 --> local G
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 
-        double accel = round(result.accel * 100)/100;
+        double accel = round(result.accel * 100) / 100;
         double velocity = round(result.velocity * 100) / 100;
         double distance = round(result.distance * 1000) / 1000;
 
@@ -247,7 +268,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -289,6 +310,11 @@ static void* _accelerometer_thread_routin(void* args) {
 
 static void* _barometer_thread_routin(void* args) {
     (void)args;
+
+    // low pass filter
+    // double alpha = 0.7;
+    // double previous_pressure = 0;
+
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
 
     struct motion_stream* input = _barometer_motion.stream;
@@ -315,9 +341,54 @@ static void* _barometer_thread_routin(void* args) {
         }
 
         double pressure = result[0];
+        // pressure = alpha * pressure + (1.0f - alpha) * previous_pressure;
+        // previous_pressure = pressure;
         double temp = result[1];
 
         moving_window_update(_barometer_motion.mw, pressure);
+
+        if (isnan(_barometer_motion.mw->stddev)) {
+            goto next_iteration;
+        }
+
+        if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
+            if (fabs(_barometer_motion.mw->stddev) < 0.5) {
+                if (_barometer_motion.stationary_pending == 0) {
+                    HR_LOGD("trigger barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+                    _barometer_motion.stationary_pending = 1;
+                    _barometer_motion.stationary_detect_threshold_ns = get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
+                } else if (_barometer_motion.stationary_pending == 1) {
+                    if (now > _barometer_motion.stationary_detect_threshold_ns) {
+                        _barometer_motion.stationary_pending = 2;
+                        //_barometer_motion.stationary_detect_threshold_ns = 0;
+                        // trigger accelerometer to reset or calibration
+                        // _accelerometer_motion.calib_state = 1;
+                        HR_LOGD("still, go go go barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+                        _barometer_motion.stationary_detect_threshold_ns = get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
+                    }
+                } else if (_barometer_motion.stationary_pending == 2) {
+                    if (now > _barometer_motion.stationary_detect_threshold_ns) {
+                        _barometer_motion.stationary_pending = 0;
+                        _barometer_motion.stationary_detect_threshold_ns = 0;
+                        HR_LOGD("still, confirmed go go go barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+                    }
+                }
+            } else {
+                HR_LOGD("failed barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+                if (_barometer_motion.stationary_pending == 1) {
+                    _barometer_motion.stationary_pending = 0;
+                    _barometer_motion.stationary_detect_threshold_ns = 0;
+                } else if (_barometer_motion.stationary_pending == 2) {
+                    HR_LOGD("failed not confirmed again! barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+                    // force notify accel to wait
+                    _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL;
+                    _barometer_motion.stationary_pending = 0;
+                    _barometer_motion.stationary_detect_threshold_ns = 0;
+                }
+            }
+        }
+
+        HR_LOGD("barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
 
         if (barometer_pressure == 0) {
             barometer_pressure = pressure;

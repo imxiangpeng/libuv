@@ -37,7 +37,6 @@ set(SOURCES main.c
     sensors/sensor_bmp388.c
     tui.c 
     iot/iot.c
-    #iot/iot_mosquitto.c
     iot/iot_topic.c
     iot/iot_topic_property.c
     iot/iot_topic_calibration.c

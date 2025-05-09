@@ -149,12 +149,11 @@ static const double G = 9.81;
 // static double _bw_velocity = 0;
 // static double _bw_distance = 0;
 
-static void _ekf_run_model(struct accelerometer_stream* self, double input[3], double dt);
+static void _ekf_run_model(struct accelerometer_stream* self, double input[IMU_AXES], double dt);
 static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
 static double hanning_window(int i, int N) {
-    if (N <= 1)
-        return 1.0;
+    if (N <= 1) return 1.0;
     return 0.5 * (1.0 - cos(2.0 * M_PI * i / (N - 1)));
 }
 static void apply_hanning_window(struct fft_stream* f) {
@@ -176,7 +175,7 @@ static double calculate_veritical_acceleration(double x, double y, double z, dou
     return x * sin(pitch) - y * sin(roll) * cos(pitch) + z * cos(roll) * cos(pitch);
 }
 
-static void do_calibration_when_needed(struct accelerometer_stream* self, double accel[3]) {
+static void do_calibration_when_needed(struct accelerometer_stream* self, double accel[IMU_AXES]) {
     int ready = 1;
     if (self->is_calibration_completed != 0) {
         return;
@@ -260,6 +259,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         cdata.field.roll_1000 = self->zero_bias_roll * 1000;
 
         printf("calibrated:%ld\n", cdata.field.is_calibrated);
+        printf("G:%ld\n", cdata.field.g_1000);
         printf("bias accel x:%ld\n", cdata.field.bias_accel_x_1000);
         printf("bias accel y:%ld\n", cdata.field.bias_accel_y_1000);
         printf("bias accel z:%ld\n", cdata.field.bias_accel_z_1000);
@@ -420,9 +420,9 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     if (s->is_calibration_completed) {
         double fft_accels[IMU_AXES] = {
-            accel_filtered[0] - s->zero_bias_accels[0] - s->ekf.x[3],
-            accel_filtered[1] - s->zero_bias_accels[1] - s->ekf.x[4],
-            accel_filtered[2] - s->zero_bias_accels[2] - s->ekf.x[5],
+            accel_filtered[0] - s->zero_bias_accels[0] /*- s->ekf.x[3]*/,
+            accel_filtered[1] - s->zero_bias_accels[1] /*- s->ekf.x[4]*/,
+            accel_filtered[2] - s->zero_bias_accels[2] /*- s->ekf.x[5]*/,
         };
         _fft_process(s, fft_accels, IMU_AXES);
     }
@@ -498,10 +498,9 @@ static int accelerometer_stream_reset(struct motion_stream* self) {
 
     // clear distance & speed
     ms->ekf.x[0] = 0;
-    ekf->P[0] = 1e-10;
+    ekf->P[0] = 1e-6;
     ms->ekf.x[1] = 0;
-    ekf->P[EKF_N + 1] = 1e-10;
-
+    ekf->P[EKF_N + 1] = 1e-6;
     ms->ekf.x[2] = 0;
     ekf->P[EKF_N * 2 + 1] = 1e-10;
 
@@ -637,7 +636,7 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
     return 0;
 }
 
-static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], double dt) {
+static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_AXES], double dt) {
     ekf_t* ekf = NULL;
     double linear_accel = 0;
 
@@ -661,6 +660,10 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], d
                                                         self->ekf.x[4] - self->zero_bias_accels[1],
                                                         self->ekf.x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
 #endif
+        // mxp, 20250509, no need process manully when we use pitch to calc accel
+        // if (self->inverted) {
+        //     linear_accel *= -1.0;
+        // }
         // HR_LOGD("%s(%d): linear %f vs %f = %f\n", __FUNCTION__, __LINE__, linear_accel, linear, linear_accel - linear);
     }
     // clang-format off
@@ -701,16 +704,16 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], d
         F[EKF_N + 2] = 0;
 
         fx[0] = 0;
-        ekf->P[0] = 1e-10;
+        ekf->P[0] = 1e-6;
         fx[1] = 0;
-        ekf->P[EKF_N + 1] = 1e-10;
+        ekf->P[EKF_N + 1] = 1e-6;
         fx[2] = 0;
-        ekf->P[2 * EKF_N + 2] = 1e-10;
+        ekf->P[2 * EKF_N + 2] = 1e-6;
 
         linear_accel = 0;
     }
 
-    HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
+    HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", linear_accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
 
     if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
         HR_LOGD("ZUPT .............ekf->x[0]:%f, x[1]:%f, a:%f..\n", ekf->x[0], ekf->x[1], linear_accel);
@@ -719,7 +722,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[3], d
 
         fx[1] = 0;
         ekf->x[1] = 0;              // 速度置 0
-        ekf->P[EKF_N + 1] = 1e-10;  // 速度误差极小，避免恢复
+        ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
         fx[2] = 0;
         ekf->x[2] = 0;  // reset delta accel
         ekf->P[2 * EKF_N + 2] = 1e-10;

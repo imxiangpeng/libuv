@@ -229,12 +229,12 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data) {
     if (!data)
         return;
-    HR_LOGD("%s(%d): sensor:%d, is calibration:%d\n", __FUNCTION__, __LINE__, data->type, data->is_calibration);
+    HR_LOGD("%s(%d): sensor:%d, is calibration:%d\n", __FUNCTION__, __LINE__, data->type, data->is_calibrating);
 
     if (data->type == SENSOR_ACCELEROMETER) {
-        _property_imu_calibration = data->is_calibration;
+        _property_imu_calibration = data->is_calibrating;
         _property_G = round(data->value[0] * 10000) / 10000;
-        HR_LOGD("%s(%d): sensor:%d, is calibration:%d, G:%f vs %f\n", __FUNCTION__, __LINE__, data->type, data->is_calibration, _property_G, data->value[0]);
+        HR_LOGD("%s(%d): sensor:%d, is calibration:%d, G:%f vs %f\n", __FUNCTION__, __LINE__, data->type, data->is_calibrating, _property_G, data->value[0]);
         uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
     }
 }

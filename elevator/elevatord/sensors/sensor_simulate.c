@@ -126,7 +126,8 @@ static int accelerometer_read(struct sensor_data* data) {
     sda->dt = _current_record.dt;
 
     line_num++;
-    // HR_LOGD("line:%ld, now:%f, accel: %f-%f-%f-%f\n", line_num, now, accel_x, accel_y, accel_z, accel_r);
+    HR_LOGD("line:%ld, now:%f(%f), accel: %f-%f-%f, pressure:%f, temp:%f\n", line_num, _current_record.now, _current_record.dt, _current_record.accel_x,
+         _current_record.accel_y, _current_record.accel_z, _current_record.pressure, _current_record.temperature);
 
     return 0;
 }

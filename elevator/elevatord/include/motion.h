@@ -49,7 +49,7 @@ struct motion_event {
 
 struct motion_sensor_calibration_event {
     enum sensor_type type;
-    int is_calibration;
+    int is_calibrating;
     double value[CALIBRATION_EVENT_VALUES_MAX];
 };
 

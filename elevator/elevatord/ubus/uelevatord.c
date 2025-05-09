@@ -403,7 +403,7 @@ static void _observer_on_status(struct motion_status* st) {
         return;
     // HR_LOGD("speed : %f\n", _speed_realtime);
 
-    HR_LOGD("_report times:%d\n", _realtime_report_times);
+    // HR_LOGD("_report times:%d\n", _realtime_report_times);
     if (_realtime_report_times % _realtime_report_fac == 0) {
         if (!_realtime_b_is_busy) {
             _realtime_b_is_busy = 1;

@@ -651,8 +651,9 @@ int uviot_prepare(struct uviot* self) {
         //_plat.alive_time, NULL);
 
         rc = mosquitto_connect(iot->mosq, self->server, self->port, self->alive_time);
-        if (rc != MOSQ_ERR_SUCCESS)
+        if (rc != MOSQ_ERR_SUCCESS) {
             usleep(1000 * 1000);
+        }
     } while (rc != MOSQ_ERR_SUCCESS);
 
     iot->sock = mosquitto_socket(iot->mosq);
