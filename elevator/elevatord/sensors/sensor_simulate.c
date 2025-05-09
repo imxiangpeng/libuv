@@ -61,6 +61,7 @@ read_again:
         if (feof(_simulate_data_fp)) {
             rewind(_simulate_data_fp);
             fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);  // skip csv file head
+            line_num = 1;
             goto read_again;
         }
         return -1;
@@ -125,7 +126,6 @@ static int accelerometer_read(struct sensor_data* data) {
     sda->x[2] = _current_record.accel_z /** -1.0*/;
     sda->dt = _current_record.dt;
 
-    line_num++;
     HR_LOGD("line:%ld, now:%f(%f), accel: %f-%f-%f, pressure:%f, temp:%f\n", line_num, _current_record.now, _current_record.dt, _current_record.accel_x,
          _current_record.accel_y, _current_record.accel_z, _current_record.pressure, _current_record.temperature);
 

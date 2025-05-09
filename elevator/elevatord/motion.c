@@ -27,6 +27,12 @@
 // please define it when release version
 #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 0
 
+// 我们会保存过去 5s 的平均值 （不太准确，我们 moving window 也占用了 1秒，所以我们数据延迟 1 秒）
+// 然后计算过去 5s 的方差，如果小于门限，就认为静止
+#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
+#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
+
+
 // 海平面标准气压 (Pa)
 #define P0 101325.0
 
@@ -47,7 +53,7 @@ static int BAROMETER_SAMPLE_RATE_HZ = 10;
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
 static double BAROMETER_WINDOW_DELAY_SECONDS = 2;
-//static double BAROMETER_STATIONARY_DETECT_THRESHOLD_MS = 2000;
+// static double BAROMETER_STATIONARY_DETECT_THRESHOLD_MS = 2000;
 
 // 低于该速度的时候不更新状态，保持原有状态
 static double VELOCITY_ZUPT_THRESHOLD = 0.1;
@@ -75,9 +81,13 @@ static double barometer_pressure = 0;
 static double barometer_height_discontinuous = 0;
 
 enum imu_calibration_state {
-    IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // wait signal from barometer
+    IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // init value, wait signal from barometer
+    IMU_CALIB_ST_DO_CALIBRATING,
+    IMU_CALIB_ST_WAIT_CALIBRATION_COMPLETED,
+    IMU_CALIB_ST_WAIT_STATIONARY_CONFIRM,
     IMU_CALIB_ST_CALIBRATING,
     IMU_CALIB_ST_CALIBRATED,
+    IMU_CALIB_ST_CALIBRATED_CONFIRM,
 };
 struct accelerometer_stream {
     struct motion_stream* stream;
@@ -159,6 +169,26 @@ static void* _accelerometer_thread_routin(void* args) {
             // HR_LOGD("we should wait barometer stationary signal ...\n");
             goto next_iteration;
         }
+        if (_accelerometer_motion.calib_state == IMU_CALIB_ST_DO_CALIBRATING) {
+            if (input->calibration_completed(input)) {
+                input->reset(input);
+                _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_CONFIRM;
+            } else {
+                input->enter_calibration(input);
+                _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_CALIBRATION_COMPLETED;
+            }
+        }
+        
+        if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_CALIBRATION_COMPLETED) {
+            if (input->calibration_completed(input)) {
+                _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_CONFIRM;
+            }
+        }
+
+        if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATED) {
+            goto next_iteration;
+        }
+        
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2 || 1 != input->calibration_completed(input)) {
@@ -316,7 +346,7 @@ static void* _barometer_thread_routin(void* args) {
     // double alpha = 0.7;
     // double previous_pressure = 0;
 
-    double pressure_history[5] = {0};              // last 5s
+    double pressure_history[5] = {0};            // last 5s
     int64_t stationary_detect_threshold_ns = 0;  // get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
 
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
@@ -325,6 +355,8 @@ static void* _barometer_thread_routin(void* args) {
     double result[2] = {0};  // {pressure, temp}
 
     enum motion_state prev_state = STOPPED;
+
+    int predict_stopped = 0;
 
     if (!_barometer_motion.mw) {
         HR_LOGE("error: can not init moving avg window\n");
@@ -382,7 +414,21 @@ static void* _barometer_thread_routin(void* args) {
             double stddev = sqrt(sum / (int)ARRAY_SIZE(pressure_history));
 
             HR_LOGD("%d seconds history: mean:%f, stddev:%f\n", ARRAY_SIZE(pressure_history), mean, stddev);
+
+            if (stddev < BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD) {
+                if (predict_stopped != 0) {
+                    predict_stopped = 1;
+                    HR_LOGD("pressure predict it's still .............\n");
+                }
+            } else {
+                if (predict_stopped == 1) {
+                    predict_stopped = 0;
+                    HR_LOGD("pressure predict it's not still .............\n");
+                }
+            }
         }
+        
+
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
             if (fabs(_barometer_motion.mw->stddev) < 0.5) {
                 if (_barometer_motion.stationary_pending == 0) {
@@ -550,7 +596,7 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ * BAROMETER_WINDOW_DELAY_SECONDS);
+    _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
     if (!_barometer_motion.mw) {
         return -1;
     }
