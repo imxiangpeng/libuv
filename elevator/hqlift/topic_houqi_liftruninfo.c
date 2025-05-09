@@ -1,5 +1,7 @@
 // mxp, 20250502, implement houqi topic: /API/V1/Up/LiftRunInfo
 // all data is subscribed from elevatord's event
+
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,10 +17,10 @@
 static struct uviot* _iot = NULL;
 
 static int _on_publish(void** payload, int* len) {
-    struct tm tm;
-    struct timespec ts;
+    // struct tm tm;
+    // struct timespec ts;
     printf("liftruninfo publish \n");
-    char tmp[256] = {0};
+    // char tmp[256] = {0};
     cJSON* root = NULL;
 
     struct elevator_status st;
@@ -44,7 +46,9 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
-    cJSON_AddNumberToObject(root, "runningMileageTotal", his->distance);
+    cJSON_AddNumberToObject(root, "runningMileageTotal", round(his->distance * 10) / 10);
+    cJSON_AddNumberToObject(root, "runningTimeTotal", (his->timestamp_end - his->timestamp_begin) / 1000);
+
     cJSON_AddNumberToObject(root, "mannedNum", st.passenger_count);
     cJSON_AddNumberToObject(root, "inNum", 0 /*dm_lift_passenger_count_in()*/);
     cJSON_AddNumberToObject(root, "outNum", 0 /*dm_lift_passenger_count_out()*/);
@@ -53,42 +57,52 @@ static int _on_publish(void** payload, int* len) {
 
     cJSON* arr = cJSON_AddArrayToObject(root, "runSpeed");
     for (size_t i = 0; i < his->speed_array.offset;) {
-        double* v = (double*)(his->speed_array.data + i);
-        cJSON_AddItemToArray(arr, cJSON_CreateNumber(*v));
+        double v = *(double*)(his->speed_array.data + i);
+        v = round(v * 10) / 10;
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
 
     arr = cJSON_AddArrayToObject(root, "jitterFrequency");
     for (size_t i = 0; i < his->jitter_frequency_array.offset;) {
-        double* v = (double*)(his->jitter_frequency_array.data + i);
-        cJSON_AddItemToArray(arr, cJSON_CreateNumber(*v));
+        double v = *(double*)(his->jitter_frequency_array.data + i);
+        v = round(v * 10) / 10;
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
 
     arr = cJSON_AddArrayToObject(root, "jitterAcceleration");
     for (size_t i = 0; i < his->jitter_accel_array.offset;) {
-        double* v = (double*)(his->jitter_accel_array.data + i);
-        cJSON_AddItemToArray(arr, cJSON_CreateNumber(*v));
+        double v = *(double*)(his->jitter_accel_array.data + i);
+        v = round(v * 10) / 10;
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
 
     arr = cJSON_AddArrayToObject(root, "acceleration");
     for (size_t i = 0; i < his->accel_array.offset;) {
-        double* v = (double*)(his->accel_array.data + i);
-        cJSON_AddItemToArray(arr, cJSON_CreateNumber(*v));
+        double v = *(double*)(his->accel_array.data + i);
+        v = round(v * 10) / 10;
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
 
     cJSON_AddNumberToObject(root, "runBeginTimeStamp", his->timestamp_begin);
     cJSON_AddNumberToObject(root, "runEndTimeStamp", his->timestamp_end);
     cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
-    cJSON_AddNumberToObject(root, "lightVariationAmplitude", 1);
+    int brightness = elevator_light_brightness();
+    if (brightness < 80) {
+        brightness = 0;
+    } else if (brightness < 150) {
+        brightness = 1;
+    } else {
+        brightness = 2;
+    }
+    cJSON_AddNumberToObject(root, "lightVariationAmplitude", brightness);
 
-    clock_gettime(CLOCK_REALTIME, &ts);
-    (void)localtime_r(&ts.tv_sec, &tm);
+    // clock_gettime(CLOCK_REALTIME, &ts);
+    //(void)localtime_r(&ts.tv_sec, &tm);
 
-    /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
-    cJSON_AddStringToObject(root, "faultTime", tmp);
     cJSON_AddNumberToObject(root, "runBeginFloor", his->floor_begin);
     cJSON_AddNumberToObject(root, "runEndFloor", his->floor_end);
 

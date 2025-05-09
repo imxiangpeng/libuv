@@ -47,6 +47,7 @@ static int BAROMETER_SAMPLE_RATE_HZ = 10;
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
 static double BAROMETER_WINDOW_DELAY_SECONDS = 2;
+//static double BAROMETER_STATIONARY_DETECT_THRESHOLD_MS = 2000;
 
 // 低于该速度的时候不更新状态，保持原有状态
 static double VELOCITY_ZUPT_THRESHOLD = 0.1;
@@ -225,7 +226,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.direction = _accelerometer_motion.velocity > 0 ? DIRECTION_UP : DIRECTION_DOWN;
                 _accelerometer_motion.ev.distance = distance;
                 _accelerometer_motion.ev.floor = floor_num;
-                _accelerometer_motion.ev.timestamp_begin = get_realtime_ms() / 1000;
+                _accelerometer_motion.ev.timestamp_begin = get_realtime_ms();
 
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
             }
@@ -259,7 +260,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.distance = distance;
                 _accelerometer_motion.ev.floor_begin = _accelerometer_motion.ev.floor;
                 _accelerometer_motion.ev.floor = floor_num;
-                _accelerometer_motion.ev.timestamp_end = get_realtime_ms() / 1000;
+                _accelerometer_motion.ev.timestamp_end = get_realtime_ms();
 
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
             }
@@ -315,6 +316,9 @@ static void* _barometer_thread_routin(void* args) {
     // double alpha = 0.7;
     // double previous_pressure = 0;
 
+    double pressure_history[5] = {0};              // last 5s
+    int64_t stationary_detect_threshold_ns = 0;  // get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
+
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
 
     struct motion_stream* input = _barometer_motion.stream;
@@ -351,6 +355,34 @@ static void* _barometer_thread_routin(void* args) {
             goto next_iteration;
         }
 
+        if (stationary_detect_threshold_ns == 0) {
+            stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
+        }
+        if (pressure_history[0] == 0) {
+            pressure_history[0] = _barometer_motion.mw->mean;
+        }
+
+        if (now > stationary_detect_threshold_ns) {
+            double sum = 0, mean = 0;
+            stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
+            for (size_t i = ARRAY_SIZE(pressure_history) - 1; i > 0; i--) {
+                pressure_history[i] = pressure_history[i - 1];
+                sum += pressure_history[i - 1];
+            }
+            pressure_history[0] = _barometer_motion.mw->mean;
+
+            sum += pressure_history[0];
+
+            mean = sum / (int)ARRAY_SIZE(pressure_history);
+            sum = 0;
+            for (size_t i = 0; i < ARRAY_SIZE(pressure_history); i++) {
+                sum += (pressure_history[i] - mean) * (pressure_history[i] - mean);
+                HR_LOGD("%d seconds history: %f\n", i, pressure_history[i]);
+            }
+            double stddev = sqrt(sum / (int)ARRAY_SIZE(pressure_history));
+
+            HR_LOGD("%d seconds history: mean:%f, stddev:%f\n", ARRAY_SIZE(pressure_history), mean, stddev);
+        }
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
             if (fabs(_barometer_motion.mw->stddev) < 0.5) {
                 if (_barometer_motion.stationary_pending == 0) {
