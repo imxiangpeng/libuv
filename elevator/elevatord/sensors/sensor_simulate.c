@@ -122,7 +122,7 @@ static int accelerometer_read(struct sensor_data* data) {
     sda->x[1] = _current_record.accel_y;
     // -1 correct data direction
     // because simulate data is record while device is inverted/upside down
-    sda->x[2] = _current_record.accel_z * -1.0;
+    sda->x[2] = _current_record.accel_z /** -1.0*/;
     sda->dt = _current_record.dt;
 
     line_num++;
