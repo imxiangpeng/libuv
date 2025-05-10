@@ -75,6 +75,10 @@ static void _topic_period_timer_cb(uv_timer_t* handle) {
 
     HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
 
+    if (mosquitto_socket(t->iot->mosq) == -1) {
+        return;
+    }
+
     // public topics
     void* payload = NULL;
     int len = 0;
@@ -114,6 +118,11 @@ static void iot__topic_async_cb(uv_async_t* handle) {
     t = (struct uviot__topic*)handle->data;
 
     HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
+
+    // maybe not connected
+    if (mosquitto_socket(t->iot->mosq) == -1) {
+        return;
+    }
 
     // public topics
     void* payload = NULL;
@@ -252,6 +261,18 @@ static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
     if (!mosq || !iot)
         return;
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+
+    // disconnect maybe trigger in keepalive so we should reconnect
+    // but keepalive is in timer callback not poll back
+    if (!uv_is_closing((uv_handle_t*)&iot->poll)) {
+        uv_poll_stop(&iot->poll);
+        uv_close((uv_handle_t*)&iot->poll, NULL);
+    }
+    if (iot->auto_reconnect) {
+        // stop & start reconnect timer callback
+        uv_timer_stop(&iot->timer);
+        uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
+    }
 }
 
 static void _on_subscribe(struct mosquitto* mosq, void* obj, int mid, int qos_count, const int* granted_qos) {
@@ -401,12 +422,14 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     // verify socket has been closed by us
     if (mosquitto_socket(mosq) == -1) {
         HR_LOGD("socket is invalid, we should stop poll\n");
-        uv_poll_stop(handle);
-        uv_close((uv_handle_t*)handle, NULL);
+        if (!uv_is_closing((uv_handle_t*)handle)) {
+            uv_poll_stop(handle);
+            uv_close((uv_handle_t*)handle, NULL);
+        }
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback
             uv_timer_stop(&iot->timer);
-            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 0);
+            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
         }
 
         return;
@@ -415,8 +438,10 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     if (events & UV_DISCONNECT) {
         HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
         // stop current poll, we should reconnect and using new socket
-        uv_poll_stop(handle);
-        uv_close((uv_handle_t*)handle, NULL);
+        if (!uv_is_closing((uv_handle_t*)handle)) {
+            uv_poll_stop(handle);
+            uv_close((uv_handle_t*)handle, NULL);
+        }
 
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback
@@ -644,7 +669,7 @@ int uviot_prepare(struct uviot* self) {
 
     HR_LOGE("%s(%d): \n", __FUNCTION__, __LINE__);
     do {
-        HR_LOGD("%s(%d): connect:%s:%d\n", __FUNCTION__, __LINE__, self->server, self->port);
+        HR_LOGD("%s(%d): connect:%s:%d, alive time:%d\n", __FUNCTION__, __LINE__, self->server, self->port, self->alive_time);
         // 我们发现我电脑 apt 安装的 mosquitto 使用异步连接阿里 iot 的时候总是连接不上,但是 sync 接口测试正常
         // 后来使用自己编译的 mosquitto 测试正常
         // rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
@@ -734,6 +759,6 @@ const char* uviot_get_connection_mac_address(struct uviot* self) {
         return "";
     }
 
-    //return "D4430EF3063A";
+    // return "D4430EF3063A";
     return iot->status.mac;
 }

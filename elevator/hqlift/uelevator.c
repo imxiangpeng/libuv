@@ -357,6 +357,19 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     }
 
     printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
+    
+#if 0 // we should re subscriber event?
+
+    ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
+
+    ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
+    ubus_register_event_handler(_ubus_ctx, &_object_event, "elevator.event.*");
+
+    subscriber_elevatord_event();
+
+
+#endif
+
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC

@@ -47,7 +47,7 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
     cJSON_AddNumberToObject(root, "runningMileageTotal", round(his->distance * 10) / 10);
-    cJSON_AddNumberToObject(root, "runningTimeTotal", (his->timestamp_end - his->timestamp_begin) / 1000);
+    cJSON_AddNumberToObject(root, "runningTimeTotal", round((his->timestamp_end - his->timestamp_begin) / 1000.0));
 
     cJSON_AddNumberToObject(root, "mannedNum", st.passenger_count);
     cJSON_AddNumberToObject(root, "inNum", 0 /*dm_lift_passenger_count_in()*/);
@@ -58,7 +58,6 @@ static int _on_publish(void** payload, int* len) {
     cJSON* arr = cJSON_AddArrayToObject(root, "runSpeed");
     for (size_t i = 0; i < his->speed_array.offset;) {
         double v = *(double*)(his->speed_array.data + i);
-        v = round(v * 10) / 10;
         cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
@@ -74,7 +73,6 @@ static int _on_publish(void** payload, int* len) {
     arr = cJSON_AddArrayToObject(root, "jitterAcceleration");
     for (size_t i = 0; i < his->jitter_accel_array.offset;) {
         double v = *(double*)(his->jitter_accel_array.data + i);
-        v = round(v * 10) / 10;
         cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
@@ -82,7 +80,6 @@ static int _on_publish(void** payload, int* len) {
     arr = cJSON_AddArrayToObject(root, "acceleration");
     for (size_t i = 0; i < his->accel_array.offset;) {
         double v = *(double*)(his->accel_array.data + i);
-        v = round(v * 10) / 10;
         cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }

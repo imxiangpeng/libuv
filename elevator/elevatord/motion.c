@@ -32,7 +32,6 @@
 #define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
 #define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
 
-
 // 海平面标准气压 (Pa)
 #define P0 101325.0
 
@@ -79,6 +78,17 @@ static double barometer_end = 0;
 static double barometer_pressure = 0;
 
 static double barometer_height_discontinuous = 0;
+
+enum motion_init_stage {
+    MOTION_INIT_STAGE_0 = 0,
+    MOTION_INIT_STAGE_BAROMETER_STATIONARY = 1 << 0,
+    MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM = 1 << 1,
+    MOTION_INIT_STAGE_IMU_STATIONARY_DETECT = 1 << 2,
+    MOTION_INIT_STAGE_IMU_STATIONARY_DETECT_COMPLETED = 1 << 3,
+    MOTION_INIT_STAGE_FINISHED = 1 << 4,
+};
+
+static uint32_t _motion_init_stage = MOTION_INIT_STAGE_0;
 
 enum imu_calibration_state {
     IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // init value, wait signal from barometer
@@ -163,12 +173,64 @@ static void* _accelerometer_thread_routin(void* args) {
         struct timespec spec;
         int64_t now = get_monotonic_nanoseconds();
 
+        // HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
         int ret = input->read(input, (void*)&result, sizeof(result));
         // support simulate, because simulate read data only in imu thread
+#if 0    
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
             // HR_LOGD("we should wait barometer stationary signal ...\n");
             goto next_iteration;
         }
+#endif
+        if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
+            // 1. wait barameter detect stationary
+            if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
+                HR_LOGD("%s(%d): 1. wait barometer signal motion init stage: 0x%X, wait barometer stationary signal\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                goto next_iteration;
+            }
+
+            HR_LOGD("%s(%d): motion init stage: 0x%X, barometer stationary finished \n", __FUNCTION__, __LINE__, _motion_init_stage);
+            // 2. do calibration detection or reset state when calibration is completed
+            if ((_motion_init_stage & MOTION_INIT_STAGE_IMU_STATIONARY_DETECT) == 0) {
+                HR_LOGD("%s(%d): 2. receive stantionary motion init stage: 0x%X, we should do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                _motion_init_stage |= MOTION_INIT_STAGE_IMU_STATIONARY_DETECT;
+                if (input->calibration_completed(input)) {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X, imu reset state\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    input->reset(input);
+                } else {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    input->enter_calibration(input);
+                }
+
+                goto next_iteration;
+            }
+
+            // HR_LOGD("%s(%d): motion init stage: 0x%X, we should wait calibration finished\n", __FUNCTION__, __LINE__, _motion_init_stage);
+            // 3. wait calibration finished
+
+            if ((_motion_init_stage & MOTION_INIT_STAGE_IMU_STATIONARY_DETECT_COMPLETED) == 0) {
+                if (input->calibration_completed(input)) {
+                    _motion_init_stage |= MOTION_INIT_STAGE_IMU_STATIONARY_DETECT_COMPLETED;
+                    HR_LOGD("%s(%d): 3. wait calibration finished motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                } else {
+                    HR_LOGD("%s(%d): 3. wait calibration motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                }
+
+                goto next_iteration;
+            }
+
+            // HR_LOGD("%s(%d): motion init stage: 0x%X, we should wait barometer stationary confirm signal\n", __FUNCTION__, __LINE__, _motion_init_stage);
+            // 4. wait barometer confirm signal
+            if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM) == 0) {
+                HR_LOGD("%s(%d): 4. motion init stage: 0x%X, we should wait barometer stationary confirm signal\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                goto next_iteration;
+            }
+
+            // 5. finish init
+            _motion_init_stage |= MOTION_INIT_STAGE_FINISHED;
+        }
+
+#if 0
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_DO_CALIBRATING) {
             if (input->calibration_completed(input)) {
                 input->reset(input);
@@ -188,7 +250,8 @@ static void* _accelerometer_thread_routin(void* args) {
         if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATED) {
             goto next_iteration;
         }
-        
+#endif
+
         if (ret != 0) {
             // error or calibration not complete
             if (ret == -2 || 1 != input->calibration_completed(input)) {
@@ -356,7 +419,7 @@ static void* _barometer_thread_routin(void* args) {
 
     enum motion_state prev_state = STOPPED;
 
-    int predict_stopped = 0;
+    // int predict_stopped = 0;
 
     if (!_barometer_motion.mw) {
         HR_LOGE("error: can not init moving avg window\n");
@@ -393,7 +456,7 @@ static void* _barometer_thread_routin(void* args) {
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
         }
-
+#if 0
         if (now > stationary_detect_threshold_ns) {
             double sum = 0, mean = 0;
             stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
@@ -420,15 +483,38 @@ static void* _barometer_thread_routin(void* args) {
                     predict_stopped = 1;
                     HR_LOGD("pressure predict it's still .............\n");
                 }
+
+                if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    _motion_init_stage |= MOTION_INIT_STAGE_BAROMETER_STATIONARY;
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    HR_LOGD("pressure predict it's still motion_init_stage stationary signal.............\n");
+                } else {
+                    if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM) == 0) {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                        _motion_init_stage |= MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM;
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                        HR_LOGD("pressure predict it's still motion_init_stage stationary confirm signal.............\n");
+                    }
+                }
+
             } else {
                 if (predict_stopped == 1) {
                     predict_stopped = 0;
                     HR_LOGD("pressure predict it's not still .............\n");
                 }
+
+                if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
+                    HR_LOGD("pressure predict it's not still, clear motion_init_stage stationary .............\n");
+
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY);
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                }
             }
         }
-        
-
+#endif
+#if 0
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL) {
             if (fabs(_barometer_motion.mw->stddev) < 0.5) {
                 if (_barometer_motion.stationary_pending == 0) {
@@ -465,9 +551,45 @@ static void* _barometer_thread_routin(void* args) {
                 }
             }
         }
-
+#endif
         HR_LOGD("barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
 
+        if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
+            if (_barometer_motion.mw->stddev < BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD) {
+                if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    _motion_init_stage |= MOTION_INIT_STAGE_BAROMETER_STATIONARY;
+                    HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                    HR_LOGD("pressure predict it's still motion_init_stage stationary signal.............\n");
+                    // 气压数据变化比加速度慢很多，我们强制设置 5 秒看看
+                    stationary_detect_threshold_ns = now + seconds_to_nanoseconds(5);
+                } else {
+                    if (now > stationary_detect_threshold_ns) {
+                        if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM) == 0) {
+                            HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                            if ((_motion_init_stage & MOTION_INIT_STAGE_IMU_STATIONARY_DETECT_COMPLETED) != 0) {
+                                _motion_init_stage |= MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM;
+                                HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                                HR_LOGD("pressure predict it's still motion_init_stage stationary confirm signal.............\n");
+                            } else {
+                                HR_LOGD("%s(%d): pressure predict  is still, but should wait imu calibration finished motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
+                HR_LOGD("pressure predict it's not still, clear motion_init_stage stationary .............\n");
+
+                HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY);
+                _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM);
+                _motion_init_stage = 0;
+                // 或许，我们还需要删除已经校准的数据，需要吗？因为校准本身也是会识别静止的
+                HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                //}
+            }
+        }
         if (barometer_pressure == 0) {
             barometer_pressure = pressure;
         }

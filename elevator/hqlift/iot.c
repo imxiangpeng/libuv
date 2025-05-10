@@ -58,6 +58,7 @@ int iot_init(struct uv_loop_s* loop) {
 
     snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
     _iot->port = BROKER_DEFAULT_PORT;
+    _iot->alive_time = BROKER_DEFAULT_ALIVETIME;
     
     hmac_secret = TIHUIYAN_DEVICE_SECRET;
     // mqttClientId: clientId+"|securemode=3,signmethod=hmacsha1,timestamp=132323232|"

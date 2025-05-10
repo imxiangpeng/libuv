@@ -29,7 +29,42 @@
 #define HRLOG_OUTPUT_FILE 1
 
 #if HRLOG_OUTPUT_FILE
+#include <pthread.h>
 static FILE* persist_fp = NULL;
+
+static pthread_once_t persist_once_control = PTHREAD_ONCE_INIT;
+// static pthread_mutex_t persist_lock = PTHREAD_MUTEX_INITIALIZER;
+static void init_persist_output() {
+    struct tm tm;
+    struct timespec ts;
+
+    char path[256] = "./hrlog-";
+    char* ptr = path + strlen(path);
+
+    FILE* f = fopen("/proc/self/comm", "r");
+    if (f) {
+        fscanf(f, "%s", ptr);
+        printf("Process name: %s\n", ptr);
+        fclose(f);
+    }
+
+    ptr = path + strlen(path);
+    sprintf(ptr, "-%d-", getpid());
+    ptr = path + strlen(path);
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M", &tm);
+    strcat(path, ".log");
+    printf("path:%s\n", path);
+    persist_fp = fopen(path, "w");
+    if (!persist_fp) {
+        printf("failed create output ..\n");
+    }
+
+    setbuf(persist_fp, NULL);
+}
 #endif
 
 int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
@@ -87,6 +122,8 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
 
 #if HRLOG_OUTPUT_FILE
     // syslog(LOG_SYSLOG, "%s", buf);
+    pthread_once(&persist_once_control, init_persist_output);
+#if 0
     if (!persist_fp) {
         char path[256] = "./hrlog-";
         char* ptr = path + strlen(path);
@@ -110,13 +147,14 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
 
         setbuf(persist_fp, NULL);
     }
+#endif
 
     if (persist_fp) {
         fprintf(persist_fp, "%s", buf);
     }
 #else
     printf("%s", buf);
-	// syslog(LOG_SYSLOG, "%s", buf);
+    // syslog(LOG_SYSLOG, "%s", buf);
 #endif
 
     return 0;

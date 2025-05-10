@@ -71,14 +71,15 @@ double elevator_temperature(void) {
         return temp;
     }
 
-    temp = round(temp * 100) / 100;
+    temp = round(temp * 10) / 10;
     fclose(fp);
     printf("temp:%f\n", temp);
     return temp;
 }
 
+// houqi LiftState: lightVariationAmplitude 0-255
+// in_voltage2_input [ 0 - 700 ]
 int elevator_light_brightness() {
-    // houqi LiftState: lightVariationAmplitude 0-255
     int brightness = 100;  // 0-255
     const char* brightness_channel = "/sys/bus/iio/devices/iio:device1/in_voltage2_input";
     FILE* fp = fopen(brightness_channel, "r");
