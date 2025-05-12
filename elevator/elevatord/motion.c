@@ -586,6 +586,7 @@ static void* _barometer_thread_routin(void* args) {
                 _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM);
                 _motion_init_stage = 0;
                 // 或许，我们还需要删除已经校准的数据，需要吗？因为校准本身也是会识别静止的
+                // 但是 imu 的校准在匀速阶段可能也可以进行
                 HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
                 //}
             }

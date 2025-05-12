@@ -237,22 +237,18 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
         blobmsg_for_each_attr(cur, tb[HI_ACCEL_ARRAY], rem) {
             double v = blobmsg_get_double(cur);
-            HR_LOGD("a:%f\n", v);
             hrbuffer_append(&_historical.accel_array, &v, sizeof(v));
         }
         blobmsg_for_each_attr(cur, tb[HI_SPEED_ARRAY], rem) {
             double v = blobmsg_get_double(cur);
-            HR_LOGD("s:%f\n", v);
             hrbuffer_append(&_historical.speed_array, &v, sizeof(v));
         }
         blobmsg_for_each_attr(cur, tb[HI_JITTER_FREQ_ARRAY], rem) {
             double v = blobmsg_get_double(cur);
-            HR_LOGD("jf:%f\n", v);
             hrbuffer_append(&_historical.jitter_frequency_array, &v, sizeof(v));
         }
         blobmsg_for_each_attr(cur, tb[HI_JITTER_ACCEL_ARRAY], rem) {
             double v = blobmsg_get_double(cur);
-            HR_LOGD("ja:%f\n", v);
             hrbuffer_append(&_historical.jitter_accel_array, &v, sizeof(v));
         }
 
@@ -451,20 +447,15 @@ static void* uelevator_thread_routin(void* args) {
     subscriber_elevatord_event();
 
     uloop_fd_add(&pipe_fd, ULOOP_READ);
-    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     uloop_run();
-    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
-    HR_LOGD("uobject exit clean fdlajfldalfd...\n");
     ubus_unregister_event_handler(_ubus_ctx, &_object_event);
     ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
     ubus_free(_ubus_ctx);
     _ubus_ctx = NULL;
-    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     uloop_done();
-    HR_LOGD("%s(%d): can not connect\n", __FUNCTION__, __LINE__);
 
     return NULL;
 }
@@ -510,7 +501,8 @@ int uelevator_deinit(void) {
     if (_uobject_tid != 0) {
         HR_LOGD("uobject send exit ...\n");
         post_message(MSG_QUIT);
-        // pthread_cancel(_uobject_tid);
+        usleep(100);
+        pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
 #if 0

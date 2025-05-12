@@ -42,6 +42,7 @@ struct uloop_timeout _loop_thread_notify_timer;
 
 static int _pipefd[2] = {-1, -1};  // [0]=read, [1]=write
 static pthread_t _uobject_tid = 0;
+static int _request_exit = 0;
 
 extern struct ubus_object _elevatord_object;
 
@@ -307,7 +308,7 @@ static void* uelevatord_thread_routin(void* args) {
 
     uloop_init();
 
-    while (1) {
+    while (_request_exit != 1) {
         _ubus_ctx = ubus_connect(UBUS_SOCK);
         if (_ubus_ctx) {
             break;
@@ -380,7 +381,9 @@ int uelevatord_deinit(void) {
     motion_unregister_observer(&_ubus_observer);
     if (_uobject_tid != 0) {
         uevelatord_post_message(MSG_QUIT);
-        // pthread_cancel(_uobject_tid);
+        // usleep(100);
+        _request_exit = 1;
+        pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
         _uobject_tid = 0;

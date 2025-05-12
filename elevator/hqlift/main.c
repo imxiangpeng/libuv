@@ -43,7 +43,7 @@ static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
 
     HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
-    if (SIGUSR1 == signum) {
+    if (SIGUSR1 == signum || SIGTERM == signum) {
         uv_stop(uv_default_loop());
         uv_async_send(&_dummy_keep_loop);
         uv_close((uv_handle_t*)&_dummy_keep_loop, NULL);
@@ -59,6 +59,7 @@ int main(int argc, char** argv) {
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
+    sigaction(SIGTERM, &action, NULL);
 
     elevator_init();
 
