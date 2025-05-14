@@ -16,6 +16,7 @@
 /// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
+#include "time_utils.h"
 #include "uviot.h"
 
 #define DEVICE_MEMORY_SIZE_G "1"
@@ -217,8 +218,7 @@ static int _on_publish(void** payload, int* len) {
     snprintf(tmp, sizeof(tmp), "%d", total);
     cJSON_AddStringToObject(root, "diskTotalSpace", tmp);
     //
-    snprintf(tmp, sizeof(tmp), "%ld", time(NULL));
-    cJSON_AddStringToObject(root, "timeStamp", tmp);
+    cJSON_AddNumberToObject(root, "timeStamp", (int64_t)(get_realtime_ms() / 1000));
     cJSON_AddStringToObject(root, "ipAddr", uviot_get_connection_ipv4_address(_iot));
 
     *payload = cJSON_PrintUnformatted(root);

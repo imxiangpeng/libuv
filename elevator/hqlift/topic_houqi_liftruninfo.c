@@ -87,15 +87,7 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddNumberToObject(root, "runBeginTimeStamp", his->timestamp_begin);
     cJSON_AddNumberToObject(root, "runEndTimeStamp", his->timestamp_end);
     cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
-    int brightness = elevator_light_brightness();
-    if (brightness < 80) {
-        brightness = 0;
-    } else if (brightness < 150) {
-        brightness = 1;
-    } else {
-        brightness = 2;
-    }
-    cJSON_AddNumberToObject(root, "lightVariationAmplitude", brightness);
+    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_brightness());
 
     // clock_gettime(CLOCK_REALTIME, &ts);
     //(void)localtime_r(&ts.tv_sec, &tm);
