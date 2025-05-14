@@ -45,7 +45,7 @@ struct sensor_data_temperature {
 
 struct sensor {
     int (*init)();
-    int (*configure)(int sampling_rate);
+    int (*configure)(double sampling_rate);
     int (*read)(struct sensor_data* data);
     int (*close)();
 };

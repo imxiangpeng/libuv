@@ -7,7 +7,7 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-static const char* IIO_BMP388_NAME = "bmp388";
+static const char* IIO_BMP388_NAME = "bmp380";
 static const char* IIO_CH_PRESSURE_NAME = "pressure";
 static const char* IIO_CH_TEMPERATURE_NAME = "temp";
 
@@ -29,8 +29,10 @@ static int bmp388_init() {
 static int barometer_init() {
     return bmp388_init();
 }
-static int barometer_configure(int sampling_rate) {
+static int barometer_configure(double sampling_rate) {
     (void)sampling_rate;
+
+    iio_device_attr_write_double(_bmp388, "sampling_frequency", sampling_rate /*12.5*/);
     return 0;
 }
 
@@ -72,7 +74,7 @@ static int barometer_close() {
 static int temperature_init() {
     return bmp388_init();
 }
-static int termperature_configure(int sampling_rate) {
+static int termperature_configure(double sampling_rate) {
     (void)sampling_rate;
     return 0;
 }

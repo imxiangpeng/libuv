@@ -55,7 +55,7 @@ static int accelerometer_init() {
     }
     return 0;
 }
-static int accelerometer_configure(int sampling_rate) {
+static int accelerometer_configure(double sampling_rate) {
     struct iio_channel* ch = NULL;
 
     if (!_bmi270) {
@@ -116,7 +116,7 @@ static int accelerometer_close() {
 static int gyroscope_init() {
     return bmi270_init();
 }
-static int gyroscope_configure(int sampling_rate) {
+static int gyroscope_configure(double sampling_rate) {
     (void)sampling_rate;
     return 0;
 }

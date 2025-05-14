@@ -44,7 +44,7 @@ struct simulate_record {
 
 // time,dt,accel_x,accel_y,accel_z,union_g,gyro_x,gyro_y,gyro_z,pressure,temp,ag,ag
 static int simulate_record_read(struct simulate_record* record) {
-    double accel_r, ag;
+    double accel_r;
     char* p = NULL;
     char line[MAX_LINE_LENGTH] = {0};
     if (!record) {
@@ -55,21 +55,21 @@ static int simulate_record_read(struct simulate_record* record) {
         return -1;
     }
 
-read_again:
+//read_again:
     p = fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);
     if (!p) {
         if (feof(_simulate_data_fp)) {
             rewind(_simulate_data_fp);
             fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);  // skip csv file head
             line_num = 1;
-            goto read_again;
+            // goto read_again;
         }
         return -1;
     }
 
-    if (sscanf(p, "%lf,%lf,%lf,%lf,%lf,%lf,%*f,%*f,%*f,%lf,%lf,%lf",
+    if (sscanf(p, "%lf,%lf,%lf,%lf,%lf,%lf,%*f,%*f,%*f,%lf,%lf",
                &record->now, &record->dt,
-               &record->accel_x, &record->accel_y, &record->accel_z, &accel_r, &record->pressure, &record->temperature, &ag) != 9) {
+               &record->accel_x, &record->accel_y, &record->accel_z, &accel_r, &record->pressure, &record->temperature) != 8) {
         HR_LOGE("cvs parse error:%s\n", line);
 
         fclose(_simulate_data_fp);
@@ -101,7 +101,7 @@ static int accelerometer_init() {
 
     return 0;
 }
-static int accelerometer_configure(int sampling_rate) {
+static int accelerometer_configure(double sampling_rate) {
     (void)sampling_rate;
     // why sampling_frequency is not device's attribute?
     return 0;
@@ -148,7 +148,7 @@ struct sensor sensor_simulate_accelerometer = {
 static int barometer_init() {
     return 0;
 }
-static int barometer_configure(int sampling_rate) {
+static int barometer_configure(double sampling_rate) {
     (void)sampling_rate;
     // why sampling_frequency is not device's attribute?
     return 0;
