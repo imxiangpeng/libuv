@@ -742,6 +742,8 @@ static int motion_acceleration_start(void) {
 
     pthread_attr_init(&attr);
 
+
+    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
     // pthread_attr_getschedpolicy(&attr, &thread_policy);
     // pthread_attr_getschedparam(&attr, &param);
     ret = pthread_attr_setschedpolicy(&attr, algorithm);
