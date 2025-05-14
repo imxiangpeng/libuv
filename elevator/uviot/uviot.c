@@ -16,6 +16,7 @@
 #include <mosquitto.h>
 #include <mqtt_protocol.h>
 #include <net/if.h>
+#include <resolv.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -411,6 +412,9 @@ static void uviot_impl_connect_retry_timer_cb(uv_timer_t* handle) {
     rc = mosquitto_connect(iot->mosq, self->server, self->port, self->alive_time);
     if (rc != MOSQ_ERR_SUCCESS) {
         HR_LOGD("%s(%d): connect:%s:%d, alive time:%d, failed:%d\n", __FUNCTION__, __LINE__, self->server, self->port, self->alive_time, rc);
+        if (rc == MOSQ_ERR_EAI) {
+            res_init();
+        }
         return;  // auto connect retry
     }
 
