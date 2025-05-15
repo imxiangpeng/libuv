@@ -8,10 +8,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+// #include "butterworth_filter.h"
 #include "hr_log.h"
 
 #include "motion_stream.h"
 #include "sensor.h"
+
 
 #define container_of(ptr, type, member) ({            \
     const typeof(((type*)0)->member)* __mptr = (ptr); \
@@ -32,6 +34,8 @@ struct barometer_stream {
     int calibration;
 
     int64_t now;
+
+    // struct butterworth_filter* filter;
 };
 
 static int barometer_stream_open(struct motion_stream* self) {
@@ -71,6 +75,7 @@ static int barometer_stream_read(struct motion_stream* self, void* data, size_t 
     }
 
     // {pressure, temperature}
+    // p[0] = butterworth_filter_process(s->filter, sensor.pressure); // sensor.pressure;
     p[0] = sensor.pressure;
     p[1] = sensor.temperature;
     return 0;
@@ -121,7 +126,7 @@ struct motion_stream* barometer_stream_init(int sampling_frequency) {
     bm->self.calibration_completed = barometer_stream_calibration_completed;
     bm->self.close = barometer_stream_close;
 
-    // bm->bw_filter = butterworth_filter_init(5, sampling_frequency);
+    // bm->filter = butterworth_filter_init(1, sampling_frequency);
 
     // bm->mw = moving_window_init(sampling_frequency / 2);
     return &bm->self;

@@ -796,7 +796,10 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             double* magnitudes = (double*)malloc(sizeof(double) * (f->sampling_size / 2 + 1));
 
             int N_fft_out = f->sampling_size / 2 + 1;
-            for (int j = 0; j < N_fft_out; j++) {
+            // 这里估计需要考虑不要从 0 开始，从 1 或者 2 开始
+            // 低于 2 hz 的我们不认为抖动
+            // TODO
+            for (int j = 2; j < N_fft_out; j++) {
                 double real = f->out[j][0];
                 double imag = f->out[j][1];
                 double magnitude = sqrt(real * real + imag * imag);

@@ -425,7 +425,7 @@ static void _observer_on_status(struct motion_status* st) {
             uevelatord_post_message(MSG_REALTIME);
             _realtime_report_times = 0;
         } else {
-            HR_LOGE("drop .........\n");
+            // HR_LOGE("drop .........\n");
             // drop this time trigger next time
             _realtime_report_times--;
         }

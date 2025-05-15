@@ -23,6 +23,11 @@
 // 如果这个时候是运动状态（设备重启或者进程重启不知道当前是什么状态）那么我们的速度以及行程数据很可能就是不准确的。
 // 所以，需要利用气压来识别等待静止状态，然后让 imu 重置，在此之前 montion 不应该将数据向外部传递。
 
+// 20250515 我们修改后的 bmp388 驱动在测试中获取气压是非常灵敏的，不需要我们之前各种延迟 workaround 方案
+// 我们在考虑另一个因素，就是极端情况下，纠正加速度的偏差
+
+#define MOTION_EVENT_CONFIRM_FROM_PRESSURE 1
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
 #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 0
@@ -46,12 +51,13 @@ static const double G0 = 9.81;
 
 static struct motion_observer* _motion_observers[10] = {0};
 
-static int ACCELEROMETER_SAMPLE_RATE_HZ = 100;
-static int BAROMETER_SAMPLE_RATE_HZ = 10;
+static int ACCELEROMETER_SAMPLE_RATE_HZ = 200;
+static double BAROMETER_SAMPLE_RATE_HZ = 12.5f;
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
-static double BAROMETER_WINDOW_DELAY_SECONDS = 2;
+// 使用我们新的 bmp388 驱动，这里我们延迟 1s 就好了
+static double BAROMETER_WINDOW_DELAY_SECONDS = 1;  // 1;
 // static double BAROMETER_STATIONARY_DETECT_THRESHOLD_MS = 2000;
 
 // 低于该速度的时候不更新状态，保持原有状态
@@ -76,6 +82,8 @@ static double barometer_distance = 0;
 static double barometer_begin = 0;
 static double barometer_end = 0;
 static double barometer_pressure = 0;
+static double barometer_velocity = 0;
+static int64_t barometer_now = 0;
 
 static double barometer_height_discontinuous = 0;
 
@@ -161,11 +169,13 @@ static void* _accelerometer_thread_routin(void* args) {
 #if DUMP_DATA_TO_FILE
     char buf[MAX_LINE_LENGTH] = {0};
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_mean,pressure_stddev\n");
+        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_velocity,pressure_mean,pressure_stddev\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
-
+#if MOTION_EVENT_CONFIRM_FROM_PRESSURE
+    int64_t motion_event_delay_confirm_with_pressure_ns = seconds_to_nanoseconds(1);
+#endif
     _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL;
     struct motion_stream* input = _accelerometer_motion.stream;
     struct accelerometer_stream_data result;
@@ -182,6 +192,7 @@ static void* _accelerometer_thread_routin(void* args) {
             goto next_iteration;
         }
 #endif
+#if 0
         if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
             // 1. wait barameter detect stationary
             if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
@@ -194,7 +205,7 @@ static void* _accelerometer_thread_routin(void* args) {
             if ((_motion_init_stage & MOTION_INIT_STAGE_IMU_STATIONARY_DETECT) == 0) {
                 HR_LOGD("%s(%d): 2. receive stantionary motion init stage: 0x%X, we should do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_stage);
                 _motion_init_stage |= MOTION_INIT_STAGE_IMU_STATIONARY_DETECT;
-                if (input->calibration_completed(input)) {
+                if ( 0 && input->calibration_completed(input)) {
                     HR_LOGD("%s(%d): motion init stage: 0x%X, imu reset state\n", __FUNCTION__, __LINE__, _motion_init_stage);
                     input->reset(input);
                 } else {
@@ -229,7 +240,7 @@ static void* _accelerometer_thread_routin(void* args) {
             // 5. finish init
             _motion_init_stage |= MOTION_INIT_STAGE_FINISHED;
         }
-
+#endif
 #if 0
         if (_accelerometer_motion.calib_state == IMU_CALIB_ST_DO_CALIBRATING) {
             if (input->calibration_completed(input)) {
@@ -287,16 +298,19 @@ static void* _accelerometer_thread_routin(void* args) {
         double velocity = round(result.velocity * 100) / 100;
         double distance = round(result.distance * 1000) / 1000;
 
+        // double velocity_old = round(result.velocity * 100) / 100;;
         enum motion_state new_state = _accelerometer_motion.state;
 
+        // we should use real velocity to detect accelerating & decelerating
+        // do not use round, which may causing state jump
         if (velocity == 0) {
             new_state = STOPPED;
         } else if (fabs(velocity) < VELOCITY_ZUPT_THRESHOLD) {
             // keep old state until velocity change significantly
             // new_state = STOPPED;
-        } else if (fabs(velocity) > fabs(_accelerometer_motion.velocity)) {
+        } else if (fabs(result.velocity) > fabs(_accelerometer_motion.velocity)) {
             new_state = ACCELERATING;
-        } else if (fabs(velocity) < fabs(_accelerometer_motion.velocity)) {
+        } else if (fabs(result.velocity) < fabs(_accelerometer_motion.velocity)) {
             new_state = DECELERATING;
         } else {
             new_state = CONSTANTING;
@@ -307,9 +321,10 @@ static void* _accelerometer_thread_routin(void* args) {
         _accelerometer_motion.distance = result.distance;  // distance;
 
         floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label));
-        HR_LOGD("accel:%f, velocity:%f, distance:%f, height:%f\n",
-                accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
+        HR_LOGD("%s(%d):accel:%f, velocity:%f, distance:%f, height:%f\n",
+                __FUNCTION__, __LINE__, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
 
+        HR_LOGD("%s(%d):barometer barometer_velocity:%f, barometer_pressure:%f, barometer_begin:%f, barometer_end:%f, (%f)\n", __FUNCTION__, __LINE__, barometer_velocity, barometer_pressure, barometer_begin, barometer_end, barometer_pressure - barometer_end);
         if (new_state != _accelerometer_motion.state) {
             HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
             if (_accelerometer_motion.state == STOPPED) {
@@ -320,8 +335,14 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.distance = distance;
                 _accelerometer_motion.ev.floor = floor_num;
                 _accelerometer_motion.ev.timestamp_begin = get_realtime_ms();
+                // when starting, pressure is assigned , so we can compare it later
+                _accelerometer_motion.ev.pressure = _barometer_motion.mw->mean;  // 使用过去一个窗口的均值作为当前开始运行时间点气压值
 
+#if MOTION_EVENT_CONFIRM_FROM_PRESSURE
+                motion_event_delay_confirm_with_pressure_ns = now + seconds_to_nanoseconds(1);
+#else
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
+#endif
             }
 
             if (new_state == STOPPED) {
@@ -355,14 +376,47 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.floor = floor_num;
                 _accelerometer_motion.ev.timestamp_end = get_realtime_ms();
 
+#if MOTION_EVENT_CONFIRM_FROM_PRESSURE
+                // _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
+                motion_event_delay_confirm_with_pressure_ns = now + seconds_to_nanoseconds(1);
+#else
+                _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
+#endif
             }
             _accelerometer_motion.state = new_state;
         }
 
+#if MOTION_EVENT_CONFIRM_FROM_PRESSURE
+        if (motion_event_delay_confirm_with_pressure_ns != 0 && now > motion_event_delay_confirm_with_pressure_ns) {
+            motion_event_delay_confirm_with_pressure_ns = 0;
+            HR_LOGD("%s(%d): motion event delay confirm! state:%d, pressure:%f vs %f (%f)\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.state, _accelerometer_motion.ev.pressure, barometer_pressure, barometer_pressure - _accelerometer_motion.ev.pressure);
+            switch (_accelerometer_motion.ev.state) {
+                case STOPPED:
+                    HR_LOGD("%s(%d): motion event delay confirm! STOPPED, pressure:%f vs %f\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.pressure, barometer_pressure);
+                    if (barometer_pressure - _accelerometer_motion.ev.pressure < 30) {  // moving less than 2.4
+                        // ignore the event maybe invalid!
+                        break;
+                    }
+                    _accelerometer_motion.ev.pressure = barometer_pressure;  // 使用过去一个窗口的均值作为当前开始运行时间点气压值
+                    notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
+                    break;
+                case ACCELERATING:
+                case DECELERATING:
+                case CONSTANTING:
+                    HR_LOGD("%s(%d): motion event delay confirm! RUNNING, pressure:%f vs %f\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.pressure, barometer_pressure);
+                    _accelerometer_motion.ev.pressure = _barometer_motion.mw->mean;  // 使用过去一个窗口的均值作为当前开始运行时间点气压值
+                    notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
+                    break;
+                default:
+                    break;
+            }
+        }
+#endif
+
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, _accelerometer_motion.velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, barometer_velocity, _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -439,6 +493,7 @@ static void* _barometer_thread_routin(void* args) {
             goto next_iteration;
         }
 
+        // double pressure_previous = _barometer_motion.mw->mean;
         double pressure = result[0];
         // pressure = alpha * pressure + (1.0f - alpha) * previous_pressure;
         // previous_pressure = pressure;
@@ -449,10 +504,16 @@ static void* _barometer_thread_routin(void* args) {
         if (isnan(_barometer_motion.mw->stddev)) {
             goto next_iteration;
         }
+        if (pressure_history[0] == 0) {
+            pressure_history[0] = _barometer_motion.mw->mean;
+
+            goto next_iteration;
+        }
 
         if (stationary_detect_threshold_ns == 0) {
             stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
         }
+
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
         }
@@ -554,6 +615,7 @@ static void* _barometer_thread_routin(void* args) {
 #endif
         HR_LOGD("barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
 
+#if 1
         if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
             if (_barometer_motion.mw->stddev < BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD) {
                 if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
@@ -591,7 +653,10 @@ static void* _barometer_thread_routin(void* args) {
                 //}
             }
         }
+#endif
+
         if (barometer_pressure == 0) {
+            // barometer_pressure = _barometer_motion.mw->mean;//pressure;
             barometer_pressure = pressure;
         }
 
@@ -603,6 +668,12 @@ static void* _barometer_thread_routin(void* args) {
                     now, pressure, barometer_pressure, barometer_height_discontinuous);
         }
 
+        if (barometer_now != 0) {
+            barometer_velocity = calculate_height_difference(barometer_pressure, _barometer_motion.mw->mean /*pressure*/, temp) * seconds_to_nanoseconds(1) / (now - barometer_now);
+        }
+
+        barometer_now = now;
+        // barometer_pressure = _barometer_motion.mw->mean;//pressure;
         barometer_pressure = pressure;
 
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {
@@ -628,6 +699,7 @@ static void* _barometer_thread_routin(void* args) {
             if (now > _barometer_motion.delay_stop_ts_ns) {
                 _barometer_motion.delay_stop_ts_ns = 0;
                 barometer_end = pressure;
+                barometer_end = _barometer_motion.mw->mean;
 
                 barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
 
@@ -638,6 +710,13 @@ static void* _barometer_thread_routin(void* args) {
                 barometer_height_discontinuous = 0;
             }
         }
+#if 0
+        _barometer_motion.mw->mean = NAN;
+        _barometer_motion.mw->stddev = NAN;
+        _barometer_motion.mw->size = 0;
+        _barometer_motion.mw->index = 0;
+        _barometer_motion.mw->sum = 0;
+#endif
 
     next_iteration:
         spec.tv_sec = (now + delta_time_ns) / 1000000000;
@@ -719,7 +798,7 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_motion.mw = moving_window_init(BAROMETER_SAMPLE_RATE_HZ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
+    _barometer_motion.mw = moving_window_init((int)12 /*BAROMETER_SAMPLE_RATE_HZ*/ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
     if (!_barometer_motion.mw) {
         return -1;
     }
@@ -742,10 +821,8 @@ static int motion_acceleration_start(void) {
 
     pthread_attr_init(&attr);
 
-
-    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
-    // pthread_attr_getschedpolicy(&attr, &thread_policy);
-    // pthread_attr_getschedparam(&attr, &param);
+    // should set it on your real board
+    // pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
     ret = pthread_attr_setschedpolicy(&attr, algorithm);
     if (0 != ret) {
         HR_LOGE("%s(%d): failed to pthread_attr_setschedpolicy\n", __FUNCTION__, __LINE__);
@@ -898,6 +975,7 @@ int motion_calibrate_at_floor(int floor) {
     }
 
     _accelerometer_motion.height = height;
+    _barometer_motion.height = height;
 
     HR_LOGD("%s(%d): calibrate at floor %d -> height: %f success\n", __FUNCTION__, __LINE__, floor, height);
     return 0;
@@ -907,6 +985,7 @@ int motion_calibrate_at_height(double height) {
     int floor;
     char label[64] = {0};
     _accelerometer_motion.height = height;
+    _barometer_motion.height = height;
 
     if (0 != floor_predict(height, &floor, label, sizeof(label))) {
         HR_LOGD("%s(%d): calibrate at height %f failed\n", __FUNCTION__, __LINE__, height);
