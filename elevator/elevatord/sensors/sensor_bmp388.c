@@ -74,12 +74,12 @@ static int barometer_close() {
 static int temperature_init() {
     return bmp388_init();
 }
-static int termperature_configure(double sampling_rate) {
+static int temperature_configure(double sampling_rate) {
     (void)sampling_rate;
     return 0;
 }
 
-static int termperature_read(struct sensor_data* data) {
+static int temperature_read(struct sensor_data* data) {
     struct iio_channel* ch = NULL;
     struct sensor_data_temperature* baro = (struct sensor_data_temperature*)data;
 
@@ -100,7 +100,7 @@ static int termperature_read(struct sensor_data* data) {
     return 0;
 }
 
-static int termperature_close() {
+static int temperature_close() {
     return 0;
 }
 
@@ -112,6 +112,6 @@ struct sensor sensor_bmp388_barometer = {
 
 struct sensor sensor_bmp388_temperature = {
     .init = temperature_init,
-    .configure = termperature_configure,
-    .read = termperature_read,
-    .close = termperature_close};
+    .configure = temperature_configure,
+    .read = temperature_read,
+    .close = temperature_close};
