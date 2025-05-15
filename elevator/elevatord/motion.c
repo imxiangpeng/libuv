@@ -78,6 +78,8 @@ static FILE* _dump_fp = NULL;
 
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
 
+static int barameter_stationary = 0;
+
 static double barometer_distance = 0;
 static double barometer_begin = 0;
 static double barometer_end = 0;
@@ -87,16 +89,15 @@ static int64_t barometer_now = 0;
 
 static double barometer_height_discontinuous = 0;
 
-enum motion_init_stage {
-    MOTION_INIT_STAGE_0 = 0,
-    MOTION_INIT_STAGE_BAROMETER_STATIONARY = 1 << 0,
-    MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM = 1 << 1,
-    MOTION_INIT_STAGE_IMU_STATIONARY_DETECT = 1 << 2,
-    MOTION_INIT_STAGE_IMU_STATIONARY_DETECT_COMPLETED = 1 << 3,
-    MOTION_INIT_STAGE_FINISHED = 1 << 4,
+enum motion_init_status {
+    MOTION_INIT_STATUS_UNKNOWN = 0,
+    MOTION_INIT_STATUS_BAROMETER_STATIONARY = 1 << 0,
+    MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION = 1 << 2,
+    MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATRION_COMPLETED = 1 << 3,
+    MOTION_INIT_STATUS_FINISHED = 1 << 4,
 };
 
-static uint32_t _motion_init_stage = MOTION_INIT_STAGE_0;
+static uint32_t _motion_init_status = MOTION_INIT_STATUS_UNKNOWN;
 
 enum imu_calibration_state {
     IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // init value, wait signal from barometer
@@ -130,7 +131,10 @@ struct barometer_stream {
 
     int is_calibration;
 
+    enum motion_state state;
+    double motion_pressure;
     struct moving_window* mw;
+    struct moving_window* history_mw;
     int64_t delay_stop_ts_ns;
 
     int stationary_pending;
@@ -192,6 +196,52 @@ static void* _accelerometer_thread_routin(void* args) {
             goto next_iteration;
         }
 #endif
+        // mxp, 20250515, do calibration when startup
+        if ((_motion_init_status & MOTION_INIT_STATUS_FINISHED ) == 0) {
+            // 1. wait barameter detect stationary
+            // barometer thread will update MOTION_INIT_STATUS_BAROMETER_STATIONARY of _motion_init_status
+            if ((_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY) == 0) {
+                HR_LOGD("%s(%d): 1. wait barometer signal motion init status: 0x%X, wait barometer stationary signal\n", __FUNCTION__, __LINE__, _motion_init_status);
+
+                // 1.1 clear calibration bit when barometer is not stationary
+                _motion_init_status &= ~MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION;
+                _motion_init_status &= ~MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATRION_COMPLETED;
+                goto next_iteration;
+            }           
+
+            // 2. do calibration detection or reset state when calibration is completed
+            if ((_motion_init_status & MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION) == 0) {
+                _motion_init_status |= MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION;
+                // 2.1 only reset status when device is calibrated
+                // 2.2 do calibration when needed
+                if (input->calibration_completed(input)) {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X, imu reset state\n", __FUNCTION__, __LINE__, _motion_init_status);
+                    input->reset(input);
+                } else {
+                    HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_status);
+                    input->enter_calibration(input);
+                }
+                // TODO
+                // 2.3 we should update motion height according barometer pressure data
+                HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration, we should read init height from barometer\n", __FUNCTION__, __LINE__, _motion_init_status);
+                // read heigh from barometer
+                _accelerometer_motion.height = 0;
+                goto next_iteration;
+            }
+
+            // 3. wait calibration finished
+            if ((_motion_init_status & MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION) == 0) {
+                if (input->calibration_completed(input)) {
+                    _motion_init_status |= MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATRION_COMPLETED;
+                    HR_LOGD("%s(%d): 3. wait calibration finished motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_status);
+                } else {
+                    HR_LOGD("%s(%d): 3. wait calibration motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_status);
+                }
+                goto next_iteration;
+            }
+
+            _motion_init_status |= MOTION_INIT_STATUS_FINISHED;
+        }
 #if 0
         if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
             // 1. wait barameter detect stationary
@@ -390,7 +440,7 @@ static void* _accelerometer_thread_routin(void* args) {
 #if MOTION_EVENT_CONFIRM_FROM_PRESSURE
         if (motion_event_delay_confirm_with_pressure_ns != 0 && now > motion_event_delay_confirm_with_pressure_ns) {
             motion_event_delay_confirm_with_pressure_ns = 0;
-            HR_LOGD("%s(%d): motion event delay confirm! state:%d, pressure:%f vs %f (%f)\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.state, _accelerometer_motion.ev.pressure, barometer_pressure, barometer_pressure - _accelerometer_motion.ev.pressure);
+            HR_LOGD("%s(%d): motion event delay confirm! state:%d, pressure:%f vs %f (%f), stddev:%f\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.state, _accelerometer_motion.ev.pressure, barometer_pressure, barometer_pressure - _accelerometer_motion.ev.pressure, _barometer_motion.mw->stddev);
             switch (_accelerometer_motion.ev.state) {
                 case STOPPED:
                     HR_LOGD("%s(%d): motion event delay confirm! STOPPED, pressure:%f vs %f\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.pressure, barometer_pressure);
@@ -463,7 +513,9 @@ static void* _barometer_thread_routin(void* args) {
     // double alpha = 0.7;
     // double previous_pressure = 0;
 
-    double pressure_history[5] = {0};            // last 5s
+    int64_t history_mw_sampling_rate = 5;  //  (1/5) * pressure sampling rate
+
+    double pressure_history[3] = {0};            // last 5s
     int64_t stationary_detect_threshold_ns = 0;  // get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
 
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
@@ -479,6 +531,10 @@ static void* _barometer_thread_routin(void* args) {
         HR_LOGE("error: can not init moving avg window\n");
         return NULL;
     }
+
+    int loop = 0;
+
+    _barometer_motion.state = STOPPED;
 
     while (1) {
         struct timespec spec;
@@ -504,20 +560,82 @@ static void* _barometer_thread_routin(void* args) {
         if (isnan(_barometer_motion.mw->stddev)) {
             goto next_iteration;
         }
+
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
-
             goto next_iteration;
+        }
+
+        loop++;
+
+        if (loop % history_mw_sampling_rate) {
+            loop = 0;
+            double sum = 0, mean = 0;
+            // moving_window_update(_barometer_motion.history_mw, _barometer_motion.mw->mean);
+            for (size_t i = ARRAY_SIZE(pressure_history) - 1; i > 0; i--) {
+                pressure_history[i] = pressure_history[i - 1];
+                sum += pressure_history[i - 1];
+            }
+            pressure_history[0] = _barometer_motion.mw->mean;
+            sum += pressure_history[0];
+
+            mean = sum / (int)ARRAY_SIZE(pressure_history);
+            sum = 0;
+            for (size_t i = 0; i < ARRAY_SIZE(pressure_history); i++) {
+                sum += (pressure_history[i] - mean) * (pressure_history[i] - mean);
+                HR_LOGD("%d seconds history: %f\n", i, pressure_history[i]);
+            }
+            double stddev = sqrt(sum / (int)ARRAY_SIZE(pressure_history));
+
+            HR_LOGD("%s(%d): state:%d(%s), %d seconds history: mean:%f, stddev:%f\n", __FUNCTION__, __LINE__, _barometer_motion.state, motion_state_str(_barometer_motion.state), ARRAY_SIZE(pressure_history), mean, stddev);
+
+            if (stddev > 10) {
+                goto next_iteration;
+            }
+
+            if (stddev < 0.5) {
+                barameter_stationary = 1;
+                _motion_init_status |= MOTION_INIT_STATUS_BAROMETER_STATIONARY;
+                if (_barometer_motion.state != STOPPED) {
+                    _barometer_motion.state = STOPPED;
+                    double distance = calculate_height_difference(_barometer_motion.motion_pressure, _barometer_motion.mw->mean, temp);
+                    HR_LOGD("%s(%d): state:%d(%s), %d seconds history: mean:%f, stddev:%f, distance:%f\n", __FUNCTION__, __LINE__, _barometer_motion.state, motion_state_str(_barometer_motion.state), ARRAY_SIZE(pressure_history), mean, stddev, distance);
+                }
+                _barometer_motion.motion_pressure = _barometer_motion.mw->mean;
+            } else {
+                // clear stationary bit
+                _motion_init_status &= ~MOTION_INIT_STATUS_BAROMETER_STATIONARY;
+
+                double delta = pressure_history[0] - pressure_history[1];
+                double delta2 = pressure_history[1] - pressure_history[2];
+
+                HR_LOGD("%s(%d): state:%d(%s), pressure 0:%f vs %f (delta:%f, delta2:%f)\n", __FUNCTION__, __LINE__, _barometer_motion.state, motion_state_str(_barometer_motion.state),
+                        pressure_history[0], pressure_history[1], delta, delta2);
+
+                delta = fabs(delta);
+                delta2 = fabs(delta2);
+                if (delta > delta2) {
+                    HR_LOGD("barameter motion state: running\n");
+                    _barometer_motion.state = ACCELERATING;
+                } else if (delta < delta2) {
+                    HR_LOGD("barameter motion state: decelerating\n");
+                    _barometer_motion.state = DECELERATING;
+                } else {
+                    HR_LOGD("barameter motion state: constaing\n");
+                    _barometer_motion.state = CONSTANTING;
+                }
+            }
         }
 
         if (stationary_detect_threshold_ns == 0) {
             stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
         }
 
+#if 0
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
         }
-#if 0
+
         if (now > stationary_detect_threshold_ns) {
             double sum = 0, mean = 0;
             stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
@@ -615,7 +733,7 @@ static void* _barometer_thread_routin(void* args) {
 #endif
         HR_LOGD("barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
 
-#if 1
+#if 0
         if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
             if (_barometer_motion.mw->stddev < BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD) {
                 if ((_motion_init_stage & MOTION_INIT_STAGE_BAROMETER_STATIONARY) == 0) {
@@ -643,13 +761,13 @@ static void* _barometer_thread_routin(void* args) {
                 // if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
                 HR_LOGD("pressure predict it's not still, clear motion_init_stage stationary .............\n");
 
-                HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                // HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
                 _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY);
                 _motion_init_stage &= ~(MOTION_INIT_STAGE_BAROMETER_STATIONARY_CONFIRM);
                 _motion_init_stage = 0;
                 // 或许，我们还需要删除已经校准的数据，需要吗？因为校准本身也是会识别静止的
                 // 但是 imu 的校准在匀速阶段可能也可以进行
-                HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
+                // HR_LOGD("%s(%d): motion init stage: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_stage);
                 //}
             }
         }
@@ -803,6 +921,7 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
+    _barometer_motion.history_mw = moving_window_init(3 /*BAROMETER_SAMPLE_RATE_HZ*/ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
     // acceleration_initialize();
     // barometer_initialize();
     return 0;
