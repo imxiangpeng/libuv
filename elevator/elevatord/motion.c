@@ -53,6 +53,7 @@ static struct motion_observer* _motion_observers[10] = {0};
 
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 200;
 static double BAROMETER_SAMPLE_RATE_HZ = 12.5f;
+#define BAROMETER_PREDICT_STATIONARY_SLOPE 0.1
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
@@ -77,8 +78,6 @@ static FILE* _dump_fp = NULL;
 #endif
 
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
-
-static int barameter_stationary = 0;
 
 static double barometer_distance = 0;
 static double barometer_begin = 0;
@@ -134,7 +133,7 @@ struct barometer_stream {
     enum motion_state state;
     double motion_pressure;
     struct moving_window* mw;
-    struct moving_window* history_mw;
+    // struct moving_window* history_mw;
     int64_t delay_stop_ts_ns;
 
     int stationary_pending;
@@ -513,16 +512,17 @@ static void* _barometer_thread_routin(void* args) {
     // double alpha = 0.7;
     // double previous_pressure = 0;
 
-    int64_t history_mw_sampling_rate = 5;  //  (1/5) * pressure sampling rate
+    //int64_t history_mw_sampling_rate = 5;  //  (1/5) * pressure sampling rate
 
-    double pressure_history[3] = {0};            // last 5s
-    int64_t stationary_detect_threshold_ns = 0;  // get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
+    //double pressure_history[3] = {0};            // last 5s
+    //int64_t stationary_detect_threshold_ns = 0;  // get_monotonic_nanoseconds() + seconds_to_nanoseconds(BAROMETER_WINDOW_DELAY_SECONDS);
 
     int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
 
     struct motion_stream* input = _barometer_motion.stream;
     double result[2] = {0};  // {pressure, temp}
 
+    double slope = 0;
     enum motion_state prev_state = STOPPED;
 
     // int predict_stopped = 0;
@@ -532,7 +532,6 @@ static void* _barometer_thread_routin(void* args) {
         return NULL;
     }
 
-    int loop = 0;
 
     _barometer_motion.state = STOPPED;
 
@@ -561,6 +560,15 @@ static void* _barometer_thread_routin(void* args) {
             goto next_iteration;
         }
 
+        moving_window_slope(_barometer_motion.mw, &slope);
+
+        if (!isnan(slope) && slope < BAROMETER_PREDICT_STATIONARY_SLOPE) {
+            _motion_init_status |= MOTION_INIT_STATUS_BAROMETER_STATIONARY;
+        } else {
+            _motion_init_status &= ~MOTION_INIT_STATUS_BAROMETER_STATIONARY;
+        }
+
+#if 0
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
             goto next_iteration;
@@ -568,7 +576,7 @@ static void* _barometer_thread_routin(void* args) {
 
         loop++;
 
-        if (loop % history_mw_sampling_rate) {
+        if (loop % history_mw_sampling_rate == 0) {
             loop = 0;
             double sum = 0, mean = 0;
             // moving_window_update(_barometer_motion.history_mw, _barometer_motion.mw->mean);
@@ -615,13 +623,13 @@ static void* _barometer_thread_routin(void* args) {
                 delta = fabs(delta);
                 delta2 = fabs(delta2);
                 if (delta > delta2) {
-                    HR_LOGD("barameter motion state: running\n");
+                    //HR_LOGD("barameter motion state: running\n");
                     _barometer_motion.state = ACCELERATING;
                 } else if (delta < delta2) {
-                    HR_LOGD("barameter motion state: decelerating\n");
+                    //HR_LOGD("barameter motion state: decelerating\n");
                     _barometer_motion.state = DECELERATING;
                 } else {
-                    HR_LOGD("barameter motion state: constaing\n");
+                    //HR_LOGD("barameter motion state: constaing\n");
                     _barometer_motion.state = CONSTANTING;
                 }
             }
@@ -630,7 +638,7 @@ static void* _barometer_thread_routin(void* args) {
         if (stationary_detect_threshold_ns == 0) {
             stationary_detect_threshold_ns = now + seconds_to_nanoseconds(1);
         }
-
+#endif
 #if 0
         if (pressure_history[0] == 0) {
             pressure_history[0] = _barometer_motion.mw->mean;
@@ -731,7 +739,7 @@ static void* _barometer_thread_routin(void* args) {
             }
         }
 #endif
-        HR_LOGD("barometer mean:%f, stddev:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+        HR_LOGD("barometer mean:%f, stddev:%f, slope:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev, slope);
 
 #if 0
         if ((_motion_init_stage & MOTION_INIT_STAGE_FINISHED) == 0) {
@@ -921,7 +929,7 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_motion.history_mw = moving_window_init(3 /*BAROMETER_SAMPLE_RATE_HZ*/ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
+    // _barometer_motion.history_mw = moving_window_init(3 /*BAROMETER_SAMPLE_RATE_HZ*/ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
     // acceleration_initialize();
     // barometer_initialize();
     return 0;

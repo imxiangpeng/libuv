@@ -16,4 +16,7 @@ int moving_window_release(struct moving_window *w);
 int moving_window_update(struct moving_window* w, double val);
 
 int moving_window_trim_avg(struct moving_window* w, double* val);
+
+int moving_window_slope(struct moving_window *w, double *val);
+
 #endif
