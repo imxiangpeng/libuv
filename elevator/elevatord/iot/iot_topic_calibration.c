@@ -43,6 +43,7 @@ struct calibration_event {
     int floor;
     char label[64];
     double height;
+    double pressure;
     struct hr_list_head entry;
 };
 
@@ -102,7 +103,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
     }
 
     hr_list_for_each_entry(e, &_auto_floor_calibration_message_queue, entry) {
-        HR_LOGE("%s(%d): mxp id:%d, floor:%d, label:%s, height:%f\n", __FUNCTION__, __LINE__, e->id, e->floor, e->label, e->height);
+        HR_LOGE("%s(%d): mxp id:%d, floor:%d, label:%s, height:%f, pressure:%f\n", __FUNCTION__, __LINE__, e->id, e->floor, e->label, e->height, e->pressure);
     }
 
     e = hr_list_first_entry(&_auto_floor_calibration_message_queue, struct calibration_event, entry);
@@ -122,6 +123,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
     cJSON_AddNumberToObject(param, "Floor", e->floor);
     cJSON_AddStringToObject(param, "Label", e->label);
     cJSON_AddNumberToObject(param, "Height", e->height);
+    cJSON_AddNumberToObject(param, "Pressure", e->pressure);
 
     // free the message
     calibration_event_free(e);
@@ -189,7 +191,7 @@ static int _on_svc_message(void* payload, int len) {
     return 0;
 }
 
-static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, double pressure, int completed) {
     struct calibration_event* e = NULL;
     if (!label) {
         return;
@@ -203,6 +205,7 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     e->id = id;
     e->floor = floor;
     e->height = height;
+    e->pressure = pressure;
 
     if (label) {
         snprintf(e->label, sizeof(e->label), "%s", label);

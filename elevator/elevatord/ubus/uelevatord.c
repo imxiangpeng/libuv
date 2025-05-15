@@ -105,7 +105,7 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
 }
 
 // ubus -s /tmp/ubus.sock subscribe elevatord
-static void _on_floor_calibration_event(int id, int floor, const char* label, double height, int completed) {
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, double pressure, int completed) {
     (void)completed;
     struct ubus_context* ctx = uelevatord_get_ubus_ctx();
     if (!ctx) {
@@ -121,6 +121,7 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     blobmsg_add_u32(&b, "Floor", floor);
     blobmsg_add_string(&b, "Label", label);
     blobmsg_add_double(&b, "Height", height);
+    blobmsg_add_double(&b, "Pressure", pressure);
 
     ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1 /*no block*/);
 }

@@ -22,6 +22,7 @@ struct floor {
     char label[64];  // name
     double height;
     double height_relative;  // height relative to the base floor(ground floor)
+    double pressure;
 };
 
 struct building_model {
@@ -232,16 +233,17 @@ static void _observer_on_event(struct motion_event* data) {
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
             f->height = height;
+            f->pressure = data->pressure;
             if (_floor_calibration_index < _building.floors_below_base) {
                 f->num = _floor_calibration_index - _building.floors_below_base;
             } else {
                 f->num = _floor_calibration_index - _building.floors_below_base + _building.base_floor_num;
             }
             snprintf(f->label, sizeof(f->label), "%d", f->num);
-            HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index);
+            HR_LOGD("%s(%d): calibration: num:%d, height:%f, pressure:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, f->pressure, _floor_calibration_index);
 
             if (_floor_calibration_cb) {
-                _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, 0);
+                _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, f->pressure, 0);
             }
             _floor_calibration_index++;
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, index:%d, floor_nums:%d\n", __FUNCTION__, __LINE__, f->num, f->height, _floor_calibration_index, _building.floor_nums);
@@ -253,12 +255,13 @@ static void _observer_on_event(struct motion_event* data) {
                 snprintf(f->label, sizeof(f->label), "%d", f->num);
                 // use previous height as the last floor height
                 f->height = height;
+                f->pressure = data->pressure;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
                 floor_store_model();
 
                 if (_floor_calibration_cb) {
-                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, 1 /*completed*/);
+                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, f->pressure, 1 /*completed*/);
                     _floor_calibration_cb = NULL;
                 }
                 _floor_calibration = 0;
