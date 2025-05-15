@@ -17,6 +17,12 @@
 #include "cjson/cJSON.h"
 
 #define FLOOR_MODEL_VERSION "1.0"
+
+// this model is generated when user trigger floor calibration
+#define FLOOR_MODEL_PATH "/etc/elevatord_floor_model.json"
+// this model maybe update dynamic
+#define FLOOR_PRESSURE_MODEL_PATH "/etc/elevatord_floor_pressure_model.json"
+
 struct floor {
     int num;
     char label[64];  // name
@@ -213,11 +219,12 @@ static int floor_store_model() {
         snprintf(tmp, sizeof(tmp), "%d", f->num);
         cJSON_AddStringToObject(ele, "name", tmp);
         cJSON_AddNumberToObject(ele, "height", f->height);
+        cJSON_AddNumberToObject(ele, "pressure", f->pressure);
     }
 
     char* data = cJSON_Print(root);
     HR_LOGD("floor model:%s\n", data);
-    _replace_floor_model_config("floor_model_generated.json", data, strlen(data));
+    _replace_floor_model_config(FLOOR_MODEL_PATH, data, strlen(data));
     free(data);
     cJSON_Delete(root);
     return 0;
@@ -275,7 +282,7 @@ static struct motion_observer _floor_observer = {
 };
 
 int floor_init() {
-    floor_load_model("floor_model.json");
+    floor_load_model(FLOOR_MODEL_PATH);
     motion_register_observer(&_floor_observer);
     return 0;
 }
