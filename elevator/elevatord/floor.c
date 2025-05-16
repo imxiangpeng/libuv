@@ -1,6 +1,8 @@
 #include "floor.h"
 
 #define _GNU_SOURCE
+#define _XOPEN_SOURCE 600
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdlib.h>
@@ -13,22 +15,35 @@
 #include "file_util.h"
 #include "hr_log.h"
 #include "motion.h"
+#include "time_utils.h"
 
 #include "cjson/cJSON.h"
 
 #define FLOOR_MODEL_VERSION "1.0"
 
 // this model is generated when user trigger floor calibration
-#define FLOOR_MODEL_PATH "/etc/elevatord_floor_model.json"
+// we will not use pressure in this model
+// because pressure maybe update frequently
+#define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
+#define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord_floor_model.json"
 // this model maybe update dynamic
 #define FLOOR_PRESSURE_MODEL_PATH "/etc/elevatord_floor_pressure_model.json"
 
+#define FLOOR_PREDICT_PRESSURE_DELTA 30    // 30Pa
+#define FLOOR_PRESSURE_THRESHOLD_DELTA 10  // 10Pa
+
+static const double PRESSURE_L = 0.0065;
+static const double PRESSURE_R = 8.31432;
+static const double PRESSURE_M = 0.0289644;
+
+static const double G0 = 9.81;
 struct floor {
     int num;
     char label[64];  // name
     double height;
     double height_relative;  // height relative to the base floor(ground floor)
     double pressure;
+    double temperature;
 };
 
 struct building_model {
@@ -41,8 +56,10 @@ struct building_model {
 // only support one caller
 static int _floor_calibration = 0;
 static int _floor_calibration_index = 0;
+
 static floor_calibration_cb _floor_calibration_cb = NULL;
-int floor_load_model(const char* path) {
+
+static int floor_load_model(const char* path) {
     int ret = -1;
     ssize_t len = 0;
     char *data = NULL, *version = NULL, *date = NULL;
@@ -50,6 +67,7 @@ int floor_load_model(const char* path) {
     int floors = 0, i = 0, base_id = -1;
     double base_num = 1;
 
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     if (!path) {
         return -1;
     }
@@ -102,6 +120,7 @@ int floor_load_model(const char* path) {
         double num = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "num"));
         const char* label = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "name"));
         double height = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "height"));
+        double pressure = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "pressure"));
 
         if (isnan(num) || !label) {
             HR_LOGE("invalid .............\n");
@@ -114,10 +133,16 @@ int floor_load_model(const char* path) {
         snprintf(p->label, sizeof(p->label), "%s", label);
         p->height = height;
 
+        if (isnan(pressure)) {
+            p->pressure = 0;
+        } else {
+            p->pressure = pressure;
+        }
+
         if (p->num == base_num) {
             base_id = i;
         }
-        HR_LOGD("id:%d, base_id:%d, num:%d name:%s, height:%f\n", i, base_id, p->num, label, height);
+        HR_LOGD("id:%d, base_id:%d, num:%d name:%s, height:%f, pressure:%f\n", i, base_id, p->num, label, height, pressure);
         i++;
     }
 
@@ -134,22 +159,107 @@ int floor_load_model(const char* path) {
     for (i = base_id + 1; i < floors; i++) {
         _building.model[i].height_relative = _building.model[i - 1].height + _building.model[i - 1].height_relative;
 
-        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
+        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f, pressure:%f\n",
                 i, _building.model[i].label,
-                _building.model[i].height, _building.model[i].height_relative);
+                _building.model[i].height, _building.model[i].height_relative, _building.model[i].pressure);
     }
 
     HR_LOGD("=========================\n");
 
     for (i = 0; i < floors; i++) {
-        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f\n",
+        HR_LOGD("id:%d, name:%s, height:%f, height_base:%f, pressure:%f\n",
                 i, _building.model[i].label,
-                _building.model[i].height, _building.model[i].height_relative);
+                _building.model[i].height, _building.model[i].height_relative, _building.model[i].pressure);
     }
+
     cJSON_Delete(root);
 
     return ret;
 }
+#if 0
+int floor_load_pressure_model(const char* path) {
+    int ret = -1;
+    ssize_t len = 0;
+    char *data = NULL, *version = NULL, *date = NULL;
+    cJSON *root = NULL, *ele = NULL, *floor_array = NULL;
+    int floors = 0;
+    double base_num = 1;
+
+    if (!path) {
+        return -1;
+    }
+
+    len = futil_read(path, &data);
+    if (len <= 0) {
+        return -1;
+    }
+
+    root = cJSON_ParseWithLength(data, len);
+    free(data);
+
+    if (!root) {
+        HR_LOGE("can not read file:%s, data:%s\n", path, data);
+
+        HR_LOGE("error:%s\n", cJSON_GetErrorPtr());
+        return -1;
+    }
+
+    version = cJSON_GetStringValue(cJSON_GetObjectItem(root, "version"));
+    date = cJSON_GetStringValue(cJSON_GetObjectItem(root, "date"));
+
+    base_num = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "base_num"));
+    base_num = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "base_pressure"));
+    base_num = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "base_temperature"));
+
+    floor_array = cJSON_GetObjectItem(root, "floor");
+    floors = cJSON_GetArraySize(floor_array);
+    if (!version || !date || isnan(base_num) || floors == 0) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    HR_LOGD("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
+    
+
+    struct tm tm;
+    memset(&tm, 0, sizeof(struct tm));
+
+    if (strptime(date, "%Y-%m-%d %H:%M:%S", &tm) == NULL) {
+        cJSON_Delete(root);
+        HR_LOGE("Failed to parse date string\n");
+        return -1;
+    }
+
+    // we should compare timestamp, when it's too long maybe invalid
+    time_t timestamp = mktime(&tm);
+    
+    HR_LOGD("floor pressure model: elapse (%ld s)\n", get_realtime_ms()/1000 - timestamp);
+
+    cJSON_ArrayForEach(ele, floor_array) {
+        double num = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "num"));
+        double pressure = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "pressure"));
+        double temperature = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "temperature"));
+
+        if (isnan(num) || isnan(pressure) || isnan(temperature)) {
+            HR_LOGE("invalid .............\n");
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        for (int i = 0; i < _building.floor_nums; i++) {
+            if (num == _building.model[i].num) {
+                _building.model[i].pressure = pressure;
+                _building.model[i].temperature = temperature;
+                break;
+            }
+        }
+    }
+
+    cJSON_Delete(root);
+
+    return ret;
+}
+#endif
 
 static int _replace_floor_model_config(const char* path, char* data, int size) {
     int fd = -1;
@@ -184,7 +294,8 @@ static int _replace_floor_model_config(const char* path, char* data, int size) {
     free(tmp);
     return 0;
 }
-static int floor_store_model() {
+
+static int floor_store_model(int update_backup) {
     int i = 0;
     struct tm tm;
     struct timespec ts;
@@ -194,7 +305,7 @@ static int floor_store_model() {
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
 
-    strftime(tmp, sizeof(tmp) - 1, "%Y.%m.%d %H:%M:%S", &tm);
+    strftime(tmp, sizeof(tmp) - 1, "%Y-%m-%d %H:%M:%S", &tm);
 
     root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "version", FLOOR_MODEL_VERSION);
@@ -225,6 +336,9 @@ static int floor_store_model() {
     char* data = cJSON_Print(root);
     HR_LOGD("floor model:%s\n", data);
     _replace_floor_model_config(FLOOR_MODEL_PATH, data, strlen(data));
+    if (update_backup != 0) {
+        _replace_floor_model_config(FLOOR_MODEL_BACKUP_PATH, data, strlen(data));
+    }
     free(data);
     cJSON_Delete(root);
     return 0;
@@ -265,7 +379,7 @@ static void _observer_on_event(struct motion_event* data) {
                 f->pressure = data->pressure;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
-                floor_store_model();
+                floor_store_model(1);  // update backup when calibration
 
                 if (_floor_calibration_cb) {
                     _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, f->pressure, 1 /*completed*/);
@@ -283,6 +397,7 @@ static struct motion_observer _floor_observer = {
 
 int floor_init() {
     floor_load_model(FLOOR_MODEL_PATH);
+    // floor_load_pressure_model(FLOOR_PRESSURE_MODEL_PATH);
     motion_register_observer(&_floor_observer);
     return 0;
 }
@@ -325,6 +440,99 @@ int floor_predict(double height, int* num, char* label, int length) {
     return -1;
 }
 
+// must called when stopped
+int floor_predict_with_pressure(double pressure, double* height, int* num, char* label, int length) {
+    int i = 0;
+
+    if (!height || !num || !label) {
+        return -1;
+    }
+
+    // not support when calibration
+    if (_floor_calibration) {
+        return -1;
+    }
+    for (i = 0; i < _building.floor_nums; i++) {
+        struct floor* f = &_building.model[i];
+        double delta_p = fabs(pressure - _building.model[i].pressure);
+        HR_LOGD("%s(%d): pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
+        if (delta_p < FLOOR_PREDICT_PRESSURE_DELTA) {
+            *num = f->num;
+            *height = f->height_relative;
+            snprintf(label, length, "%s", f->label);
+            HR_LOGD("%s(%d): matched pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
+            return 0;
+        }
+    }
+
+    HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
+    // dundi
+
+    // exception
+    return -1;
+}
+
+static double calculate_height_difference(double p0, double p1, double temperature) {
+    static double fac = PRESSURE_L * PRESSURE_R / PRESSURE_M / G0;
+    return ((temperature + 273.15) / PRESSURE_L) * (1 - pow(p1 / p0, fac /*0.190284*/));
+}
+
+static double calculate_base_pressure(double p1, double height, double temperature) {
+    double fac = (PRESSURE_L * PRESSURE_R) / (PRESSURE_M * G0);
+    double T_kelvin = temperature + 273.15;
+    double ratio = 1.0 - (PRESSURE_L * height) / T_kelvin;
+
+    if (ratio <= 0.0) {
+        return -1.0;  // invalid
+    }
+
+    double exponent = 1.0 / fac;
+    double p0 = p1 / pow(ratio, exponent);
+    return p0;
+}
+
+int floor_update_pressure_when_stationary(int num, double pressure, double temperature) {
+    (void)num;
+    (void)pressure;
+    (void)temperature;
+    struct floor* fb = NULL;
+
+    double delta_p = 0;
+    for (int i = 0; i < _building.floor_nums; i++) {
+        if (_building.model[i].num == num) {
+            fb = &_building.model[i];
+            break;
+        }
+    }
+
+    if (!fb) {
+        // no such floor
+        return -1;
+    }
+
+    delta_p = fabs(pressure - fb->pressure);
+    HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f)\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure);
+    if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA ) {
+        return 0;  // no need update
+    }
+
+    for (int i = 0; i < _building.floor_nums; i++) {
+        struct floor* fr = &_building.model[i];
+        if (fb != fr) {
+            double p0 = calculate_base_pressure(pressure, fb->height_relative - fr->height_relative, temperature);
+            if (p0 > 0) {
+                p0 = round(p0 * 100)/100;
+                HR_LOGD("%s(%d): update floor:%d, pressure %f -> %f, temperature: %f -> %f, height:%f\n", __FUNCTION__, __LINE__,
+                        fr->pressure, p0, fr->temperature, temperature, calculate_height_difference(p0, pressure, temperature));
+                fr->pressure = p0;
+                fr->temperature = temperature;
+            }
+        }
+    }
+
+    floor_store_model(0);
+    return 0;
+}
 // height relative to base floor
 int floor_relative_height(int num, double* height) {
     int i = 0;
