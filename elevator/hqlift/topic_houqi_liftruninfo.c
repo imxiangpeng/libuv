@@ -43,7 +43,9 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     cJSON_AddStringToObject(root, "type", EVENT_RUNINFO_TOPIC_NAME);
-    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
+    // cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
+    // houqi's macAddr is serialno, length must > 12
+	cJSON_AddStringToObject(root, "macAddr", elevator_serialno()); // elevator_mac
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
     cJSON_AddNumberToObject(root, "runningMileageTotal", round(his->distance * 10) / 10);

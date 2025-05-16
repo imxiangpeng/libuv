@@ -26,7 +26,9 @@ static int _on_publish(void **payload, int *len) {
 
     uelevator_get_status(&st);
     cJSON_AddStringToObject(root, "type", "LiftFault");
-    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
+    // cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
+    // houqi's macAddr is serialno, length must > 12
+	cJSON_AddStringToObject(root, "macAddr", elevator_serialno()); // elevator_mac
     cJSON_AddStringToObject(root, "uuid", "00000000000000000");
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);

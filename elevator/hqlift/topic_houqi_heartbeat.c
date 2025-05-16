@@ -206,7 +206,8 @@ static int _on_publish(void** payload, int* len) {
     printf("total:%d, avail:%d, percent:%d\n", total, avail, percent);
 
     cJSON_AddStringToObject(root, "type", "HeartBeat");
-    cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
+    // houqi's macAddr is serialno, length must > 12
+    cJSON_AddStringToObject(root, "macAddr", elevator_serialno() /*uviot_get_connection_mac_address(_iot)*/);
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddStringToObject(root, "memory", DEVICE_MEMORY_SIZE_G);
     snprintf(tmp, sizeof(tmp), "%d", _cpu_usage_percent());
@@ -218,8 +219,8 @@ static int _on_publish(void** payload, int* len) {
     snprintf(tmp, sizeof(tmp), "%d", total);
     cJSON_AddStringToObject(root, "diskTotalSpace", tmp);
     //
-    cJSON_AddNumberToObject(root, "timeStamp", (int64_t)(get_realtime_ms() / 1000));
-    cJSON_AddStringToObject(root, "ipAddr", uviot_get_connection_ipv4_address(_iot));
+    cJSON_AddNumberToObject(root, "timeStamp", get_realtime_ms());
+    cJSON_AddStringToObject(root, "ipAddr", uviot_get_connection_ipv4_address(_iot));	
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
