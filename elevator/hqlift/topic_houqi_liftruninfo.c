@@ -49,7 +49,8 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
     cJSON_AddNumberToObject(root, "runningMileageTotal", round(his->distance * 10) / 10);
-    cJSON_AddNumberToObject(root, "runningTimeTotal", round((his->timestamp_end - his->timestamp_begin) / 1000.0));
+	// The documentation describes the unit as seconds, but the actual system uses milliseconds.
+    cJSON_AddNumberToObject(root, "runningTimeTotal", his->timestamp_end - his->timestamp_begin);
 
     cJSON_AddNumberToObject(root, "mannedNum", st.passenger_count);
     cJSON_AddNumberToObject(root, "inNum", 0 /*dm_lift_passenger_count_in()*/);

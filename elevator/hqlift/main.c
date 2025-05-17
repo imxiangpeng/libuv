@@ -54,12 +54,29 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
+    const char* serial = NULL;
+    const char* elevator_no = NULL;
+
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
     sigaction(SIGTERM, &action, NULL);
+
+    serial = elevator_serialno();
+    elevator_no = elevator_deviceid();
+
+    // houqi require the serial number to be at least 12 characters long.
+    if (!serial || strlen(serial) <= 12) {
+        HR_LOGE("serial is invalid!\n");
+        return -1;
+    }
+
+    if (!elevator_no || strlen(elevator_no) < 3) {
+        HR_LOGE("elevator no is invalid!\n");
+        return -1;
+    }
 
     elevator_init();
 
