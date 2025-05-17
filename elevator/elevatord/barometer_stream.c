@@ -14,7 +14,6 @@
 #include "motion_stream.h"
 #include "sensor.h"
 
-
 #define container_of(ptr, type, member) ({            \
     const typeof(((type*)0)->member)* __mptr = (ptr); \
     (type*)((char*)__mptr - offsetof(type, member));  \
@@ -34,8 +33,6 @@ struct barometer_stream {
     int calibration;
 
     int64_t now;
-
-    // struct butterworth_filter* filter;
 };
 
 static int barometer_stream_open(struct motion_stream* self) {

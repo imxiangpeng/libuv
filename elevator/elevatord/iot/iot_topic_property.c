@@ -84,7 +84,6 @@ struct property {
 static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
 
-// static void _observer_on_status(struct motion_status* st);
 
 static void _observer_on_event(struct motion_event* data);
 

@@ -67,7 +67,6 @@ static int floor_load_model(const char* path) {
     int floors = 0, i = 0, base_id = -1;
     double base_num = 1;
 
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     if (!path) {
         return -1;
     }
@@ -344,9 +343,21 @@ static int floor_store_model(int update_backup) {
     return 0;
 }
 
+ 气压保存不对，保存成了下一个楼层的气压了！
+
+
 static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
+
+    // start running, record current pressure
+    if (data->state == ACCELERATING) {
+        if (_floor_calibration) {
+            struct floor* f = &_building.model[_floor_calibration_index];
+            f->pressure = data->pressure;
+        }
+        return;
+    }
     if (data->state == STOPPED) {
         double height = data->distance;
         HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f, _floor_calibration:%d\n", __FUNCTION__, __LINE__, height, data->pressure, _floor_calibration);
@@ -354,7 +365,7 @@ static void _observer_on_event(struct motion_event* data) {
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
             f->height = height;
-            f->pressure = data->pressure;
+            // f->pressure = data->pressure;
             if (_floor_calibration_index < _building.floors_below_base) {
                 f->num = _floor_calibration_index - _building.floors_below_base;
             } else {
@@ -376,6 +387,7 @@ static void _observer_on_event(struct motion_event* data) {
                 snprintf(f->label, sizeof(f->label), "%d", f->num);
                 // use previous height as the last floor height
                 f->height = height;
+                // this is the current floor pressure
                 f->pressure = data->pressure;
 
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);

@@ -54,6 +54,9 @@ static int barometer_read(struct sensor_data* data) {
         return -1;
     }
 
+    // match iio:pressure/bmp280 convert from kPa to Pa
+    baro->pressure *= 1000.f;
+
     ch = iio_device_find_channel(_bmp388, IIO_CH_TEMPERATURE_NAME, false);
     if (!ch) {
         return -1;
@@ -63,6 +66,9 @@ static int barometer_read(struct sensor_data* data) {
         HR_LOGE("%s(%d): failed to read %s\n", __FUNCTION__, __LINE__, IIO_CH_PRESSURE_NAME);
         return -1;
     }
+
+    // match iio:pressure/bmp280 
+    baro->temperature /= 1000.f;
 
     return 0;
 }

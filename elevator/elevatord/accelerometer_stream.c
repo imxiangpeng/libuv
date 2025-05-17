@@ -228,9 +228,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
 
         self->G = calculate_stationary_veritical_acceleration(self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2]);
 
-        printf("%s(%d) G:%f\n", __FUNCTION__, __LINE__, self->G);
         self->G = round(self->G * 1000) / 1000;
-        printf("%s(%d) G:%f\n", __FUNCTION__, __LINE__, self->G);
 
         self->zero_bias_roll = atan2(-self->zero_bias_accels[1] /*y*/, self->zero_bias_accels[2] /*z*/);
         self->zero_bias_pitch = atan2(self->zero_bias_accels[0] /*x*/,
@@ -240,10 +238,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         self->zero_bias_roll = round(self->zero_bias_roll * 1000) / 1000;
 
         float az_world = self->zero_bias_accels[0] * sin(self->zero_bias_pitch) - self->zero_bias_accels[1] * sin(self->zero_bias_roll) * cos(self->zero_bias_pitch) + self->zero_bias_accels[2] * cos(self->zero_bias_roll) * cos(self->zero_bias_pitch);
-        // self->G = calculate_veritical_acceleration(self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2],
-        //                                           self->zero_bias_pitch, self->zero_bias_roll);
         HR_LOGD("%s(%d) G:%f vs %f\n", __FUNCTION__, __LINE__, self->G, az_world);
-        printf("%s(%d) G:%f vs %f\n", __FUNCTION__, __LINE__, self->G, az_world);
         self->calibration_retries = 0;
         // self->G = round(sum * 10000 / self->calibration_retries_max) / 10000;
         HR_LOGD("%s(%d): it's still: %lf, zero offset: %f %f %f, pitch:%f, roll:%f\n", __FUNCTION__, __LINE__, self->G, self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
@@ -359,7 +354,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     dt = accel.dt;
 #endif
 
-    HR_LOGD("dt:%f\n", dt);
+    // HR_LOGD("dt:%f\n", dt);
     double accel_filtered[IMU_AXES] = {0};
 
     // butter worth filter cutoff 10hz
@@ -736,7 +731,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         linear_accel = 0;
     }
 
-    HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", linear_accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
+    // HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", linear_accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
 
     if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
         HR_LOGD("ZUPT .............ekf->x[0]:%f, x[1]:%f, a:%f..\n", ekf->x[0], ekf->x[1], linear_accel);
@@ -840,8 +835,13 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
             double accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
             // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
-            f->jitter_frequency = frequency;
-            f->jitter_accel = accel_value;
+			if ( accel_value > 0.1) {
+                f->jitter_frequency = frequency;
+                f->jitter_accel = accel_value;
+			} else {
+                f->jitter_frequency = 0;
+                f->jitter_accel = 0;
+			}
             /*if (frequency == 0) {
                 for (size_t j = 0; j < f->sampling_size; j++) {
                     HR_LOGD("%s(%d): %d -> %f\n", __FUNCTION__, __LINE__, j, f->in[j]);
