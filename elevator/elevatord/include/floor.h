@@ -1,5 +1,9 @@
 #ifndef FLOOR_H
 #define FLOOR_H
+
+
+#define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
+
 int floor_init();
 int floor_deinit();
 

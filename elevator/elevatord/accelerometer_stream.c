@@ -153,7 +153,8 @@ static void _ekf_run_model(struct accelerometer_stream* self, double input[IMU_A
 static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
 static double hanning_window(int i, int N) {
-    if (N <= 1) return 1.0;
+    if (N <= 1)
+        return 1.0;
     return 0.5 * (1.0 - cos(2.0 * M_PI * i / (N - 1)));
 }
 static void apply_hanning_window(struct fft_stream* f) {
@@ -486,6 +487,28 @@ static int accelerometer_stream_calibration_completed(struct motion_stream* self
     return s->is_calibration_completed;
 }
 
+static int accelerometer_stream_read_calibration_data(struct motion_stream* self, void* data, size_t count) {
+    struct accelerometer_stream_calibration_data* p = (struct accelerometer_stream_calibration_data*)data;
+    struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
+    if (!self || !s || !p) {
+        return -1;
+    }
+
+    assert(sizeof(struct accelerometer_stream_calibration_data) == count);
+
+    if (s->is_calibration_completed == 0) {
+        return -1;
+    }
+
+    p->bias_accel_x = s->zero_bias_accels[0];
+    p->bias_accel_y = s->zero_bias_accels[1];
+    p->bias_accel_z = s->zero_bias_accels[2];
+
+    p->pitch = s->zero_bias_pitch;
+    p->roll = s->zero_bias_roll;
+    return 0;
+}
+
 static int accelerometer_stream_reset(struct motion_stream* self) {
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     ekf_t* ekf = NULL;
@@ -529,6 +552,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     s->self.open = accelerometer_stream_open;
     s->self.enter_calibration = accelerometer_stream_calibration_enter;
     s->self.calibration_completed = accelerometer_stream_calibration_completed;
+    s->self.read_calibration_data = accelerometer_stream_read_calibration_data;
     s->self.read = accelerometer_stream_read;
     s->self.reset = accelerometer_stream_reset;
     s->self.close = accelerometer_stream_close;
@@ -585,7 +609,6 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
         s->zero_bias_accels[2] = cdata.field.bias_accel_z_1000 / 1000.0;
         s->zero_bias_pitch = cdata.field.pitch_1000 / 1000.0;
         s->zero_bias_roll = cdata.field.roll_1000 / 1000.0;
-
 
         // force update filter to match zero bias
         for (int i = 0; i < 10; i++) {
@@ -721,7 +744,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         linear_accel = 0;
 
         fx[1] = 0;
-        ekf->x[1] = 0;              // 速度置 0
+        ekf->x[1] = 0;             // 速度置 0
         ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
         fx[2] = 0;
         ekf->x[2] = 0;  // reset delta accel

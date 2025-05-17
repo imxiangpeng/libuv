@@ -1,14 +1,16 @@
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#include "file_util.h"
-#include "iot_topic.h"
 #include "cjson/cJSON.h"
+#include "file_util.h"
+#include "floor.h"
 #include "hr_log.h"
+#include "iot_topic.h"
 
 #include "motion.h"
 #include "sensor.h"
@@ -25,38 +27,72 @@ enum {
 
 static struct uviot* _iot = NULL;
 
-static const char* _elevator_id_pending = NULL;
+static char _elevator_id[128] = {0};
 
-static int _property_imu_calibration = 0;
-static int _property_imu_calibration_reported = 0;
-static double _property_G = 9.81;
-static double _property_G_reported = 9.81;
+enum {
+    PROPERTY_ELEVATOR_ID = 0,
+    PROPERTY_BIAS_ACCEL_X,
+    PROPERTY_BIAS_ACCEL_Y,
+    PROPERTY_BIAS_ACCEL_Z,
+    PROPERTY_BIAS_PITCH,
+    PROPERTY_BIAS_ROLL,
+    PROPERTY_IMU_CALIBRATION,
+    PROPERTY_FLOOR,
+    PROPERTY_HEIGHT,
+    PROPERTY_PRESSURE,
+    PROPERTY_TEMPERATURE,
+    PROPERTY_FLOOR_MODEL,
+    __PROPERTY_MAX
+};
 
-static int _realtime_report_times = 0;
-static const int _realtime_report_fac = 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
+struct property {
+    const char* name;
+    enum property_data_type {
+        P_INT64,
+        P_DOUBLE,
+        P_STRING
+    } type;
 
-static double _status_pressure = 0;
-static double _status_pressure_reported = 0;
-static double _status_temperature = 20.3;
-static double _status_temperature_reported = 20.3;
-static int _status_floor = 0;
-static int _status_floor_reported = 0;
-// static int _status_door = 0;
-static double _status_speed = 0;
-static double _status_speed_reported = 0;
-static double _status_height = 0;
-static double _status_height_reported = 0;
-// static int _status_direction = 0;
+    union {
+        int64_t val_int64;
+        double val_double;
+        // !NULL: use preallocated memory, data should be ready now
+        // NULL: the value need to be handled dynamically
+        const char* val_str;  // use external memory
+    } value;
+    int dirty;
+} _properties_tbl[__PROPERTY_MAX] = {
+    [PROPERTY_ELEVATOR_ID] = {"elevator_id", P_STRING, {.val_str = _elevator_id}, 1 /* report when startup*/},
+    // calibration
+    [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", P_DOUBLE, {0}, 0},
+    [PROPERTY_BIAS_ACCEL_Y] = {"bias_accel_y", P_DOUBLE, {0}, 0},
+    [PROPERTY_BIAS_ACCEL_Z] = {"bias_accel_z", P_DOUBLE, {0}, 0},
+    [PROPERTY_BIAS_PITCH] = {"bias_pitch", P_DOUBLE, {0}, 0},
+    [PROPERTY_BIAS_ROLL] = {"bias_roll", P_DOUBLE, {0}, 0},
+    [PROPERTY_IMU_CALIBRATION] = {"imu_calibration", P_INT64, {0}, 0},
+    // floor
+    [PROPERTY_FLOOR] = {"floor", P_INT64, {0}, 0},
+    [PROPERTY_HEIGHT] = {"height", P_DOUBLE, {0}, 0},
+    // do not add speed it's realtime parameter, ali display not good
+    // also pressure and temperature only reported after run finished
+    [PROPERTY_PRESSURE] = {"pressure", P_DOUBLE, {0}, 0},
+    [PROPERTY_TEMPERATURE] = {"temperature", P_DOUBLE, {0}, 0},
+    // this is special parameter, we should read data dynamic
+    [PROPERTY_FLOOR_MODEL] = {"floor_model", P_STRING, {0}, 0},
+};
 
-static int _property_floor_model_pending = 0;
-
+static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
-static void _observer_on_status(struct motion_status* st);
+
+// static void _observer_on_status(struct motion_status* st);
+
+static void _observer_on_event(struct motion_event* data);
 
 static struct motion_observer _iot_property_observer = {
-    .on_status = _observer_on_status,
+    // we use on_event only report when finished
+    // .on_status = _observer_on_status,
+    .on_event = _observer_on_event,
     .on_sensor_calibration = _iot_motion_observer_on_sensor_calibration,
-
 };
 
 static int _on_publish(void** payload, int* len) {
@@ -73,50 +109,40 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "version", "1.0.0");
 
     param = cJSON_AddObjectToObject(root, "params");
-    if (_status_pressure_reported != _status_pressure) {
-        cJSON_AddNumberToObject(param, "pressure", _status_pressure);
-        _status_pressure_reported = _status_pressure;
-    }
-    if (_status_temperature_reported != _status_temperature) {
-        cJSON_AddNumberToObject(param, "temperature", _status_temperature);
-        _status_temperature_reported = _status_temperature;
-    }
-    if (_property_imu_calibration_reported != _property_imu_calibration) {
-        cJSON_AddNumberToObject(param, "imu_calibration", _property_imu_calibration);
-        _property_imu_calibration_reported = _property_imu_calibration;
-    }
-    if (_property_G_reported != _property_G) {
-        cJSON_AddNumberToObject(param, "G", _property_G);
-        _property_G_reported = _property_G;
-    }
-    if (_status_speed_reported != _status_speed) {
-        cJSON_AddNumberToObject(param, "speed", _status_speed);
-        _status_speed_reported = _status_speed;
-    }
 
-    if (_status_height_reported != _status_height) {
-        cJSON_AddNumberToObject(param, "height", _status_height);
-        _status_height_reported = _status_height;
-    }
+    for (size_t i = 0; i < ARRAY_SIZE(_properties_tbl); i++) {
+        struct property* prop = &_properties_tbl[i];
+        HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name, prop->type, prop->dirty);
+        if (prop->dirty == 0) {
+            continue;
+        }
+        prop->dirty = 0;
+        switch (prop->type) {
+            case P_INT64:
+                cJSON_AddNumberToObject(param, prop->name, prop->value.val_int64);
+                break;
+            case P_DOUBLE:
+                cJSON_AddNumberToObject(param, prop->name, prop->value.val_double);
+                break;
+            case P_STRING: {
+                if (prop->value.val_str) {
+                    cJSON_AddStringToObject(param, prop->name, prop->value.val_str);
+                    break;
+                }
 
-    if (_status_floor_reported != _status_floor) {
-        cJSON_AddNumberToObject(param, "floor", _status_floor);
-        _status_floor_reported = _status_floor;
-    }
+                // string point is null
+                // the value maybe should process manually
+                if (strcmp("floor_model", prop->name) == 0) {
+                    char* data = NULL;
+                    futil_read(FLOOR_MODEL_PATH, &data);
 
-    if (_elevator_id_pending) {
-        cJSON_AddStringToObject(param, "elevator_id", _elevator_id_pending);
-        _elevator_id_pending = NULL;
-    }
-
-    if (_property_floor_model_pending) {
-        char* data = NULL;
-        _property_floor_model_pending = 0;
-        futil_read("./floor_model_generated.json", &data);
-
-        cJSON_AddStringToObject(param, "floor_model", data);
-        HR_LOGD("property report floor model:%s\n", data);
-        free(data);
+                    cJSON_AddStringToObject(param, prop->name, data);
+                    HR_LOGD("property report floor model:%s\n", data);
+                    free(data);
+                }
+                break;
+            }
+        }
     }
 
     *payload = cJSON_PrintUnformatted(root);
@@ -126,16 +152,38 @@ static int _on_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", *payload);
-#if 0
-    *payload = strdup("{\"name\":\"xiaohua\"}");
-    *len = strlen(*payload);
-#endif
+
     return 0;
 }
 
 static int _on_reply_message(void* payload, int len) {
     printf("reply message %d -> %s\n", len, (char*)payload);
     return 0;
+}
+
+static size_t _popen_result(int* result, const char* cmd, char* buffer, size_t size) {
+    FILE* pstream = NULL;
+    size_t read_size = 0;
+    if (!result || !cmd || !buffer | (size <= 0)) {
+        return -1;
+    }
+
+    pstream = popen(cmd, "r");
+    if (!pstream)
+        return -1;
+
+    memset((void*)buffer, 0, size);
+
+    while (!feof(pstream) && read_size < size) {
+        size_t length = fread(buffer + read_size, 1, size - read_size, pstream);
+        read_size += length;
+    }
+
+    buffer[size - 1] = '\0';  // ensure null
+    *result = pclose(pstream);
+
+    *result = read_size != 0 ? 0 : -1;
+    return read_size;
 }
 
 static int _on_property_set_message(void* payload, int len) {
@@ -181,6 +229,23 @@ static int _on_property_set_message(void* payload, int len) {
     elevator_id = cJSON_GetStringValue(cJSON_GetObjectItem(params, "elevator_id"));
     if (elevator_id) {
         // burn elevator id
+        int result = -1;
+        char cmd[512] = {0};
+
+        // only me operate the deviceid field so do not wait lock
+        snprintf(cmd, sizeof(cmd),
+                 "echo 1 >  /sys/class/unifykeys/attach &&"
+                 // "while [ \"$(cat /sys/class/unifykeys/lock)\" != \"0\" ]; do sleep 0.1;done &&"
+                 "echo 1 >  /sys/class/unifykeys/lock && "
+                 "echo deviceid > /sys/class/unifykeys/name &&"
+                 "echo \"%s\" > /sys/class/unifykeys/write &&"
+                 "cat /sys/class/unifykeys/read &&"
+                 "echo 0 >  /sys/class/unifykeys/lock;",
+                 elevator_id);
+        // system(cmd);
+        _popen_result(&result, cmd, _elevator_id, sizeof(_elevator_id));
+
+        schedule_report();
     }
     cJSON_Delete(root);
 
@@ -211,10 +276,26 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
 
 int iot_topic_property_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)iot;
+
+    int result = -1;
+    char cmd[512] = {0};
     if (!public_key || !device_name) {
         return -1;
     }
     _iot = iot;
+
+    // only me operate the deviceid field so do not wait lock
+    snprintf(cmd, sizeof(cmd),
+             "echo 1 >  /sys/class/unifykeys/attach &&"
+             "echo 1 >  /sys/class/unifykeys/lock && "
+             "echo deviceid > /sys/class/unifykeys/name &&"
+             "cat /sys/class/unifykeys/read &&"
+             "echo 0 >  /sys/class/unifykeys/lock;");
+
+    _popen_result(&result, cmd, _elevator_id, sizeof(_elevator_id));
+
+    _properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
+
     for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
         struct uviot_topic* t = &_iot_property_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
@@ -229,52 +310,61 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data) {
     if (!data)
         return;
-    HR_LOGD("%s(%d): sensor:%d, is calibration:%d\n", __FUNCTION__, __LINE__, data->type, data->is_calibrating);
+    HR_LOGD("%s(%d): sensor:%d, is calibration:%d\n", __FUNCTION__, __LINE__, data->type, data->state);
 
     if (data->type == SENSOR_ACCELEROMETER) {
-        _property_imu_calibration = data->is_calibrating;
-        _property_G = round(data->value[0] * 10000) / 10000;
-        HR_LOGD("%s(%d): sensor:%d, is calibration:%d, G:%f vs %f\n", __FUNCTION__, __LINE__, data->type, data->is_calibrating, _property_G, data->value[0]);
-        uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
+        // bias_accel_x
+        // bias_accel_y
+        // bias_accel_z
+        // pitch
+        // roll
+        
+        _properties_tbl[PROPERTY_IMU_CALIBRATION].value.val_int64 = data->state;
+        _properties_tbl[PROPERTY_IMU_CALIBRATION].dirty = 1;
+
+        _properties_tbl[PROPERTY_BIAS_ACCEL_X].value.val_double = data->value[0];
+        _properties_tbl[PROPERTY_BIAS_ACCEL_X].dirty = 1;
+    
+        _properties_tbl[PROPERTY_BIAS_ACCEL_Y].value.val_double = data->value[1];
+        _properties_tbl[PROPERTY_BIAS_ACCEL_Y].dirty = 1;
+
+        _properties_tbl[PROPERTY_BIAS_ACCEL_Z].value.val_double = data->value[2];
+        _properties_tbl[PROPERTY_BIAS_ACCEL_Z].dirty = 1;
+
+        _properties_tbl[PROPERTY_BIAS_PITCH].value.val_double = data->value[3];
+        _properties_tbl[PROPERTY_BIAS_PITCH].dirty = 1;
+        
+        _properties_tbl[PROPERTY_BIAS_ROLL].value.val_double = data->value[4];
+        _properties_tbl[PROPERTY_BIAS_ROLL].dirty = 1;
+        schedule_report();
     }
 }
 
-static void _observer_on_status(struct motion_status* st) {
-    int need_publish = 0;
-
-    if (!st)
+static void _observer_on_event(struct motion_event* data) {
+    if (!data)
         return;
-    // HR_LOGD("speed : %f\n", _speed_realtime);
 
-    HR_LOGD("_report times:%d\n", _realtime_report_times);
-    if (_realtime_report_times % _realtime_report_fac == 0) {
-        _realtime_report_times = 0;
+    if (data->state != STOPPED && data->state != ACCELERATING)
+        return;
 
-        if (_status_speed != fabs(st->velocity)) {
-            _status_speed = round(fabs(st->velocity) * 1000) / 1000;
-            need_publish |= 1;
-        }
-        if (_status_height != st->height) {
-            _status_height = round(st->height * 100) / 100;
-        }
-        if (_status_floor != st->floor) {
-            need_publish |= 1;
-            _status_floor = st->floor;
-        }
-        if (_status_pressure != st->pressure) {
-            _status_pressure = round(st->pressure);
-            need_publish |= 1;
-        }
-    }
+    _properties_tbl[PROPERTY_FLOOR].value.val_int64 = data->floor;
+    _properties_tbl[PROPERTY_FLOOR].dirty = 1;
+    _properties_tbl[PROPERTY_HEIGHT].value.val_double = round(data->height * 100) / 100;
+    _properties_tbl[PROPERTY_HEIGHT].dirty = 1;
+    _properties_tbl[PROPERTY_PRESSURE].value.val_double = round(data->pressure * 100) / 100;
+    _properties_tbl[PROPERTY_PRESSURE].dirty = 1;
+    _properties_tbl[PROPERTY_TEMPERATURE].value.val_double = round(data->temperature * 100) / 100;
+    _properties_tbl[PROPERTY_TEMPERATURE].dirty = 1;
+    
+    
+    schedule_report();
+}
 
-    _realtime_report_times++;
-
-    if (0 != need_publish) {
-        uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
-    }
+static void schedule_report(void) {
+    uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }
 
 void report_floor_model_property() {
-    _property_floor_model_pending = 1;
+    _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

@@ -100,6 +100,13 @@ static int barometer_stream_calibration_completed(struct motion_stream* self) {
     // return bm->calibration == 1;
 }
 
+static int barometer_stream_read_calibration_data(struct motion_stream* self, void* data, size_t count) {
+    (void)self;
+    (void)data;
+    (void)count;
+
+    return 0;
+}
 static int barometer_stream_reset(struct motion_stream* self) {
     (void)self;
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
@@ -124,6 +131,7 @@ struct motion_stream* barometer_stream_init(int sampling_frequency) {
     bm->self.reset = barometer_stream_reset;
     bm->self.enter_calibration = barometer_stream_calibration_enter;
     bm->self.calibration_completed = barometer_stream_calibration_completed;
+    bm->self.read_calibration_data = barometer_stream_read_calibration_data;
     bm->self.close = barometer_stream_close;
 
     // bm->filter = butterworth_filter_init(1, sampling_frequency);

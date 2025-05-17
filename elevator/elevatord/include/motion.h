@@ -40,16 +40,18 @@ struct motion_event {
     enum motion_direction direction;
     int floor;
     int floor_begin;
+    double height;
     double distance;
     double pressure;
+    double temperature;
     int64_t timestamp_begin;
     int64_t timestamp_end;
 };
-#define CALIBRATION_EVENT_VALUES_MAX 5
+#define CALIBRATION_EVENT_VALUES_MAX 10
 
 struct motion_sensor_calibration_event {
     enum sensor_type type;
-    int is_calibrating;
+    int state;
     double value[CALIBRATION_EVENT_VALUES_MAX];
 };
 

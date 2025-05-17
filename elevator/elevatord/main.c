@@ -88,15 +88,12 @@ int main(int argc, char** argv) {
 
     printf("is_calibration:%d\n", is_calibration);
 
- 
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGUSR1, &action, NULL);
     sigaction(SIGTERM, &action, NULL);
-
-   
 
     sensor_init();
 
@@ -106,27 +103,27 @@ int main(int argc, char** argv) {
     }
 
     floor_init();
- 
+
     if (is_calibration) {
         floor_enter_calibration(base_floor, floors_below_base, floors_above_base);
-    }   
+    }
 
     tui_init();
 
     motion_run();
 
     uelevatord_init();
-    
+
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     // iot block until connected
     //iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-    
+
     motion_deinitalize();
 
     tui_deinit();
     floor_deinit();
-    
+
     uelevatord_deinit();
 
     //iot_deinit();

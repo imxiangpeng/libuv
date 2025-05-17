@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -7,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <limits.h>
 
 #include "accelerometer_stream.h"
 #include "barometer_stream.h"
@@ -27,7 +27,7 @@
 // 20250515 我们修改后的 bmp388 驱动在测试中获取气压是非常灵敏的，不需要我们之前各种延迟 workaround 方案
 // 我们在考虑另一个因素，就是极端情况下，纠正加速度的偏差
 
-#define MOTION_EVENT_CONFIRM_FROM_PRESSURE 1
+#define MOTION_EVENT_CONFIRM_FROM_PRESSURE 0
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
@@ -59,7 +59,7 @@ static double BAROMETER_SAMPLE_RATE_HZ = 12.5f;
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
 // 使用我们新的 bmp388 驱动，这里我们延迟 1s 就好了
-static double BAROMETER_WINDOW_DELAY_SECONDS = 1;  // 1;
+static double BAROMETER_WINDOW_DELAY_SECONDS = 0;  // 1;
 // static double BAROMETER_STATIONARY_DETECT_THRESHOLD_MS = 2000;
 
 // 低于该速度的时候不更新状态，保持原有状态
@@ -113,14 +113,11 @@ enum motion_init_status {
 
 static uint32_t _motion_init_status = MOTION_INIT_STATUS_UNKNOWN;
 
-enum imu_calibration_state {
-    IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL = 0,  // init value, wait signal from barometer
-    IMU_CALIB_ST_DO_CALIBRATING,
-    IMU_CALIB_ST_WAIT_CALIBRATION_COMPLETED,
-    IMU_CALIB_ST_WAIT_STATIONARY_CONFIRM,
-    IMU_CALIB_ST_CALIBRATING,
-    IMU_CALIB_ST_CALIBRATED,
-    IMU_CALIB_ST_CALIBRATED_CONFIRM,
+enum calibration_state {
+    CALIB_ST_NOT_STARTED = 0,
+    CALIB_ST_IN_PROGRESS,
+    CALIB_ST_FINISHED,
+    CALIB_ST_FAILED
 };
 struct accelerometer_stream {
     struct motion_stream* stream;
@@ -130,7 +127,7 @@ struct accelerometer_stream {
     // -1: wait signal from barometer
     // 0: have received from barometer and reset imu
     // 1: imu calibrated success or reset success
-    enum imu_calibration_state calib_state;
+    enum calibration_state calib_state;
 
     enum motion_state state;
 
@@ -192,9 +189,9 @@ static void* _accelerometer_thread_routin(void* args) {
     }
 #endif
 #if MOTION_EVENT_CONFIRM_FROM_PRESSURE
-    int64_t motion_event_delay_confirm_with_pressure_ns = seconds_to_nanoseconds(1);
+    int64_t motion_event_delay_confirm_with_pressure_ns = 0;
 #endif
-    _accelerometer_motion.calib_state = IMU_CALIB_ST_WAIT_STATIONARY_SIGNAL;
+    _accelerometer_motion.calib_state = CALIB_ST_NOT_STARTED;
     struct motion_stream* input = _accelerometer_motion.stream;
     struct accelerometer_stream_data result;
     for (;;) {
@@ -235,11 +232,8 @@ static void* _accelerometer_thread_routin(void* args) {
                     HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_status);
                     input->enter_calibration(input);
                 }
-                // TODO
-                // 2.3 we should update motion height according barometer pressure data
-                HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration, we should read init height from barometer\n", __FUNCTION__, __LINE__, _motion_init_status);
-                // read heigh from barometer
-                _accelerometer_motion.height = 0;
+                // _accelerometer_motion.calib_state = CALIB_ST_IN_PROGRESS;
+
                 goto next_iteration;
             }
 
@@ -254,6 +248,8 @@ static void* _accelerometer_thread_routin(void* args) {
                 goto next_iteration;
             }
 
+            // TODO
+            // 4 we should update motion height according barometer pressure data
             double height = 0;
             int num = 0;
             char label[256] = {0};
@@ -264,8 +260,14 @@ static void* _accelerometer_thread_routin(void* args) {
                 floor_baseline_num = num;
                 floor_baseline_pressure = barometer_pressure;
                 HR_LOGD("boot startup finished at: floor: %d, height:%f\n", num, height);
-                
+
                 floor_update_pressure_when_stationary(num, barometer_pressure, barometer_temperature);
+            } else {
+                HR_LOGE("we can not map to floor number ! pressure: %f, temp:%f\n", barometer_pressure, barometer_pressure);
+                _accelerometer_motion.height = 0;
+                _barometer_motion.height = 0;
+                floor_baseline_num = 1;
+                floor_baseline_pressure = barometer_pressure;
             }
 
             _motion_init_status |= MOTION_INIT_STATUS_FINISHED;
@@ -277,14 +279,14 @@ static void* _accelerometer_thread_routin(void* args) {
             // error or calibration not complete
             if (ret == -2 || 1 != input->calibration_completed(input)) {
                 HR_LOGD("accelerometer is under calibration\n");
-                if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATING) {
-                    _accelerometer_motion.calib_state = IMU_CALIB_ST_CALIBRATING;
+                if (_accelerometer_motion.calib_state != CALIB_ST_IN_PROGRESS) {
+                    _accelerometer_motion.calib_state = CALIB_ST_IN_PROGRESS;
 
                     struct motion_sensor_calibration_event ev;
 
                     memset((void*)&ev, 0, sizeof(ev));
                     ev.type = SENSOR_ACCELEROMETER;
-                    ev.is_calibrating = 1;
+                    ev.state = 1;  //_accelerometer_motion.calib_state;
                     notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
                 }
             }
@@ -292,15 +294,26 @@ static void* _accelerometer_thread_routin(void* args) {
         }
 
         // read success it mean calibration is finished
-        if (_accelerometer_motion.calib_state != IMU_CALIB_ST_CALIBRATED) {
+        if (_accelerometer_motion.calib_state != CALIB_ST_FINISHED) {
+            struct accelerometer_stream_calibration_data data;
             struct motion_sensor_calibration_event ev;
 
-            _accelerometer_motion.calib_state = IMU_CALIB_ST_CALIBRATED;
+            _accelerometer_motion.calib_state = CALIB_ST_FINISHED;
 
             memset((void*)&ev, 0, sizeof(ev));
             ev.type = SENSOR_ACCELEROMETER;
-            ev.is_calibrating = 0;
-            ev.value[0] = result.G;  // id 4 --> local G
+            ev.state = 0;  // CALIB_ST_FINISHED;
+            // ev.value[0] = result.G;  // id 4 --> local G
+
+            if (input->read_calibration_data) {
+                if (0 == input->read_calibration_data(input, &data, sizeof(data))) {
+                    ev.value[0] = data.bias_accel_x;
+                    ev.value[1] = data.bias_accel_y;
+                    ev.value[2] = data.bias_accel_z;
+                    ev.value[3] = data.pitch;
+                    ev.value[4] = data.roll;
+                }
+            }
             notify_observer(MOTION_OBSERVER_ACTION_ON_SENSOR_CALIBRATION, &ev);
         }
 
@@ -336,7 +349,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
         HR_LOGD("%s(%d):barometer barometer_velocity:%f, barometer_pressure:%f, barometer_begin:%f, barometer_end:%f, (%f)\n", __FUNCTION__, __LINE__, barometer_velocity, barometer_pressure, barometer_begin, barometer_end, barometer_pressure - barometer_end);
         if (new_state != _accelerometer_motion.state) {
-            HR_LOGD("motion state: %d -> %d %s ==> %s\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state));
+            HR_LOGD("mxp motion state: %d -> %d %s ==> %s, pressure:%f\n", _accelerometer_motion.state, new_state, motion_state_str(_accelerometer_motion.state), motion_state_str(new_state), barometer_pressure);
             if (_accelerometer_motion.state == STOPPED) {
                 HR_LOGD("mxp starting-------------------from:%d -> %s----->\n", floor_num, floor_label);
                 _accelerometer_motion.ev.state = new_state;
@@ -381,6 +394,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.state = new_state;
                 // according distance
                 _accelerometer_motion.ev.direction = distance > 0 ? DIRECTION_UP : DIRECTION_DOWN;
+                _accelerometer_motion.ev.height = _accelerometer_motion.height;
                 _accelerometer_motion.ev.distance = distance;
                 _accelerometer_motion.ev.floor_begin = _accelerometer_motion.ev.floor;
                 _accelerometer_motion.ev.floor = floor_num;
@@ -390,7 +404,31 @@ static void* _accelerometer_thread_routin(void* args) {
                 // _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
                 motion_event_delay_confirm_with_pressure_ns = now + seconds_to_nanoseconds(1);
 #else
+                // previous event pressure, maybe first event
+                double height = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
+                HR_LOGD("%s(%d): mxp stopped, pressure detect height:%f vs acc :%f\n", __FUNCTION__, __LINE__, height, distance);
+                int num = 0;
+                char label[256] = {0};
+                double relative_height = 0;
+
+                if (floor_baseline_pressure != 0) {
+                    relative_height = calculate_height_difference(floor_baseline_pressure, barometer_pressure, barometer_temperature);
+                    double h = 0;
+                    if (floor_relative_height(floor_baseline_num, &h) == 0) {
+                        HR_LOGD("mxp finished, baseline floor:%d, relative to baseline :%f, calc real base relative height:%f\n", floor_baseline_num, relative_height, relative_height + h);
+                        relative_height += h;
+                    }
+                }
+
+                HR_LOGD("mxp finished current pressure:%f, height: %f related to :%d floor\n", barometer_pressure, relative_height, floor_baseline_num);
+                if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
+                    // _accelerometer_motion.height = height;
+                    HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
+                } else {
+                    HR_LOGD("mxp finished at unknown, but from acce: floor: %d, height:%f\n", floor_num, _accelerometer_motion.height);
+                }
                 _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
+                _accelerometer_motion.ev.temperature = barometer_temperature;
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
 #endif
             }
@@ -408,10 +446,10 @@ static void* _accelerometer_thread_routin(void* args) {
                         break;
                     }
                     HR_LOGD("%s(%d): motion event delay confirm! STOPPED, pressure:%f vs %f = (%f)\n", __FUNCTION__, __LINE__, _accelerometer_motion.ev.pressure, barometer_pressure, barometer_pressure - _accelerometer_motion.ev.pressure);
-                    //if (fabs(barometer_pressure - _accelerometer_motion.ev.pressure) < 30) {  // moving less than 2.4
-                    //    // ignore the event maybe invalid!
-                    //    break;
-                    //}
+                    // if (fabs(barometer_pressure - _accelerometer_motion.ev.pressure) < 30) {  // moving less than 2.4
+                    //     // ignore the event maybe invalid!
+                    //     break;
+                    // }
                     double height = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
 
                     HR_LOGD("%s(%d): stopped, pressure detect height:%f vs acc :%f\n", __FUNCTION__, __LINE__, height, distance);
@@ -429,7 +467,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     if (floor_baseline_pressure != 0) {
                         relative_height = calculate_height_difference(floor_baseline_pressure, barometer_pressure, barometer_temperature);
                         double h = 0;
-                        if(floor_relative_height(floor_baseline_num, &h) == 0) {
+                        if (floor_relative_height(floor_baseline_num, &h) == 0) {
                             HR_LOGD("mxp finished, baseline floor:%d, relative to baseline :%f, calc real base relative height:%f\n", floor_baseline_num, relative_height, relative_height + h);
                             relative_height += h;
                         }

@@ -24,7 +24,7 @@
 // this model is generated when user trigger floor calibration
 // we will not use pressure in this model
 // because pressure maybe update frequently
-#define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
+// #define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
 #define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord_floor_model.json"
 // this model maybe update dynamic
 #define FLOOR_PRESSURE_MODEL_PATH "/etc/elevatord_floor_pressure_model.json"
