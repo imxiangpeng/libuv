@@ -70,7 +70,7 @@ static int _on_publish(void **payload, int *len) {
     return -1;
 
   *len = strlen(*payload);
-  HR_LOGD("publish: %s\n", *payload);
+  HR_LOGD("publish: %s\n", (char*)*payload);
 
    print_memory_usage();
   return 0;

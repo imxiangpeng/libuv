@@ -309,12 +309,14 @@ static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitt
     struct uviot_impl* iot = (struct uviot_impl*)obj;
     if (!mosq || !iot)
         return;
+#if 0
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
             message->topic, message->payloadlen);
     if (message->payload) {
         HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n%s\n", __FUNCTION__,
-                __LINE__, message->topic, message->payloadlen, message->payload);
+                __LINE__, message->topic, message->payloadlen, (const char*)message->payload);
     }
+#endif
 
     if (!message->payload)
         return;

@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
         floor_enter_calibration(base_floor, floors_below_base, floors_above_base);
     }
 
-    tui_init();
+    //tui_init();
 
     motion_run();
 
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
 
     motion_deinitalize();
 
-    tui_deinit();
+    //tui_deinit();
     floor_deinit();
 
     uelevatord_deinit();

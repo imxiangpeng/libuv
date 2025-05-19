@@ -226,7 +226,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         _historical.floor_begin = (int)blobmsg_get_u32(tb[HI_FLOOR_BEGIN]);
         _historical.floor_end = (int)blobmsg_get_u32(tb[HI_FLOOR_END]);
 
-        HR_LOGD("historical: distance:%f, direction:%d, timestamp:%u -> %u(%u), floor: %d -> %d\n", _historical.distance, _historical.direction,
+        HR_LOGD("historical: distance:%f, direction:%d, timestamp:%lu -> %lu(%lu), floor: %d -> %d\n", _historical.distance, _historical.direction,
                 _historical.timestamp_begin, _historical.timestamp_end, _historical.timestamp_end - _historical.timestamp_begin,
                 _historical.floor_begin, _historical.floor_end);
 

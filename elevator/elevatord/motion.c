@@ -421,7 +421,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
                     // adjust base floor to base floor in model
                     if (floor_num == floor_base_floor()) {
-                        HR_LOGD("adjust baseline floor from %d to %f\n", floor_baseline_num, floor_num);
+                        HR_LOGD("adjust baseline floor from %d to %d\n", floor_baseline_num, floor_num);
                         floor_baseline_num = floor_base_floor();
                         floor_baseline_pressure = barometer_pressure;
                     }

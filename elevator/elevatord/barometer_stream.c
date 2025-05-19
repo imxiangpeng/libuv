@@ -43,7 +43,7 @@ static int barometer_stream_open(struct motion_stream* self) {
     s->sensor = sensor_instance(SENSOR_BAROMETER);
 
     if (0 != s->sensor->init()) {
-        HR_LOGE("%s(%d): can open open barometer ...\n");
+        HR_LOGE("%s(%d): can open open barometer ...\n", __FUNCTION__, __LINE__);
         return -1;
     }
 

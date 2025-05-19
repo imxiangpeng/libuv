@@ -486,6 +486,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
             if (p0 > 0) {
                 p0 = round(p0 * 100) / 100;
                 HR_LOGD("%s(%d): update floor:%d, pressure %f -> %f, temperature: %f -> %f, height:%f\n", __FUNCTION__, __LINE__,
+                        fr->num,
                         fr->pressure, p0, fr->temperature, temperature, calculate_height_difference(p0, pressure, temperature));
                 fr->pressure = p0;
                 fr->temperature = temperature;

@@ -88,7 +88,7 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
         return -1;
     }
 
-    HR_LOGD("%s(%d): method:%s\n", method);
+    HR_LOGD("%s(%d): method:%s\n", __FUNCTION__, __LINE__, method);
     if (0 == strcmp("get", method)) {
         memset((void*)&b, 0, sizeof(b));
         blob_buf_init(&b, 0);

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "file_util.h"
 #include "iot_topic.h"
 /// publish every 10s
 #include "cjson/cJSON.h"
@@ -134,7 +135,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
         return -1;
 
     *len = strlen(*payload);
-    HR_LOGD("publish: %s\n", *payload);
+    HR_LOGD("publish: %s\n", (char*)*payload);
 #if 1
     if (!hr_list_empty(&_auto_floor_calibration_message_queue)) {
         // when queue is not empty, we should trigger again
@@ -146,7 +147,10 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
 }
 
 static int _on_reply_message(void* payload, int len) {
-    printf("reply message %d -> %s\n", len, (char*)payload);
+    if (!payload)
+        return -1;
+
+    printf("reply message %d -> %s\n", len, (const char*)payload);
     return 0;
 }
 // {"BaseFloor":1,"FloorsBelow":2,"FloorsAbove":22}
@@ -160,7 +164,7 @@ static int _on_svc_message(void* payload, int len) {
         return -1;
     }
 
-    HR_LOGD("%s(%d): payload:%s\n", __FUNCTION__, __LINE__, payload);
+    HR_LOGD("%s(%d): payload:%s\n", __FUNCTION__, __LINE__, (const char*)payload);
     root = cJSON_ParseWithLength((const char*)payload, len);
     if (!root) {
         return -1;
@@ -321,7 +325,7 @@ static struct uviot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
     },
 };
 
-int iot_topic_calibration_init(struct uviot* iot, const char* public_key, const char* device_name) {
+int iot_topic_service_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)iot;
     if (!public_key || !device_name) {
         return -1;

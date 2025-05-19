@@ -39,7 +39,7 @@ set(SOURCES main.c
     iot/iot.c
     iot/iot_topic.c
     iot/iot_topic_property.c
-    iot/iot_topic_calibration.c
+    iot/iot_topic_service.c
     ubus/uelevatord.c
     butterworth_filter.c
     moving_window.c)

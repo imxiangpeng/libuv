@@ -13,6 +13,8 @@
 #include <openssl/hmac.h>
 #include <uv.h>
 
+#include "sconf.h"
+
 #include "hr_log.h"
 #include "iot_topic.h"
 
@@ -23,6 +25,14 @@
 #define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
 #define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
 #define TIHUIYAN_DEVICE_NAME "LC123456789" // usid serial
+
+struct sconf_proto _mqtt_conf_fields[] = {
+    {"broker", PROTO_VALUE_STRING, { .string = NULL}},
+    {"port", PROTO_VALUE_INT64, { .int64 = 1883}},
+    {"keepalive", PROTO_VALUE_INT64, { .int64 = 60}},
+    {"username", PROTO_VALUE_STRING, { .string = NULL}},
+    {"password", PROTO_VALUE_STRING, { .string = NULL}},
+};
 
 static struct uviot* _iot = NULL;
 
@@ -46,10 +56,18 @@ int iot_init(struct uv_loop_s* loop) {
     char* product_key = TIHUIYAN_PRODUCT_KEY;
 
     long long ts = time_ms();
-
     _iot = uviot_alloc(loop);
     if (!_iot)
         return -1;
+
+
+    if ( 0 == sconf_load_with_proto("elevatord_iot.conf", _mqtt_conf_fields, sizeof(_mqtt_conf_fields)/sizeof(_mqtt_conf_fields[0])) ){
+        
+    } else {
+        
+    }
+
+
 
     snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
     _iot->port = BROKER_DEFAULT_PORT;

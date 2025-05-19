@@ -13,9 +13,16 @@
 #include "iot_topic.h"
 
 #include "motion.h"
+#include "sconf.h"
 #include "sensor.h"
 
 #include "uviot.h"
+
+// #define ELEVATORD_CONFIG_PATH "/etc/elevatord/elevatord.conf"
+#define ELEVATORD_CONFIG_PATH "elevatord.conf"
+#define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
+
+#define HQLIFTD_CONFIG_PATH "hqliftd.conf"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -28,6 +35,8 @@ enum {
 static struct uviot* _iot = NULL;
 
 static char _elevator_id[128] = {0};
+
+static struct sconf_proto report_switch_conf = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}};
 
 enum {
     PROPERTY_ELEVATOR_ID = 0,
@@ -42,6 +51,8 @@ enum {
     PROPERTY_PRESSURE,
     PROPERTY_TEMPERATURE,
     PROPERTY_FLOOR_MODEL,
+    PROPERTY_REPORT_SWITCH,
+    PROPERTY_HQLIFTD_CONFIG,
     __PROPERTY_MAX
 };
 
@@ -79,11 +90,12 @@ struct property {
     [PROPERTY_TEMPERATURE] = {"temperature", P_DOUBLE, {0}, 0},
     // this is special parameter, we should read data dynamic
     [PROPERTY_FLOOR_MODEL] = {"floor_model", P_STRING, {0}, 0},
+    [PROPERTY_REPORT_SWITCH] = {"report_switch", P_INT64, {0}, 0},
+    [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", P_STRING, {0}, 0},
 };
 
 static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
-
 
 static void _observer_on_event(struct motion_event* data);
 
@@ -138,6 +150,11 @@ static int _on_publish(void** payload, int* len) {
                     cJSON_AddStringToObject(param, prop->name, data);
                     HR_LOGD("property report floor model:%s\n", data);
                     free(data);
+                } else if (strcmp("hqliftd_config", prop->name) == 0) {
+                    char* data = NULL;
+                    futil_read(HQLIFTD_CONFIG_PATH, &data);
+                    cJSON_AddStringToObject(param, prop->name, data);
+                    free(data);
                 }
                 break;
             }
@@ -150,13 +167,15 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     *len = strlen(*payload);
-    HR_LOGD("publish: %s\n", *payload);
+    HR_LOGD("publish: %s\n", (char*)*payload);
 
     return 0;
 }
 
 static int _on_reply_message(void* payload, int len) {
-    printf("reply message %d -> %s\n", len, (char*)payload);
+    (void)payload;
+    (void)len;
+    // printf("reply message %d -> %s\n", len, (char*)payload);
     return 0;
 }
 
@@ -186,10 +205,10 @@ static size_t _popen_result(int* result, const char* cmd, char* buffer, size_t s
 }
 
 static int _on_property_set_message(void* payload, int len) {
-    printf("set message %d -> %s\n", len, (char*)payload);
+    // printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     double val = 0;
-    const char* elevator_id = NULL;
+    const char* val_str = NULL;
     cJSON *root = NULL, *params = NULL, *ele = NULL;
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
@@ -219,14 +238,14 @@ static int _on_property_set_message(void* payload, int len) {
 
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "imu_calibration"));
     if (!isnan(val)) {
-        HR_LOGD("%s(%d): enter calibration val: %d\n", __FUNCTION__, __LINE__, val);
+        HR_LOGD("%s(%d): enter calibration val: %d\n", __FUNCTION__, __LINE__, (int)val);
         if (val == 1) {
             motion_enter_sensor_calibration();
         }
     }
 
-    elevator_id = cJSON_GetStringValue(cJSON_GetObjectItem(params, "elevator_id"));
-    if (elevator_id) {
+    val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "elevator_id"));
+    if (val_str) {
         // burn elevator id
         int result = -1;
         char cmd[512] = {0};
@@ -240,12 +259,31 @@ static int _on_property_set_message(void* payload, int len) {
                  "echo \"%s\" > /sys/class/unifykeys/write &&"
                  "cat /sys/class/unifykeys/read &&"
                  "echo 0 >  /sys/class/unifykeys/lock;",
-                 elevator_id);
+                 val_str);
         // system(cmd);
         _popen_result(&result, cmd, _elevator_id, sizeof(_elevator_id));
 
+        _properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
         schedule_report();
     }
+
+    val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "report_switch"));
+    if (!isnan(val)) {
+        report_switch_conf.value.int64 = (int64_t)val;
+        sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &report_switch_conf, 1);
+
+        _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = report_switch_conf.value.int64;
+        _properties_tbl[PROPERTY_REPORT_SWITCH].dirty = 1;
+        schedule_report();
+    }
+
+    val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "hqliftd_config"));
+    if (val_str) {
+        futil_write(HQLIFTD_CONFIG_PATH, (void*)val_str, strlen(val_str));
+        _properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
+        schedule_report();
+    }
+
     cJSON_Delete(root);
 
     return 0;
@@ -295,6 +333,12 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
 
     _properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
 
+    // should load from config
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, &report_switch_conf, 1);
+    _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = report_switch_conf.value.int64;
+    // always report when startup
+    _properties_tbl[PROPERTY_REPORT_SWITCH].dirty = 1;
+
     for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
         struct uviot_topic* t = &_iot_property_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
@@ -317,13 +361,13 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
         // bias_accel_z
         // pitch
         // roll
-        
+
         _properties_tbl[PROPERTY_IMU_CALIBRATION].value.val_int64 = data->state;
         _properties_tbl[PROPERTY_IMU_CALIBRATION].dirty = 1;
 
         _properties_tbl[PROPERTY_BIAS_ACCEL_X].value.val_double = data->value[0];
         _properties_tbl[PROPERTY_BIAS_ACCEL_X].dirty = 1;
-    
+
         _properties_tbl[PROPERTY_BIAS_ACCEL_Y].value.val_double = data->value[1];
         _properties_tbl[PROPERTY_BIAS_ACCEL_Y].dirty = 1;
 
@@ -332,7 +376,7 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
 
         _properties_tbl[PROPERTY_BIAS_PITCH].value.val_double = data->value[3];
         _properties_tbl[PROPERTY_BIAS_PITCH].dirty = 1;
-        
+
         _properties_tbl[PROPERTY_BIAS_ROLL].value.val_double = data->value[4];
         _properties_tbl[PROPERTY_BIAS_ROLL].dirty = 1;
         schedule_report();
@@ -342,6 +386,11 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
 static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
+
+    // do not allow report property
+    if (report_switch_conf.value.int64 == 0) {
+        return;
+    }
 
     if (data->state != STOPPED && data->state != ACCELERATING)
         return;
@@ -354,10 +403,11 @@ static void _observer_on_event(struct motion_event* data) {
     _properties_tbl[PROPERTY_PRESSURE].dirty = 1;
     _properties_tbl[PROPERTY_TEMPERATURE].value.val_double = round(data->temperature * 100) / 100;
     _properties_tbl[PROPERTY_TEMPERATURE].dirty = 1;
- 
+
     schedule_report();
 }
 
+// can be called multi times, uv_async will run only once
 static void schedule_report(void) {
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

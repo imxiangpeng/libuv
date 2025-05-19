@@ -16,7 +16,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#include <stdio.h>
 #ifndef LOG_TAG
 #define LOG_TAG NULL
 #endif
@@ -47,6 +47,12 @@ int _hr_log_printf(int prio, const char* tag, const char *fmt, ...);
 
 #define HR_LOG(priority, tag, ...) \
   _hr_log_printf(HR_LOG_##priority, tag, __VA_ARGS__)
+
+//#undef HR_LOGD
+//#undef HR_LOGE
+
+//#define HR_LOGD printf
+//#define HR_LOGE printf
 #ifdef __cplusplus
 }
 #endif

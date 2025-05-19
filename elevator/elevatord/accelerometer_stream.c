@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #include "butterworth_filter.h"
-#include "conf.h"
+#include "sconf.h"
 #include "hr_log.h"
 #include "motion_stream.h"
 #include "moving_window.h"
@@ -265,7 +265,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         printf("bias accel z:%ld\n", cdata.field.bias_accel_z_1000);
         printf("pitch:%ld\n", cdata.field.pitch_1000);
         printf("roll:%ld\n", cdata.field.roll_1000);
-        conf_save_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX);
+        sconf_save_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX);
 
         return;
     }
@@ -364,10 +364,10 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     // butter worth filter cutoff 10hz
     for (size_t i = 0; i < ARRAY_SIZE(accel_filtered); i++) {
         accel_filtered[i] = butterworth_filter_process(s->filter[i], accel.x[i]);
-        double v = accel.x[i] - accel_filtered[i];
+        /*double v = accel.x[i] - accel_filtered[i];
         if (fabs(v) > ACCEL_JITTER_THRESHOLD) {
-            HR_LOGE("%d -> jitter:%f ....\n", i, v);
-        }
+            HR_LOGE("%ld -> jitter:%f ....\n", i, v);
+        }*/
     }
 
     // it indicates that the camera is inverted, when z < 0
@@ -573,7 +573,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
 
     union calibration_data cdata;
 
-    if (0 == conf_load_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX)) {
+    if (0 == sconf_load_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX)) {
         printf("calibrated:%ld\n", cdata.field.is_calibrated);
         printf("g:%ld\n", cdata.field.g_1000);
         printf("bias accel x:%ld\n", cdata.field.bias_accel_x_1000);

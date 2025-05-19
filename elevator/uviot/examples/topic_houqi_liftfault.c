@@ -22,7 +22,7 @@ static int _on_publish(void **payload, int *len) {
     if (!*payload) return -1;
 
     *len = strlen(*payload);
-    HR_LOGD("publish: %s\n", *payload);
+    HR_LOGD("publish: %s\n", (char*)*payload);
     return 0;
 }
 

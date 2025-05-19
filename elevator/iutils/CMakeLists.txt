@@ -8,9 +8,10 @@ INCLUDE_DIRECTORIES(include)
 
 option(HRLOG_OUTPUT_FILE "output fille output to file not default stdout" OFF)
 
-set(SOURCES conf.c file_util.c
+set(SOURCES file_util.c
     hr_buffer.c
     hr_log.c
+    sconf.c
     time_utils.c)
 
 ADD_LIBRARY(iutils STATIC ${SOURCES})
