@@ -133,7 +133,7 @@ static int _on_publish(void** payload, int* len) {
                 // the value maybe should process manually
                 if (strcmp("floor_model", prop->name) == 0) {
                     char* data = NULL;
-                    futil_read(FLOOR_MODEL_PATH, &data);
+                    futil_read(floor_model_data_path(), &data);
 
                     cJSON_AddStringToObject(param, prop->name, data);
                     HR_LOGD("property report floor model:%s\n", data);

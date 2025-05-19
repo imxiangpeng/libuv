@@ -53,6 +53,7 @@ static struct motion_observer* _motion_observers[10] = {0};
 
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 200;
 static double BAROMETER_SAMPLE_RATE_HZ = 12.5f;
+
 #define BAROMETER_PREDICT_STATIONARY_SLOPE 0.1
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
@@ -138,11 +139,7 @@ struct barometer_stream {
     enum motion_state state;
     double motion_pressure;
     struct moving_window* mw;
-    // struct moving_window* history_mw;
     int64_t delay_stop_ts_ns;
-
-    // int stationary_pending;
-    // int64_t stationary_detect_threshold_ns;
 } _barometer_motion;
 
 static int notify_observer(enum motion_observer_action action, void* data);
@@ -201,7 +198,7 @@ static void* _accelerometer_thread_routin(void* args) {
             // 1. wait barameter detect stationary
             // barometer thread will update MOTION_INIT_STATUS_BAROMETER_STATIONARY of _motion_init_status
             if ((_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY) == 0) {
-                HR_LOGD("%s(%d): 1. wait barometer signal motion init status: 0x%X, wait barometer stationary signal\n", __FUNCTION__, __LINE__, _motion_init_status);
+                HR_LOGD("%s(%d): 1. wait barometer stationary signal! motion init status: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_status);
 
                 // 1.1 clear calibration bit when barometer is not stationary
                 _motion_init_status &= ~MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION;
@@ -211,14 +208,14 @@ static void* _accelerometer_thread_routin(void* args) {
 
             // 2. do calibration detection or reset state when calibration is completed
             if ((_motion_init_status & MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION) == 0) {
+                HR_LOGD("%s(%d): 2. do calibration or reset! motion init status: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_status);
+
                 _motion_init_status |= MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION;
                 // 2.1 only reset status when device is calibrated
                 // 2.2 do calibration when needed
                 if (input->calibration_completed(input)) {
-                    HR_LOGD("%s(%d): motion init stage: 0x%X, imu reset state\n", __FUNCTION__, __LINE__, _motion_init_status);
                     input->reset(input);
                 } else {
-                    HR_LOGD("%s(%d): motion init stage: 0x%X, do imu calibration\n", __FUNCTION__, __LINE__, _motion_init_status);
                     input->enter_calibration(input);
                 }
                 // _accelerometer_motion.calib_state = CALIB_ST_IN_PROGRESS;
@@ -228,35 +225,37 @@ static void* _accelerometer_thread_routin(void* args) {
 
             // 3. wait calibration finished
             if ((_motion_init_status & MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATION) == 0) {
+                HR_LOGD("%s(%d): 3. wait calibration finished! motion init status: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_status);
+
                 if (input->calibration_completed(input)) {
                     _motion_init_status |= MOTION_INIT_STATUS_ACCELEROMETER_CALIBRATRION_COMPLETED;
-                    HR_LOGD("%s(%d): 3. wait calibration finished motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_status);
-                } else {
-                    HR_LOGD("%s(%d): 3. wait calibration motion init stage: 0x%X, calibration finished\n", __FUNCTION__, __LINE__, _motion_init_status);
                 }
                 goto next_iteration;
             }
 
             // TODO
             // 4 we should update motion height according barometer pressure data
-            double height = 0;
-            int num = 0;
-            char label[256] = {0};
-            HR_LOGD("boot startup finished current pressure:%f\n", barometer_pressure);
-            if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
-                _accelerometer_motion.height = height;
-                _barometer_motion.height = height;
-                floor_baseline_num = num;
-                floor_baseline_pressure = barometer_pressure;
-                HR_LOGD("boot startup finished at: floor: %d, height:%f\n", num, height);
+            {
+                double height = 0;
+                int num = 0;
+                char label[256] = {0};
+                HR_LOGD("%s(%d): 4. calibration finished, detect floor according pressure! motion init status: 0x%X\n", __FUNCTION__, __LINE__, _motion_init_status);
+                HR_LOGD("boot startup finished current pressure:%f\n", barometer_pressure);
+                if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
+                    _accelerometer_motion.height = height;
+                    _barometer_motion.height = height;
+                    floor_baseline_num = num;
+                    floor_baseline_pressure = barometer_pressure;
+                    HR_LOGD("boot startup finished at: floor: %d, height:%f\n", num, height);
 
-                floor_update_pressure_when_stationary(num, barometer_pressure, barometer_temperature);
-            } else {
-                HR_LOGE("we can not map to floor number ! pressure: %f, temp:%f\n", barometer_pressure, barometer_pressure);
-                _accelerometer_motion.height = 0;
-                _barometer_motion.height = 0;
-                floor_baseline_num = 1;
-                floor_baseline_pressure = barometer_pressure;
+                    floor_update_pressure_when_stationary(num, barometer_pressure, barometer_temperature);
+                } else {
+                    HR_LOGE("we can not map to floor number ! pressure: %f, temp:%f\n", barometer_pressure, barometer_pressure);
+                    _accelerometer_motion.height = 0;
+                    _barometer_motion.height = 0;
+                    floor_baseline_num = 1;
+                    floor_baseline_pressure = barometer_pressure;
+                }
             }
 
             _motion_init_status |= MOTION_INIT_STATUS_FINISHED;
@@ -457,7 +456,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     if (height > 20) {
                         // maybe we should use pressure to update accelerometer
                     }
-                    _accelerometer_motion.ev.pressure =  barometer_pressure;
+                    _accelerometer_motion.ev.pressure = barometer_pressure;
                     notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
 
                     // double height = 0;
@@ -632,7 +631,6 @@ static void* _barometer_thread_routin(void* args) {
         // barometer_now = now;
         // barometer_pressure = _barometer_motion.mw->mean;//pressure;
         barometer_pressure = round(pressure * 100) / 100;
-
         barometer_temperature = round(temp * 100) / 100;
 
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {
@@ -658,7 +656,7 @@ static void* _barometer_thread_routin(void* args) {
             if (now > _barometer_motion.delay_stop_ts_ns) {
                 _barometer_motion.delay_stop_ts_ns = 0;
                 barometer_end = pressure;
-                barometer_end = _barometer_motion.mw->mean;
+                //barometer_end = _barometer_motion.mw->mean;
 
                 barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
 

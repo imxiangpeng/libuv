@@ -20,8 +20,12 @@
 #include "sensor.h"
 #include "time_utils.h"
 
-// #define IMU_CALIBRATION_CONF "/etc/imu_calibration.conf"
-#define IMU_CALIBRATION_CONF "imu_calibration.conf"
+// #define SENSOR_CALIBRATION_CONF "/etc/elevator/sensor_calibration.conf"
+#define SENSOR_CALIBRATION_CONF "imu_calibration.conf"
+
+// reset when both acc & velocity below threshold
+#define ZUPT_ACC_THRESHOLD 0.09
+#define ZUPT_SPEED_THRESHOLD 0.2
 
 // force cut 10Hz
 #define BUTTERWORTH_CUTOFF_FREQUENCY 10
@@ -184,7 +188,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
 
     for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
         int ret = moving_window_update(self->calibration_mw[i], accel[i]);
-        HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw[i]->stddev, self->calibration_mw[i]->mean, self->calibration_retries_max);
+        // HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw[i]->stddev, self->calibration_mw[i]->mean, self->calibration_retries_max);
         if (ret != 0 || isnan(self->calibration_mw[i]->stddev)) {
             ready &= 0;
             continue;
@@ -261,7 +265,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         printf("bias accel z:%ld\n", cdata.field.bias_accel_z_1000);
         printf("pitch:%ld\n", cdata.field.pitch_1000);
         printf("roll:%ld\n", cdata.field.roll_1000);
-        conf_save_int64(IMU_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX);
+        conf_save_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX);
 
         return;
     }
@@ -378,26 +382,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     s->distance = s->ekf.x[0];
     s->velocity = s->ekf.x[1];
-#if 0    
-    p[0] = s->ekf.x[2];
-    p[1] = s->velocity;
-    p[2] = s->distance;
-    p[3] = s->ekf.x[2];
-    p[4] = s->ekf.x[3];
-    // add jitter freq & accel, using max magnitude's axis data
-    p[5] = 0; // freq
-    p[6] = 0; // accel
-    for(size_t i = 0; i < ARRAY_SIZE(s->fft);i++) {
-        if (s->fft[i].jitter_accel > p[6]) {
-            p[6] = s->fft[i].jitter_accel;
-            p[5] = s->fft[i].jitter_frequency;
-        }
-    }
-#endif
 
-    // accel_filtered[0] = s->ekf.x[3];
-    // accel_filtered[1] = s->ekf.x[4];
-    // accel_filtered[2] = s->ekf.x[5];
     double ca[IMU_AXES] = {
         s->ekf.x[3],
         s->ekf.x[4],
@@ -445,18 +430,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #endif
 
     p->jitter_accel = round(p->jitter_accel * 100) / 100;
-    // if (p->jitter_accel == 0) {
-    //     p->jitter_frequency = 0;
-    // }
 
-    // p->jitter_accel = round(s->ekf.x[5] - accel_filtered[2]);
-    //  p->jitter_frequency = round(p->jitter_frequency * 100) / 100;
-
-    // HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
-    //         __FUNCTION__, __LINE__,
-    //         accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
-
-    // HR_LOGD("%s(%d): accel:%f, jitter freq:%f, jitter accel:%f\n", __FUNCTION__, __LINE__, p->accel, p->jitter_frequency, p->jitter_accel);
     if (s->is_calibration_completed != 1) {
         return -2;  // we are calibration
     }
@@ -599,7 +573,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
 
     union calibration_data cdata;
 
-    if (0 == conf_load_int64(IMU_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX)) {
+    if (0 == conf_load_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX)) {
         printf("calibrated:%ld\n", cdata.field.is_calibrated);
         printf("g:%ld\n", cdata.field.g_1000);
         printf("bias accel x:%ld\n", cdata.field.bias_accel_x_1000);
@@ -678,7 +652,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     if (self->is_calibration_completed == 0) {
         linear_accel = 0;
     } else {
-// linear_accel = calculate_veritical_acceleration(accel[0], accel[1], accel[2], self->zero_bias_pitch, self->zero_bias_roll) - self->G;
+        // linear_accel = calculate_veritical_acceleration(accel[0], accel[1], accel[2], self->zero_bias_pitch, self->zero_bias_roll) - self->G;
 #if 0
         linear_accel = calculate_veritical_acceleration(accel[0] - self->zero_bias_accels[0],
                                                         accel[1] - self->zero_bias_accels[1],
@@ -744,7 +718,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
 
     // HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", linear_accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
 
-    if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < 0.1) && fabs(linear_accel) < 0.09)) {
+    if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < ZUPT_SPEED_THRESHOLD /*0.1*/) && fabs(linear_accel) < ZUPT_ACC_THRESHOLD /*0.09*/)) {
         HR_LOGD("ZUPT .............ekf->x[0]:%f, x[1]:%f, a:%f..\n", ekf->x[0], ekf->x[1], linear_accel);
 
         linear_accel = 0;
@@ -767,6 +741,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     // HR_LOGD("input: %f, %f, %f\n", accel[0], accel[1], accel[2]);
     ekf_predict(ekf, fx, F, Q);
 
+    // do not cut off too much, realtime status should display correct
     // 0.35 ?
     if (fabs(linear_accel) < 0.05) {
         linear_accel = 0;
@@ -802,6 +777,14 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
         f->count++;
 
         if (f->count == f->sampling_size) {
+            double frequency = 0;
+            double accel_value = 0;
+            int max_index = -1;
+            double max_magnitude = 0.0;
+            // reuse in buffer
+            double* magnitudes = (double*)malloc(sizeof(double) * (f->sampling_size / 2 + 1));
+            int N_fft_out = f->sampling_size / 2 + 1;
+
             double mean = f->sum / f->sampling_size;
 
             double window_sum = 0.0;
@@ -818,12 +801,6 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
                 fftw_execute(f->plan);
             }
 
-            int max_index = -1;
-            double max_magnitude = 0.0;
-            // reuse in buffer
-            double* magnitudes = (double*)malloc(sizeof(double) * (f->sampling_size / 2 + 1));
-
-            int N_fft_out = f->sampling_size / 2 + 1;
             // 这里估计需要考虑不要从 0 开始，从 1 或者 2 开始
             // 低于 2 hz 的我们不认为抖动
             // TODO
@@ -842,9 +819,10 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             free(magnitudes);
             magnitudes = NULL;
 
-            double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
-            double accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
-                                                                      // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
+            frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
+            accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
+
+            // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
             if (accel_value > 0.1) {
                 f->jitter_frequency = frequency;
                 f->jitter_accel = accel_value;

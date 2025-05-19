@@ -1,13 +1,11 @@
 #ifndef FLOOR_H
 #define FLOOR_H
 
-
-#define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
-
 int floor_init();
 int floor_deinit();
 
 int floor_base_floor(void);
+const char* floor_model_data_path(void);
 int floor_predict(double height, int *num, char* label, int length);
 
 int floor_predict_with_pressure(double pressure, double* height, int* num, char* label, int length);
