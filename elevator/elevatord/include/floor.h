@@ -7,6 +7,7 @@
 int floor_init();
 int floor_deinit();
 
+int floor_base_floor(void);
 int floor_predict(double height, int *num, char* label, int length);
 
 int floor_predict_with_pressure(double pressure, double* height, int* num, char* label, int length);

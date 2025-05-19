@@ -32,6 +32,8 @@ static int barometer_init() {
 static int barometer_configure(double sampling_rate) {
     (void)sampling_rate;
 
+    if (!_bmp388) return -1;
+    
     iio_device_attr_write_double(_bmp388, "sampling_frequency", sampling_rate /*12.5*/);
     return 0;
 }

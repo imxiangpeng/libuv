@@ -59,9 +59,9 @@ static int simulate_record_read(struct simulate_record* record) {
     p = fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);
     if (!p) {
         if (feof(_simulate_data_fp)) {
-            rewind(_simulate_data_fp);
-            fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);  // skip csv file head
-            line_num = 1;
+            //rewind(_simulate_data_fp);
+            //fgets(line, MAX_LINE_LENGTH, _simulate_data_fp);  // skip csv file head
+            //line_num = 1;
             // goto read_again;
         }
         return -1;

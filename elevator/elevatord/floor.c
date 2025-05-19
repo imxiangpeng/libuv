@@ -25,7 +25,7 @@
 // we will not use pressure in this model
 // because pressure maybe update frequently
 // #define FLOOR_MODEL_PATH "floor_model.json" //"/etc/elevatord_floor_model.json"
-#define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord_floor_model.json"
+#define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord_floor_model.1.json"
 // this model maybe update dynamic
 #define FLOOR_PRESSURE_MODEL_PATH "/etc/elevatord_floor_pressure_model.json"
 
@@ -343,14 +343,13 @@ static int floor_store_model(int update_backup) {
     return 0;
 }
 
- 气压保存不对，保存成了下一个楼层的气压了！
-
-
 static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
 
     // start running, record current pressure
+    // 但是开启运行气压值要比实际小一些，因为关门时气压会下降 7 - 10 Pa
+    // 我们还是希望后续通过停止时的气压值作为当前楼层气压值
     if (data->state == ACCELERATING) {
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
@@ -358,6 +357,7 @@ static void _observer_on_event(struct motion_event* data) {
         }
         return;
     }
+
     if (data->state == STOPPED) {
         double height = data->distance;
         HR_LOGD("%s(%d): runing state changed: height:%f, pressure:%f, _floor_calibration:%d\n", __FUNCTION__, __LINE__, height, data->pressure, _floor_calibration);
@@ -365,6 +365,9 @@ static void _observer_on_event(struct motion_event* data) {
         if (_floor_calibration) {
             struct floor* f = &_building.model[_floor_calibration_index];
             f->height = height;
+            // do not assign pressure, it should be assigned when start running
+            // current pressure is current floor's value
+            // however this floor is previous
             // f->pressure = data->pressure;
             if (_floor_calibration_index < _building.floors_below_base) {
                 f->num = _floor_calibration_index - _building.floors_below_base;
@@ -372,6 +375,7 @@ static void _observer_on_event(struct motion_event* data) {
                 f->num = _floor_calibration_index - _building.floors_below_base + _building.base_floor_num;
             }
             snprintf(f->label, sizeof(f->label), "%d", f->num);
+
             HR_LOGD("%s(%d): calibration: num:%d, height:%f, pressure:%f, index:%d\n", __FUNCTION__, __LINE__, f->num, f->height, f->pressure, _floor_calibration_index);
 
             if (_floor_calibration_cb) {
@@ -382,6 +386,9 @@ static void _observer_on_event(struct motion_event* data) {
             // we can not detect the last floor
             if (_floor_calibration_index == _building.floor_nums - 1) {
                 // process last floor manually
+                int num = 0;
+                char label[256] = {0};
+                double pressure = 0;
                 struct floor* f = &_building.model[_floor_calibration_index];
                 f->num = _floor_calibration_index - _building.floors_below_base + _building.base_floor_num;
                 snprintf(f->label, sizeof(f->label), "%d", f->num);
@@ -390,11 +397,20 @@ static void _observer_on_event(struct motion_event* data) {
                 // this is the current floor pressure
                 f->pressure = data->pressure;
 
+                num = f->num;
+                snprintf(label, sizeof(label), "%s", f->label);
+                pressure = f->pressure;
+
                 HR_LOGD("%s(%d): floor calibration finished ...\n", __FUNCTION__, __LINE__);
+
+                // store model file before last calibration completed event
+                // so they can read model data
                 floor_store_model(1);  // update backup when calibration
+                // reload or calc relative height
+                floor_load_model(FLOOR_MODEL_PATH);
 
                 if (_floor_calibration_cb) {
-                    _floor_calibration_cb(_floor_calibration_index, f->num, f->label, f->height, f->pressure, 1 /*completed*/);
+                    _floor_calibration_cb(_floor_calibration_index, num, label, height, pressure, 1 /*completed*/);
                     _floor_calibration_cb = NULL;
                 }
                 _floor_calibration = 0;
@@ -423,6 +439,10 @@ int floor_deinit() {
     return 0;
 }
 
+int floor_base_floor(void) {
+    return _building.base_floor_num;
+}
+
 // return predict floor according height
 int floor_predict(double height, int* num, char* label, int length) {
     int i = 0;
@@ -437,6 +457,9 @@ int floor_predict(double height, int* num, char* label, int length) {
     }
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
+        // HR_LOGD("%s(%d): height: %f, floor:%d, [%f,%f]\n", __FUNCTION__, __LINE__, height, f->num, f->height_relative - f->height / 2, f->height_relative + f->height / 2);
+        // ignore! there may be gaps, especially when the floor heights are different.
+        // not very good!
         if (height > f->height_relative - f->height / 2 &&
             height < f->height_relative + f->height / 2) {
             *num = f->num;
@@ -445,7 +468,7 @@ int floor_predict(double height, int* num, char* label, int length) {
         }
     }
 
-    HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
+    // HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
     // dundi
 
     // exception
@@ -464,11 +487,19 @@ int floor_predict_with_pressure(double pressure, double* height, int* num, char*
     if (_floor_calibration) {
         return -1;
     }
+
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
         double delta_p = fabs(pressure - _building.model[i].pressure);
-        HR_LOGD("%s(%d): pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
+        // HR_LOGD("%s(%d): pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
         if (delta_p < FLOOR_PREDICT_PRESSURE_DELTA) {
+            // should verify next floor
+            if (i < _building.floor_nums - 1) {
+                double delta_p2 = fabs(pressure - _building.model[i + 1].pressure);
+                if (delta_p > delta_p2) {
+                    f = &_building.model[i + 1];
+                }
+            }
             *num = f->num;
             *height = f->height_relative;
             snprintf(label, length, "%s", f->label);
@@ -477,7 +508,7 @@ int floor_predict_with_pressure(double pressure, double* height, int* num, char*
         }
     }
 
-    HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
+    // HR_LOGD("%s(%d): can not found height:%f !!!!!!!!!!!!!!! dundi ........\n", __FUNCTION__, __LINE__, height);
     // dundi
 
     // exception
@@ -510,6 +541,12 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     struct floor* fb = NULL;
 
     double delta_p = 0;
+
+    // not support when calibration
+    if (_floor_calibration) {
+        return -1;
+    }
+
     for (int i = 0; i < _building.floor_nums; i++) {
         if (_building.model[i].num == num) {
             fb = &_building.model[i];
@@ -524,7 +561,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
 
     delta_p = fabs(pressure - fb->pressure);
     HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f)\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure);
-    if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA ) {
+    if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA) {
         return 0;  // no need update
     }
 
@@ -533,7 +570,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         if (fb != fr) {
             double p0 = calculate_base_pressure(pressure, fb->height_relative - fr->height_relative, temperature);
             if (p0 > 0) {
-                p0 = round(p0 * 100)/100;
+                p0 = round(p0 * 100) / 100;
                 HR_LOGD("%s(%d): update floor:%d, pressure %f -> %f, temperature: %f -> %f, height:%f\n", __FUNCTION__, __LINE__,
                         fr->pressure, p0, fr->temperature, temperature, calculate_height_difference(p0, pressure, temperature));
                 fr->pressure = p0;

@@ -111,7 +111,7 @@ static int _on_publish(void** payload, int* len) {
 
     for (size_t i = 0; i < ARRAY_SIZE(_properties_tbl); i++) {
         struct property* prop = &_properties_tbl[i];
-        HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name, prop->type, prop->dirty);
+        // HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name, prop->type, prop->dirty);
         if (prop->dirty == 0) {
             continue;
         }
@@ -354,8 +354,7 @@ static void _observer_on_event(struct motion_event* data) {
     _properties_tbl[PROPERTY_PRESSURE].dirty = 1;
     _properties_tbl[PROPERTY_TEMPERATURE].value.val_double = round(data->temperature * 100) / 100;
     _properties_tbl[PROPERTY_TEMPERATURE].dirty = 1;
-    
-    
+ 
     schedule_report();
 }
 

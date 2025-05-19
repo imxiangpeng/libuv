@@ -8,7 +8,6 @@ struct accelerometer_stream_data {
     double accel;
     double velocity;
     double distance;
-    double G;
     double jitter_frequency;
     double jitter_accel;
 };

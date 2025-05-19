@@ -322,7 +322,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     double dt = 0.01;
     int ret = -1;
     struct accelerometer_stream_data* p = (struct accelerometer_stream_data*)data;
-    double accel_union = 0, accel_filter = 0;
+    // double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
     if (!self || !s) {
@@ -368,12 +368,12 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 
     // it indicates that the camera is inverted, when z < 0
     // accel_union = calculate_veritical_acceleration(accel.x[0], accel.x[1], accel.x[2]);
-    accel_union = calculate_stationary_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
-    if (s->inverted) {
-        accel_union *= -1.0;
-    }
+    // accel_union = calculate_stationary_veritical_acceleration(accel_filtered[0], accel_filtered[1], accel_filtered[2]);
+    // if (s->inverted) {
+    //     accel_union *= -1.0;
+    // }
 
-    HR_LOGD("filtered accel:%f %f %f\n", accel_filtered[0], accel_filtered[1], accel_filtered[2]);
+    // HR_LOGD("filtered accel:%f %f %f\n", accel_filtered[0], accel_filtered[1], accel_filtered[2]);
     _ekf_run_model(s, accel_filtered, dt);
 
     s->distance = s->ekf.x[0];
@@ -412,14 +412,24 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     //                                                     accel.x[2] - s->zero_bias_accels[2], s->zero_bias_pitch, s->zero_bias_roll);
     p->velocity = s->ekf.x[1];
     p->distance = s->ekf.x[0];
-    p->G = s->G;
 
     if (s->is_calibration_completed) {
+        // method one: using accel - bias
+        // method two: using accel - filtered value
+        // now we use first
+#if 1
         double fft_accels[IMU_AXES] = {
             accel_filtered[0] - s->zero_bias_accels[0] /*- s->ekf.x[3]*/,
             accel_filtered[1] - s->zero_bias_accels[1] /*- s->ekf.x[4]*/,
             accel_filtered[2] - s->zero_bias_accels[2] /*- s->ekf.x[5]*/,
         };
+#else
+        double fft_accels[IMU_AXES] = {
+            accel_filtered[0] - s->ekf.x[3],
+            accel_filtered[1] - s->ekf.x[4],
+            accel_filtered[2] - s->ekf.x[5],
+        };
+#endif
         _fft_process(s, fft_accels, IMU_AXES);
     }
 
@@ -442,15 +452,15 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     // p->jitter_accel = round(s->ekf.x[5] - accel_filtered[2]);
     //  p->jitter_frequency = round(p->jitter_frequency * 100) / 100;
 
-    HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
-            __FUNCTION__, __LINE__,
-            accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
+    // HR_LOGD("%s(%d): union:%.3f vs filter:%.3f vs %.3f vs %.3f -- %.3f == %.3f\n",
+    //         __FUNCTION__, __LINE__,
+    //         accel_union, accel_filter, s->ekf.x[2], s->ekf.x[3], s->G, s->ekf.x[3] - s->G);
 
-    HR_LOGD("%s(%d): accel:%f, jitter freq:%f, jitter accel:%f\n", __FUNCTION__, __LINE__, p->accel, p->jitter_frequency, p->jitter_accel);
+    // HR_LOGD("%s(%d): accel:%f, jitter freq:%f, jitter accel:%f\n", __FUNCTION__, __LINE__, p->accel, p->jitter_frequency, p->jitter_accel);
     if (s->is_calibration_completed != 1) {
         return -2;  // we are calibration
     }
-
+#if 0
     if (fabs(s->ekf.x[3] - accel_filtered[0]) > ACCEL_JITTER_THRESHOLD) {
         HR_LOGE("x -> jitter:%f vs %f = (%f)....\n", s->ekf.x[3], accel_filtered[0], s->ekf.x[3] - accel_filtered[0]);
     }
@@ -460,6 +470,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     if (fabs(s->ekf.x[5] - accel_filtered[2]) > ACCEL_JITTER_THRESHOLD) {
         HR_LOGE("z -> jitter:%f vs %f = (%f)....\n", s->ekf.x[5], accel_filtered[2], s->ekf.x[5] - accel_filtered[2]);
     }
+#endif
     return 0;
 }
 
@@ -752,8 +763,8 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     }
 
     // HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
-    HR_LOGD("x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
-    HR_LOGD("input: %f, %f, %f\n", accel[0], accel[1], accel[2]);
+    // HR_LOGD("x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
+    // HR_LOGD("input: %f, %f, %f\n", accel[0], accel[1], accel[2]);
     ekf_predict(ekf, fx, F, Q);
 
     // 0.35 ?
@@ -763,7 +774,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
 
     const double z[EKF_M] = {linear_accel, accel[0], accel[1], accel[2]};
 
-    HR_LOGD("delat a:%f vs %f, vs linear:%f\n", ekf->x[2], calculate_veritical_acceleration(ekf->x[3] - self->zero_bias_accels[0], ekf->x[4] - self->zero_bias_accels[1], ekf->x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll), linear_accel);
+    // HR_LOGD("delat a:%f vs %f, vs linear:%f\n", ekf->x[2], calculate_veritical_acceleration(ekf->x[3] - self->zero_bias_accels[0], ekf->x[4] - self->zero_bias_accels[1], ekf->x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll), linear_accel);
     const double hx[EKF_M] = {ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]};
     // if (self->calibration) {
     //     hx[0] = calculate_veritical_acceleration(ekf->x[3] - self->zero_bias_accels[0], ekf->x[4] - self->zero_bias_accels[1], ekf->x[5] - self->zero_bias_accels[2],
@@ -772,9 +783,8 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     //  HR_LOGD("z: [%f, %f]\n", z[0], z[1]);
     //  HR_LOGD("hx: [%f, %f]\n", hx[0], hx[1]);
     ekf_update(ekf, z, hx, H, R);
-    // HR_LOGD("after x: [%f, %f, %f,%f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3]);
 
-    HR_LOGD("after x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
+    // HR_LOGD("after x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
     //_distance += dt * _velocity + 0.5 * linear_accel * dt *dt;
     //_velocity += dt * linear_accel;
     // HR_LOGD("manual distance & velocity: [%f, %f]\n", _distance, _velocity);
@@ -834,14 +844,14 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
 
             double frequency = (double)max_index * self->sampling_frequency / f->sampling_size;
             double accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
-            // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
-			if ( accel_value > 0.1) {
+                                                                      // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
+            if (accel_value > 0.1) {
                 f->jitter_frequency = frequency;
                 f->jitter_accel = accel_value;
-			} else {
+            } else {
                 f->jitter_frequency = 0;
                 f->jitter_accel = 0;
-			}
+            }
             /*if (frequency == 0) {
                 for (size_t j = 0; j < f->sampling_size; j++) {
                     HR_LOGD("%s(%d): %d -> %f\n", __FUNCTION__, __LINE__, j, f->in[j]);
