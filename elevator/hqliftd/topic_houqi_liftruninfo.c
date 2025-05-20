@@ -105,7 +105,7 @@ static int _on_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
 
-    HR_LOGD("publish: %s\n", (char*)*payload);
+    HR_LOGD("publish: %s\n", (const char*)*payload);
     return 0;
 }
 

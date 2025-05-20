@@ -609,7 +609,7 @@ static void* _barometer_thread_routin(void* args) {
             }
         }
 
-        HR_LOGD("barometer mean:%f, stddev:%f, slope:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev, slope);
+        // HR_LOGD("barometer mean:%f, stddev:%f, slope:%f\n", _barometer_motion.mw->mean, _barometer_motion.mw->stddev, slope);
 
         if (barometer_pressure == 0) {
             // barometer_pressure = _barometer_motion.mw->mean;//pressure;

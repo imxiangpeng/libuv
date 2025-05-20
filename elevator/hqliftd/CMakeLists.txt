@@ -28,23 +28,23 @@ set(SOURCES main
     elevator
     state_machine)
 
-ADD_EXECUTABLE(hqlift ${SOURCES})
+ADD_EXECUTABLE(hqliftd ${SOURCES})
 
-TARGET_COMPILE_OPTIONS(hqlift PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
+TARGET_COMPILE_OPTIONS(hqliftd PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 
 # only on my pc
-target_include_directories(hqlift PUBLIC /opt/3rdparty/include)
+target_include_directories(hqliftd PUBLIC /opt/3rdparty/include)
 
-TARGET_LINK_LIBRARIES(hqlift ${cjson_library})
-#TARGET_LINK_LIBRARIES(hqlift ${libmosquitto_library})
-TARGET_LINK_LIBRARIES(hqlift ${libuv_library})
+TARGET_LINK_LIBRARIES(hqliftd ${cjson_library})
+#TARGET_LINK_LIBRARIES(hqliftd ${libmosquitto_library})
+TARGET_LINK_LIBRARIES(hqliftd ${libuv_library})
 
-TARGET_LINK_LIBRARIES(hqlift m)
-TARGET_LINK_LIBRARIES(hqlift pthread)
-TARGET_LINK_LIBRARIES(hqlift -lssl -lcrypto)
-TARGET_LINK_LIBRARIES(hqlift ${ubox_library} ${ubus_library} ${blob_library})
+TARGET_LINK_LIBRARIES(hqliftd m)
+TARGET_LINK_LIBRARIES(hqliftd pthread)
+TARGET_LINK_LIBRARIES(hqliftd -lssl -lcrypto)
+TARGET_LINK_LIBRARIES(hqliftd ${ubox_library} ${ubus_library} ${blob_library})
 
-TARGET_LINK_LIBRARIES(hqlift uviot)
-TARGET_LINK_LIBRARIES(hqlift iutils)
+TARGET_LINK_LIBRARIES(hqliftd uviot)
+TARGET_LINK_LIBRARIES(hqliftd iutils)
 
-#INSTALL(TARGETS hqlift RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+#INSTALL(TARGETS hqliftd RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

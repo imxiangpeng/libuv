@@ -49,6 +49,7 @@ struct sconf_proto _mqtt_conf_fields[] = {
 static struct uviot* _iot = NULL;
 
 int iot_init(struct uv_loop_s* loop) {
+
     _iot = uviot_alloc(loop);
     if (!_iot)
         return -1;

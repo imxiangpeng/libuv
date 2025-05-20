@@ -89,10 +89,7 @@ static int _on_publish(void** payload, int* len) {
     *len = strlen(*payload);
 
     printf("publish: %s\n", (char*)*payload);
-#if 0
-    *payload = strdup("{\"name\":\"xiaohua\"}");
-    *len = strlen(*payload);
-#endif
+
     return 0;
 }
 

@@ -1,6 +1,8 @@
+#define _GNU_SOURCE
+
 #include <sys/stat.h>
 #include <unistd.h>
-#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdint.h>
