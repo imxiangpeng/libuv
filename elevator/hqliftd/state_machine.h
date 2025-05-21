@@ -9,6 +9,13 @@ enum state_machine_state {
     SM_ELEVATOR_RUNNING
 };
 
+enum state_machine_event {
+    SM_EVENT_STOPPED = 0,
+    SM_EVENT_DOOR_OPENED,
+    SM_EVENT_DOOR_CLOSED,
+    SM_EVENT_RUNNING,
+};
+
 struct state_machine {
     enum state_machine_state state;
     void (*on_enter)();
@@ -23,6 +30,6 @@ int statemachine_init(struct uv_loop_s *loop);
 
 int statemachine_deinit();
 
-int statemachine_post(int message);
+int statemachine_post(enum state_machine_event message);
 
 #endif

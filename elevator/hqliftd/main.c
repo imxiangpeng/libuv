@@ -80,19 +80,21 @@ int main(int argc, char** argv) {
 
     elevator_init();
 
+    statemachine_init(uv_default_loop());
+
     uelevator_init();
 
     // block until connected
     iot_init(uv_default_loop());
 
-    statemachine_init(uv_default_loop());
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
-    statemachine_deinit();
     iot_deinit();
 
     uelevator_deinit();
+
+    statemachine_deinit();
 
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

@@ -4,6 +4,7 @@
 #include <cjson/cJSON.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "elevator.h"
 #include "uviot.h"
@@ -42,6 +43,11 @@ static int _on_command_message(void* payload, int len) {
 
         // ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/LC40025120000001
         // ipc-property set /ipc/livertmp/enabled true
+
+        char cmd[512] = {0};
+        snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
+        system(cmd);
+
         return 0;
     }
 
@@ -85,9 +91,12 @@ static int _on_command_message(void* payload, int len) {
     return 0;
 }
 
-// static int _on_upload_record_list_publish(void** payload, int* len) {
-//     return 0;
-// }
+static int _on_command_response_publish(void** payload, int* len) {
+    (void)payload;
+    (void)len;
+
+    return 0;
+}
 struct uviot_topic topic_command = {
     .name = "Command",
     .topic = {0},
@@ -95,18 +104,25 @@ struct uviot_topic topic_command = {
     .callback.on_message = _on_command_message,
 };
 
-// struct iot_topic topic_upload_record_list = {
-//     .name = "uploadRecordList",
-//     .topic = {0},
-//     .type = TOPIC_TYPE_PUBLISH,
-//     .callback.on_publish = _on_upload_record_list_publish,
-// };
+struct uviot_topic topic_command_response = {
+    .name = "Command/Response",
+    .topic = {0},
+    .type = TOPIC_TYPE_PUBLISH,
+    .callback.on_publish = _on_command_response_publish,
+};
+
+// /API/V1/Down/序列号/Command/Response
 
 int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
-    const char* serialno = elevator_serialno();//"244200000E480001"; //elevator_deviceid();
+    const char* serialno = elevator_serialno();  //"244200000E480001"; //elevator_deviceid();
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);
+
+    snprintf(topic_command_response.topic, sizeof(topic_command_response.topic), "/API/V1/Down/%s/Command/Response", serialno);
+    uviot_topic_register(iot, &topic_command_response);
+
     return 0;
 }
+

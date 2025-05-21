@@ -12,7 +12,7 @@ enum elevator_direction {
 
 enum elevator_door_state{
     ELEVATOR_DOOR_OPEN = 0,
-    ELEVATROR_DOOR_CLOSE
+    ELEVATOR_DOOR_CLOSE
 };
 
 struct elevator_status {

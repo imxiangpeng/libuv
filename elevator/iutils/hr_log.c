@@ -61,6 +61,7 @@ static void init_persist_output() {
     persist_fp = fopen(path, "w");
     if (!persist_fp) {
         printf("failed create output ..\n");
+        return;
     }
 
     setbuf(persist_fp, NULL);
@@ -151,6 +152,8 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
 
     if (persist_fp) {
         fprintf(persist_fp, "%s", buf);
+    } else {
+        syslog(LOG_SYSLOG, "%s", buf);
     }
 #else
     printf("%s", buf);

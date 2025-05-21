@@ -479,6 +479,9 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         return 0;  // no need update
     }
 
+    fb->pressure = pressure;
+    fb->temperature = temperature;
+
     for (int i = 0; i < _building.floor_nums; i++) {
         struct floor* fr = &_building.model[i];
         if (fb != fr) {

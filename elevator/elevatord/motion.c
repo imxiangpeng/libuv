@@ -90,6 +90,7 @@ static double barometer_temperature = 0;
 // 注意，这个可能是会动态变化的，因为我们更倾向于使用 1 楼（之前楼层标定时指定的基层）作为基线楼层
 // 在刚刚开机或者启动的时候，这个可能是任意楼层
 // 在运行过程中，当我们停靠基层的时候，如果检测这里不是基层，会将这里更新为基层
+// 目前我们也没有实际用途，仅仅是计算高度信息，然后打印出来
 static int floor_baseline_num = INT_MAX;
 static double floor_baseline_pressure = 0;
 
@@ -417,7 +418,18 @@ static void* _accelerometer_thread_routin(void* args) {
 
                 HR_LOGD("mxp finished current pressure:%f, height: %f related to :%d floor\n", barometer_pressure, relative_height, floor_baseline_num);
                 if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
+                    if (floor_num != num) {
+                        HR_LOGE("pressure floor:%d not match with acc floor:%d, force sync\n", num, floor_num);
+                        floor_num = num;
+                        HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
+                        _accelerometer_motion.height = height;
+                    }
                     // _accelerometer_motion.height = height;
+                    // update baseline pressure when we run it
+                    if (floor_num == floor_baseline_num) {
+                        floor_baseline_pressure = barometer_pressure;
+                    }
+
                     HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
                     // adjust base floor to base floor in model
                     if (floor_num == floor_base_floor()) {
@@ -656,7 +668,7 @@ static void* _barometer_thread_routin(void* args) {
             if (now > _barometer_motion.delay_stop_ts_ns) {
                 _barometer_motion.delay_stop_ts_ns = 0;
                 barometer_end = pressure;
-                //barometer_end = _barometer_motion.mw->mean;
+                // barometer_end = _barometer_motion.mw->mean;
 
                 barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
 
@@ -913,6 +925,8 @@ int motion_enter_sensor_calibration() {
     if (_accelerometer_motion.stream) {
         _accelerometer_motion.stream->enter_calibration(_accelerometer_motion.stream);
     }
+
+    // modify motion init status ?
 
     return 0;
 }

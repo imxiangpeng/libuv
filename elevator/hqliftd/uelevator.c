@@ -52,7 +52,7 @@ static struct ubus_subscriber _elevatord_subscriber;
 static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
 
-static struct elevator_status _status = {.door_state = ELEVATROR_DOOR_CLOSE};
+static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 
 static struct elevator_historical _historical;
 
@@ -156,7 +156,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.jitter_freq = blobmsg_get_double(tb[RT_JITTER_FREQ]);
         if (tb[RT_JITTER_ACCEL])
             _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
-    
+
         if (_status.speed > ELEVATOR_SPEED_THRESHOLD) {
             HR_LOGD("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
             // topic_houqi_liftfault_post
@@ -177,14 +177,13 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
         int state = blobmsg_get_u32(tb[M_STATE]);
         if (state == 0) {
-            statemachine_post(SM_ELEVATOR_STOPPED);
+            statemachine_post(SM_EVENT_STOPPED);
         } else {
-            statemachine_post(SM_ELEVATOR_RUNNING);
+            statemachine_post(SM_EVENT_RUNNING);
         }
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
-        // 运行历史记录对应 LiftRunInfo
-        // directly pass
+        // directly pass for LiftRunInfo
 
         HR_LOGE("%s(%d): historical come in \n", __FUNCTION__, __LINE__);
         struct blob_attr* cur = NULL;
@@ -198,24 +197,6 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             !tb[HI_FLOOR_BEGIN] || !tb[HI_FLOOR_END] ||
             !tb[HI_ACCEL_ARRAY] || !tb[HI_SPEED_ARRAY] ||
             !tb[HI_JITTER_FREQ_ARRAY] || !tb[HI_JITTER_ACCEL_ARRAY]) {
-            HR_LOGE(
-                "%s(%d): come out \n"
-                "tb[HI_DISTANCE] :%p\n"
-                "tb[HI_DIRECTION] :%p\n"
-                "tb[HI_TIMESTAMP_BEGIN] :%p\n"
-                "tb[HI_TIMESTAMP_END]:%p\n"
-                "tb[HI_FLOOR_BEGIN] :%p\n"
-                "tb[HI_FLOOR_END] :%p\n"
-                "tb[HI_ACCEL_ARRAY] :%p\n"
-                "tb[HI_SPEED_ARRAY]: %p\n"
-                "tb[HI_JITTER_FREQ_ARRAY] :%p\n"
-                "tb[HI_JITTER_ACCEL_ARRAY] :%p\n",
-                __FUNCTION__, __LINE__,
-                tb[HI_DISTANCE], tb[HI_DIRECTION],
-                tb[HI_TIMESTAMP_BEGIN], tb[HI_TIMESTAMP_END],
-                tb[HI_FLOOR_BEGIN], tb[HI_FLOOR_END],
-                tb[HI_ACCEL_ARRAY], tb[HI_SPEED_ARRAY],
-                tb[HI_JITTER_FREQ_ARRAY], tb[HI_JITTER_ACCEL_ARRAY]);
             return 0;
         }
 
@@ -333,6 +314,48 @@ static void ubus_object_event_handler(struct ubus_context* ctx,
         HR_LOGD("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
         // door
         // person
+
+        if (0 == strcmp("door", event)) {
+            static const struct blobmsg_policy policy[] = {
+                {.name = "status", .type = BLOBMSG_TYPE_STRING},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0]) {
+                return;
+            }
+
+            const char* status = blobmsg_get_string(tb[0]);
+            if (!status) {
+                return;
+            }
+            if (0 == strcmp("open", status)) {
+                _status.door_state = ELEVATOR_DOOR_OPEN;
+                statemachine_post(SM_EVENT_DOOR_OPENED);
+            } else if (0 == strcmp("close", status)) {
+                _status.door_state = ELEVATOR_DOOR_CLOSE;
+                statemachine_post(SM_EVENT_DOOR_CLOSED);
+            }
+        } else if (0 == strcmp("person", event)) {
+            int num = 0;
+            static const struct blobmsg_policy policy[] = {
+                {.name = "num", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0]) {
+                return;
+            }
+
+            num = blobmsg_get_u32(tb[0]);
+            _status.passenger_count = num;
+        }
     }
 }
 static void _reconnect_timer(struct uloop_timeout* timeout) {
@@ -353,8 +376,8 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     }
 
     printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
-    
-#if 0 // we should re subscriber event?
+
+#if 0  // we should re subscriber event?
 
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
@@ -362,7 +385,6 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_register_event_handler(_ubus_ctx, &_object_event, "elevator.event.*");
 
     subscriber_elevatord_event();
-
 
 #endif
 
@@ -388,10 +410,10 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
     int which = -1;
     read(_pipefd[0], &which, sizeof(which));
 
-    HR_LOGD("haha receive message:%d \n", which);
+    HR_LOGD("receive message:%d \n", which);
     switch (which) {
         case MSG_QUIT:
-            HR_LOGD("haha receive message:%d quit\n", which);
+            HR_LOGD("receive message:%d quit\n", which);
             uloop_end();
             break;
     }
@@ -467,8 +489,8 @@ int uelevator_init(void) {
         return -1;
     }
 
-    _status.door_state = ELEVATROR_DOOR_CLOSE;
-    
+    _status.door_state = ELEVATOR_DOOR_CLOSE;
+
     blob_buf_init(&_b, 0);
     blob_buf_grow(&_b, 1024);
 
