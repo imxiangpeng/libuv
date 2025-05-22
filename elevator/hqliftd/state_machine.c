@@ -6,22 +6,43 @@
 // there is a lot of work to be done
 
 #include "state_machine.h"
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <uv.h>
-#include "state_machine.h"
 
+#include "elevator.h"
 #include "hr_log.h"
+#include "sconf.h"
 #include "uelevator.h"
 
-#define DOOR_OPEN_TIMEOUT_AFTER_STOPPED 3000           // 3s
-#define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 20000  // 3s
+// door should opened within 5 seconds
+#define DOOR_OPEN_TIMEOUT_AFTER_STOPPED 5000           // 5s
+// notice when person in elevator long time
+// notice when a person is detected in the elevator while it is stationary and the doors are closed
+#define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 60000  // 60s
 
 static int _pipefd[2] = {-1};
 
-static enum state_machine_state _state;
+static enum state_machine_state _state = SM_ELEVATOR_UNINIT;
 static uv_poll_t _state_machine_poll;
 static uv_timer_t _timer;
+
+#define DEFAULT_SPEED_THRESHOLD 3.1f
+
+enum {
+    FIELD_RUNTIME_SPEED_THRESHOLD = 0,
+    FIELD_FTP_ADDRESS,
+    FIELD_FTP_USERNAME,
+    FIELD_FTP_PASSWORD
+};
+
+struct sconf_proto _hqlift_conf_fields[] = {
+    [FIELD_RUNTIME_SPEED_THRESHOLD] = {"SPEED_THRESHOLD", PROTO_VALUE_INT64, {.int64 = DEFAULT_SPEED_THRESHOLD * 1000}},
+    [FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = NULL}},
+    [FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
+    [FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
+};
 
 // Fault:
 // 1. 关人/困人
@@ -32,7 +53,10 @@ static uv_timer_t _timer;
 //    可以从 uelevator 中采集 RealTime 事件中的速度信息，当大于门限的时候上报
 // 2.
 //
-const char* state_str(enum state_machine_state state) {
+
+static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
+
+static const char* state_str(enum state_machine_state state) {
     switch (state) {
         case SM_ELEVATOR_UNINIT:
             return "uninit";
@@ -48,6 +72,23 @@ const char* state_str(enum state_machine_state state) {
             return "undefined";
     }
 }
+
+static const char* event_str(enum state_machine_event event) {
+    switch (event) {
+        case SM_EVENT_STOPPED:
+            return "stopped";
+        case SM_EVENT_DOOR_OPENED:
+            return "door opened";
+        case SM_EVENT_DOOR_CLOSED:
+            return "door closed";
+        case SM_EVENT_RUNNING:
+            return "running";
+        default:
+            return "known";
+    }
+    return "";
+}
+
 static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     struct elevator_status st;
     if (!handle)
@@ -58,7 +99,9 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     HR_LOGD("%s(%d): come in door not opened after stopped..., door:%d, passenger:%d\n", __FUNCTION__, __LINE__, st.door_state, st.passenger_count);
 
     if (st.passenger_count > 0) {
-        HR_LOGD("%s(%d): people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+        _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+        HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+        elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
     }
 }
 
@@ -67,29 +110,50 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
     if (!handle)
         return;
     uelevator_get_status(&st);
+    if (st.passenger_count > 0) {
+        _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+        HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+        elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+    }
     printf("%s(%d): come in door closed and we are stopped but some one is still in elevator...:%d\n", __FUNCTION__, __LINE__, st.passenger_count);
+    HR_LOGE("%s(%d): come in door closed and we are stopped but some one is still in elevator...:%d\n", __FUNCTION__, __LINE__, st.passenger_count);
 }
 static void _statemachine_message_handle(uv_poll_t* handle, int status, int events) {
     (void)handle;
     (void)status;
     (void)events;
-    printf("%s(%d): come in ...\n", __FUNCTION__, __LINE__);
+
+    enum state_machine_event event = -1;
+
     if (!(events & UV_READABLE)) {
         return;
     }
 
-    enum state_machine_event message = -1;
-    size_t rc = read(handle->io_watcher.fd, &message, sizeof(message));
-    if (rc != sizeof(message)) {
+    size_t rc = read(handle->io_watcher.fd, &event, sizeof(event));
+    if (rc != sizeof(event)) {
         return;
     }
 
-    printf("state machine message: %d(%s) received %d\n", _state, state_str(_state), message);
+    printf("state machine message: %d(%s) received event %d(%s), exception:%d\n", _state, state_str(_state), event, event_str(event), _elevator_exception);
+    HR_LOGD("state machine message: %d(%s) received event %d(%s), exception:%d\n", _state, state_str(_state), event, event_str(event), _elevator_exception);
+
+    // finished trapped event when door opened in any case
+    if (SM_EVENT_DOOR_OPENED == event) {
+        if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
+            _elevator_exception &= ~ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+            elevator_fault_resolved(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+        }
+    } else if (SM_EVENT_DOOR_CLOSED == event) {
+        if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
+            _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+            elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+        }
+    }
 
     switch (_state) {
         case SM_ELEVATOR_UNINIT:
-            // directly assign _state according message
-            switch (message) {
+            // directly assign _state according message, ignore error
+            switch (event) {
                 case SM_EVENT_STOPPED:
                     _state = SM_ELEVATOR_STOPPED;
                     break;
@@ -106,55 +170,91 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
             break;
         case SM_ELEVATOR_STOPPED:
             // expect door open -> door close -> running
-
-            switch (message) {
+            switch (event) {
                 case SM_EVENT_DOOR_OPENED:
+                    HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_STOPPED_DOOR_OPENED));
                     _state = SM_ELEVATOR_STOPPED_DOOR_OPENED;
                     uv_timer_stop(&_timer);  // stop the door open wait timer
                     break;
+                case SM_EVENT_RUNNING:
+                    HR_LOGD("%s(%d): !!! door not opened! current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    break;
                 default:
-                    printf("%s(%d): current state:%d, not support directly to state %d\n", __FUNCTION__, __LINE__, _state, message);
+                    printf("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    HR_LOGD("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
                     break;
             }
             break;
         case SM_ELEVATOR_STOPPED_DOOR_OPENED:
-            switch (message) {
+            switch (event) {
                 case SM_EVENT_DOOR_CLOSED:
+                    HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_STOPPED_DOOR_CLOSED));
                     _state = SM_ELEVATOR_STOPPED_DOOR_CLOSED;
                     // check anyone is still in elevator but elevator is not running
                     uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT, 0);  // 每1000ms触发一次
                     break;
                 case SM_EVENT_RUNNING:
+                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
+                        _elevator_exception |= ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+                    }
                     printf("%s(%d): Exception: door is opened when running !\n", __FUNCTION__, __LINE__);
                     HR_LOGE("%s(%d): Exception: door is opened when running !\n", __FUNCTION__, __LINE__);
                     break;
                 default:
-                    printf("%s(%d): current state:%d, not support directly to state %d\n", __FUNCTION__, __LINE__, _state, message);
+                    HR_LOGD("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    printf("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
                     break;
             }
             break;
         case SM_ELEVATOR_STOPPED_DOOR_CLOSED:
-            switch (message) {
+            switch (event) {
                 case SM_EVENT_RUNNING:
+                    HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_RUNNING));
                     _state = SM_ELEVATOR_RUNNING;
+                    uv_timer_stop(&_timer);  // stop the person inside long timer
+                    break;
+                case SM_EVENT_DOOR_OPENED:
+
+                    printf("%s(%d): door closed but open again: current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    HR_LOGD("%s(%d): door closed but open again: current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_STOPPED_DOOR_OPENED));
+                    _state = SM_ELEVATOR_STOPPED_DOOR_OPENED;
                     break;
                 default:
-                    printf("%s(%d): current state:%d, not support directly to state %d\n", __FUNCTION__, __LINE__, _state, message);
+                    HR_LOGD("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    printf("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
                     break;
             }
             break;
         case SM_ELEVATOR_RUNNING:
-            switch (message) {
+            switch (event) {
                 case SM_EVENT_STOPPED:
+                    HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_STOPPED));
                     _state = SM_ELEVATOR_STOPPED;
                     // start timer to detect door open
                     uv_timer_start(&_timer, _wait_door_opened_after_stopped_cb, DOOR_OPEN_TIMEOUT_AFTER_STOPPED, 0);  // 每1000ms触发一次
                     break;
                 case SM_EVENT_DOOR_OPENED:
                     printf("%s(%d): Exception door is opened while running\n", __FUNCTION__, __LINE__);
+                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
+                        _elevator_exception |= ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+                    }
+
+                    HR_LOGD("%s(%d): !!! fire event: door opened while running ...\n", __FUNCTION__, __LINE__);
+                    break;
+                case SM_EVENT_DOOR_CLOSED:
+                    // ignore
+                    if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
+                        _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                        elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+                    }
+
                     break;
                 default:
-                    printf("%s(%d): current state:%d, not support directly to state %d\n", __FUNCTION__, __LINE__, _state, message);
+                    HR_LOGD("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    printf("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
                     break;
             }
             break;

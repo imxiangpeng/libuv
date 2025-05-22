@@ -440,9 +440,6 @@ static void uviot_impl_connect_retry_timer_cb(uv_timer_t* handle) {
 }
 
 static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
-    HR_LOGD("%s(%d): come in .....status:%d, event:0x%X..\n", __FUNCTION__, __LINE__, status, events);
-
-    // struct dm_platform *plat = (struct dm_platform *)handle->data;
     struct uviot_impl* iot = NULL;
     struct mosquitto* mosq = NULL;
 

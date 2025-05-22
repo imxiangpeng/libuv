@@ -15,6 +15,7 @@
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
 #include "libubus.h"
+#include "sconf.h"
 #include "state_machine.h"
 #include "time_utils.h"
 
@@ -24,7 +25,7 @@
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
-#define ELEVATOR_SPEED_THRESHOLD 3.0
+#define ELEVATOR_SPEED_THRESHOLD 3.1
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -56,6 +57,8 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 
 static struct elevator_historical _historical;
 
+static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
+static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = 3.1f}};
 extern void topic_houqi_liftruninfo_post(void);
 
 enum {
@@ -157,9 +160,18 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         if (tb[RT_JITTER_ACCEL])
             _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
 
-        if (_status.speed > ELEVATOR_SPEED_THRESHOLD) {
-            HR_LOGD("%s(%d): speed to high .............\n", __FUNCTION__, __LINE__);
-            // topic_houqi_liftfault_post
+        if (_status.speed > _speed_limit_threhold.value.number) {
+            if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
+                _elevator_exception |= ELEVATOR_EXCEPTION_OVERSPEED;
+                elevator_fault_occurred(ELEVATOR_EXCEPTION_OVERSPEED);
+                HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.number);
+            }
+        } else {
+            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
+                _elevator_exception &= ~ELEVATOR_EXCEPTION_OVERSPEED;
+                elevator_fault_resolved(ELEVATOR_EXCEPTION_OVERSPEED);
+                HR_LOGD("%s(%d): !!! speed resume .............\n", __FUNCTION__, __LINE__);
+            }
         }
 
         HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
@@ -267,10 +279,10 @@ static const struct blobmsg_policy object_event_policy[__OE_MAX] = {
     [OE_PATH] = {.name = "path", .type = BLOBMSG_TYPE_STRING},
 };
 
-static void ubus_object_event_handler(struct ubus_context* ctx,
-                                      struct ubus_event_handler* ev,
-                                      const char* type,
-                                      struct blob_attr* msg) {
+static void ubus_event_handler(struct ubus_context* ctx,
+                               struct ubus_event_handler* ev,
+                               const char* type,
+                               struct blob_attr* msg) {
     (void)ev;
 
     struct blob_attr* tb[__OE_MAX] = {NULL};
@@ -400,8 +412,8 @@ static void _connection_lost(struct ubus_context* ctx) {
     _reconnect_timer(NULL);
 }
 
-static struct ubus_event_handler _object_event = {
-    .cb = ubus_object_event_handler,
+static struct ubus_event_handler _ubus_event = {
+    .cb = ubus_event_handler,
 };
 
 static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
@@ -463,8 +475,8 @@ static void* uelevator_thread_routin(void* args) {
 
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
-    ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
-    ubus_register_event_handler(_ubus_ctx, &_object_event, "elevator.event.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "ubus.object.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "elevator.event.*");
 
     subscriber_elevatord_event();
 
@@ -472,7 +484,7 @@ static void* uelevator_thread_routin(void* args) {
 
     uloop_run();
 
-    ubus_unregister_event_handler(_ubus_ctx, &_object_event);
+    ubus_unregister_event_handler(_ubus_ctx, &_ubus_event);
     ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
     ubus_free(_ubus_ctx);
     _ubus_ctx = NULL;
@@ -503,6 +515,8 @@ int uelevator_init(void) {
         perror("pipe");
         return -1;
     }
+
+    sconf_load_with_proto(HQLIFTD_CONF_PATH, &_speed_limit_threhold, 1);
 
     pthread_attr_init(&attr);
 

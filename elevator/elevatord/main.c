@@ -108,25 +108,24 @@ int main(int argc, char** argv) {
         floor_enter_calibration(base_floor, floors_below_base, floors_above_base);
     }
 
-    //tui_init();
+    tui_init();
 
     motion_run();
 
     uelevatord_init();
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
-    // iot block until connected
-    iot_init(uv_default_loop());
+    // iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     motion_deinitalize();
 
-    //tui_deinit();
+    tui_deinit();
     floor_deinit();
 
     uelevatord_deinit();
 
-    iot_deinit();
+    // iot_deinit();
 
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

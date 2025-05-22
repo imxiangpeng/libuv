@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -175,6 +176,15 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
             proto[idx].value.int64 = val;
             return 0;
         }
+        case PROTO_VALUE_NUMBER: {
+            double val = strtod(p, &endptr);
+            if (p == endptr || errno == ERANGE) {
+                return -1;
+            }
+            proto[idx].value.number = val;
+            return 0;
+        }
+
         case PROTO_VALUE_STRING:
             if (proto[idx].value.string != NULL) {
                 free(proto[idx].value.string);

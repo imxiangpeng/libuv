@@ -26,8 +26,6 @@
 // because pressure maybe update frequently
 #define FLOOR_MODEL_PATH "floor_model.json"  //"/etc/elevatord/floor_model.json"
 #define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord/floor_model.1.json"
-// this model maybe update dynamic
-#define FLOOR_PRESSURE_MODEL_PATH "/etc/elevatord_floor_pressure_model.json"
 
 #define FLOOR_PREDICT_PRESSURE_DELTA 30    // 30Pa
 #define FLOOR_PRESSURE_THRESHOLD_DELTA 10  // 10Pa

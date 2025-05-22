@@ -25,7 +25,6 @@ struct state_machine {
 
 struct uv_loop_s;
 
-
 int statemachine_init(struct uv_loop_s *loop);
 
 int statemachine_deinit();

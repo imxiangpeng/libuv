@@ -21,7 +21,7 @@ const char* elevator_serialno(void) {
         platform_get_property(PROPERTY_SERIAL, _serial_no, sizeof(_serial_no));
     }
     //    return _serial_no;
-    return "244200000E480001";  //"AD00469RAG47506";// "E073E72988DA001";//"244200000E480001";
+    return "LC4005CB4E213B8C9";//"244200000E480001";  //"AD00469RAG47506";// "E073E72988DA001";//"244200000E480001";
 }
 
 const char* elevator_mac(void) {

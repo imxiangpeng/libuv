@@ -84,6 +84,8 @@ static void calibration_event_free(struct calibration_event* e) {
     pthread_mutex_unlock(&_queue_mutex);
 
     HR_INIT_LIST_HEAD(&e->entry);
+
+    free(e);
 }
 
 static int send_calibration_event(struct calibration_event* m) {
