@@ -429,7 +429,7 @@ static int unifykey_node_write(const char* node, const char* value) {
         return -1;
     }
     snprintf(path, sizeof(path), "/sys/class/unifykeys/%s", node);
-    int fd = open("", O_WRONLY);
+    int fd = open(path, O_WRONLY);
     if (fd < 0) {
         return -1;
     }
@@ -487,3 +487,4 @@ static int unifykey_write(const char* key, const char* value) {
     unifykey_node_write("lock", "0");
     return len > 0 ? 0 : -1;
 }
+

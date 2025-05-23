@@ -1,3 +1,5 @@
+// mxp, 20250520, smart/simple conf utils
+
 #define _GNU_SOURCE
 
 #include <errno.h>
@@ -317,6 +319,11 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
         switch (proto[i].type) {
             case PROTO_VALUE_INT64: {
                 int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", proto[i].name, proto[i].value.int64);
+                futil_write_fd(fd, buffer, len);
+                break;
+            }
+            case PROTO_VALUE_NUMBER: {
+                int len = snprintf(buffer, sizeof(buffer), "%s=%f\n", proto[i].name, proto[i].value.number);
                 futil_write_fd(fd, buffer, len);
                 break;
             }

@@ -1,3 +1,5 @@
+// mxp, 20250502, interface to read/write amlogic unifykeys
+
 #include "platform.h"
 #include <arpa/inet.h>
 #include <errno.h>

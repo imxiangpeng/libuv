@@ -239,24 +239,24 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
     int which = -1;
     read(_pipefd[0], &which, sizeof(which));
 
-    HR_LOGD("haha receive message:%d \n", which);
+    // HR_LOGD("receive message:%d \n", which);
     switch (which) {
         case MSG_REALTIME:
-            HR_LOGD("haha report realtime message \n");
+            // HR_LOGD("report realtime message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_REALTIME, _realtime_b.head, -1 /*no block*/);
             _realtime_b_is_busy = 0;
             break;
         case MSG_HISTORICAL:
-            HR_LOGD("haha receive notify message \n");
+            // HR_LOGD("receive notify message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_HISTORICAL, _historical_b.head, -1 /*no block*/);
             _historical_b_is_busy = 0;
             break;
         case MSG_MOTION_EVENT:
-            HR_LOGD("haha receive motion event message \n");
+            // HR_LOGD("receive motion event message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_MOTION, _motion_b.head, -1 /*no block*/);
             break;
         case MSG_QUIT:
-            HR_LOGD("haha receive message:%d quit\n", which);
+            HR_LOGD("receive message:%d quit\n", which);
             uloop_end();
             break;
     }

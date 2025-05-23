@@ -52,7 +52,7 @@ static const double G0 = 9.81;
 static struct motion_observer* _motion_observers[10] = {0};
 
 static int ACCELEROMETER_SAMPLE_RATE_HZ = 200;
-static double BAROMETER_SAMPLE_RATE_HZ = 12.5f;
+static double BAROMETER_SAMPLE_RATE_HZ = 50;//12.5f;
 
 #define BAROMETER_PREDICT_STATIONARY_SLOPE 0.1
 
@@ -641,8 +641,10 @@ static void* _barometer_thread_routin(void* args) {
         // }
 
         // barometer_now = now;
-        // barometer_pressure = _barometer_motion.mw->mean;//pressure;
-        barometer_pressure = round(pressure * 100) / 100;
+
+        // use mean not current point
+        barometer_pressure = round(_barometer_motion.mw->mean * 100)/100;//pressure;
+        // barometer_pressure = round(pressure * 100) / 100;
         barometer_temperature = round(temp * 100) / 100;
 
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {

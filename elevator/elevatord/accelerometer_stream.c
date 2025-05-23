@@ -13,14 +13,14 @@
 #include <unistd.h>
 
 #include "butterworth_filter.h"
-#include "sconf.h"
 #include "hr_log.h"
 #include "motion_stream.h"
 #include "moving_window.h"
+#include "sconf.h"
 #include "sensor.h"
 #include "time_utils.h"
 
-// #define SENSOR_CALIBRATION_CONF "/etc/elevator/sensor_calibration.conf"
+// #define SENSOR_CALIBRATION_CONF "/etc/elevatord/sensor_calibration.conf"
 #define SENSOR_CALIBRATION_CONF "imu_calibration.conf"
 
 // reset when both acc & velocity below threshold
@@ -325,6 +325,9 @@ static int accelerometer_stream_open(struct motion_stream* self) {
 static int accelerometer_stream_read(struct motion_stream* self, void* data, size_t count) {
     double dt = 0.01;
     int ret = -1;
+
+    double accel_filtered[IMU_AXES] = {0};
+
     struct accelerometer_stream_data* p = (struct accelerometer_stream_data*)data;
     // double accel_union = 0, accel_filter = 0;
     struct sensor_data_accelerometer accel;
@@ -357,9 +360,6 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
 #if USE_LOCAL_SIMULATE_DATA
     dt = accel.dt;
 #endif
-
-    // HR_LOGD("dt:%f\n", dt);
-    double accel_filtered[IMU_AXES] = {0};
 
     // butter worth filter cutoff 10hz
     for (size_t i = 0; i < ARRAY_SIZE(accel_filtered); i++) {
@@ -804,7 +804,7 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             // 这里估计需要考虑不要从 0 开始，从 1 或者 2 开始
             // 低于 2 hz 的我们不认为抖动
             // TODO
-            for (int j = 2; j < N_fft_out; j++) {
+            for (int j = 0; j < N_fft_out; j++) {
                 double real = f->out[j][0];
                 double imag = f->out[j][1];
                 double magnitude = sqrt(real * real + imag * imag);
@@ -823,7 +823,14 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             accel_value = (2.0 * max_magnitude) / window_sum;  // f->sampling_size;
 
             // HR_LOGE("aix:%d: frequency:%f, accel_value:%f(max_magnitude:%f), mean:%f\n", i, frequency, accel_value, max_magnitude, mean);
-            if (accel_value > 0.1) {
+            // do not report when jitter rate under 2Hz
+            // only filter accel_z, not filter x,y
+            if (i == 2) {
+                if (frequency < 2.0) {
+                    accel_value = 0;
+                }
+            }
+            if (accel_value > 0.01) {
                 f->jitter_frequency = frequency;
                 f->jitter_accel = accel_value;
             } else {

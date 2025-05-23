@@ -79,7 +79,6 @@ double elevator_temperature(void) {
     temp /= 1000.0f; // new bmp280 driver return value should / 1000
     temp = round(temp * 10) / 10;
     fclose(fp);
-    printf("temp:%f\n", temp);
     return temp;
 }
 

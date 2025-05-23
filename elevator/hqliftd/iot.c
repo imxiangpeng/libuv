@@ -24,7 +24,7 @@
 #include "hr_log.h"
 
 //#define HQLIFTD_CONF_PATH "/etc/hqliftd/hqliftd.conf"
-#define HQLIFTD_CONF_PATH "hqliftd.conf"
+// #define HQLIFTD_CONF_PATH "hqliftd.conf"
 
 #define BROKER_DEFAULT_SERVER "mq.hqszjs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883

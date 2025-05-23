@@ -105,6 +105,7 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     }
 }
 
+// 也有可能是新进入的乘客，然后电梯一直没有运行也可以报警
 static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
     struct elevator_status st;
     if (!handle)
@@ -220,6 +221,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     HR_LOGD("%s(%d): door closed but open again: current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
                     HR_LOGD("%s(%d): from %s ==> %s\n", __FUNCTION__, __LINE__, state_str(_state), state_str(SM_ELEVATOR_STOPPED_DOOR_OPENED));
                     _state = SM_ELEVATOR_STOPPED_DOOR_OPENED;
+                    uv_timer_stop(&_timer);  // stop the person inside long timer
                     break;
                 default:
                     HR_LOGD("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
