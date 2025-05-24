@@ -23,8 +23,6 @@
 
 #include "hr_log.h"
 
-//#define HQLIFTD_CONF_PATH "/etc/hqliftd/hqliftd.conf"
-// #define HQLIFTD_CONF_PATH "hqliftd.conf"
 
 #define BROKER_DEFAULT_SERVER "mq.hqszjs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883
@@ -54,7 +52,7 @@ int iot_init(struct uv_loop_s* loop) {
     if (!_iot)
         return -1;
 
-    if (0 == sconf_load_with_proto(HQLIFTD_CONF_PATH, _mqtt_conf_fields, sizeof(_mqtt_conf_fields) / sizeof(_mqtt_conf_fields[0]))) {
+    if (0 == sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _mqtt_conf_fields, sizeof(_mqtt_conf_fields) / sizeof(_mqtt_conf_fields[0]))) {
         if (NULL != _mqtt_conf_fields[FIELD_SERVER].value.string) {
             snprintf(_iot->server, sizeof(_iot->server), "%s", _mqtt_conf_fields[FIELD_SERVER].value.string);
             free(_mqtt_conf_fields[FIELD_SERVER].value.string);

@@ -15,7 +15,7 @@
 // FTP_ADDRESS=
 // FTP_USERNAME=
 // FTP_PASSWORD=
-#define HQLIFTD_CONF_PATH "hqliftd.conf"
+// #define HQLIFTD_CONF_PATH "hqliftd.conf"
 
 
 enum elevator_direction {

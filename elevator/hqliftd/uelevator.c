@@ -228,6 +228,11 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         hrbuffer_reset(&_historical.jitter_frequency_array);
         hrbuffer_reset(&_historical.jitter_accel_array);
 
+        if (fabs(_historical.distance) < 0.5) {
+            HR_LOGE("distance:%f is too maybe invalid data\n", _historical.distance);
+            return 0;
+        }
+
         blobmsg_for_each_attr(cur, tb[HI_ACCEL_ARRAY], rem) {
             double v = blobmsg_get_double(cur);
             hrbuffer_append(&_historical.accel_array, &v, sizeof(v));
@@ -516,7 +521,7 @@ int uelevator_init(void) {
         return -1;
     }
 
-    sconf_load_with_proto(HQLIFTD_CONF_PATH, &_speed_limit_threhold, 1);
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &_speed_limit_threhold, 1);
 
     pthread_attr_init(&attr);
 

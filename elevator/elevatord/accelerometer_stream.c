@@ -826,7 +826,7 @@ static int _fft_process(struct accelerometer_stream* self, double* a, int len) {
             // do not report when jitter rate under 2Hz
             // only filter accel_z, not filter x,y
             if (i == 2) {
-                if (frequency < 2.0) {
+                if (frequency < 1.0) {
                     accel_value = 0;
                 }
             }

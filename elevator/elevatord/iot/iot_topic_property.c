@@ -20,11 +20,7 @@
 
 #include "uviot.h"
 
-// #define ELEVATORD_CONFIG_PATH "/etc/elevatord/elevatord.conf"
-#define ELEVATORD_CONFIG_PATH "elevatord.conf"
 #define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
-
-#define HQLIFTD_CONFIG_PATH "hqliftd.conf"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 

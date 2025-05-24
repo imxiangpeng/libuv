@@ -325,6 +325,11 @@ static void _observer_on_event(struct motion_event* data) {
                     _floor_calibration_cb = NULL;
                 }
                 _floor_calibration = 0;
+
+                // finally we should update accelerometer height
+                // because now it's related from the lowest floor, not base floor
+                // it's not correct when lowest floor is not base floor
+                motion_calibrate_at_floor(num);
             }
         }
     }
@@ -446,7 +451,9 @@ static double calculate_base_pressure(double p1, double height, double temperatu
     return p0;
 }
 
-int floor_update_pressure_when_stationary(int num, double pressure, double temperature) {
+// force update floor_module.json when persist is not 0
+// otherwise update memory data only
+int floor_update_pressure_when_stationary(int num, double pressure, double temperature, int persist) {
     (void)num;
     (void)pressure;
     (void)temperature;
@@ -473,8 +480,11 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
 
     delta_p = fabs(pressure - fb->pressure);
     HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f)\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure);
-    if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA) {
-        return 0;  // no need update
+
+    if (persist != 0) {
+        if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA) {
+            return 0;  // no need update
+        }
     }
 
     fb->pressure = pressure;
@@ -495,7 +505,9 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         }
     }
 
-    floor_store_model(0);
+    if (persist != 0) {
+        floor_store_model(0);
+    }
     return 0;
 }
 // height relative to base floor

@@ -1,3 +1,36 @@
+# 配置文件参数
+
+我们提供了遍历的配置文件参数获取方法，参数的获取可能零星的分布在多个文件中，这里我们统一记录一下：
+
+1.  ELEVATORD_CONFIG_PATH: /etc/elevatord/elevatord.conf
+
+    elevatord 运行参数
+
+    - `ACCELEROMETER_SAMPLING_RATE_HZ`： 加速度采样参数，默认 100Hz 或者 200Hz（double 类型，但是请使用整数）
+    - `BAROMETER_SAMPLING_RATE_HZ`： 气压传感器采样参数，系统默认 （50Hz）, 类型 double， 因为可以设置 `12.5Hz`
+    - `BAROMETER_PREDICT_STATIONARY_SLOPE`: 气压判定静止斜率(0.1)
+    - `BAROMETER_PREDICT_STATIONARY_STDDEV`: 气压判定静止标准差(1.5, 我们测试一般在 1 以下，但是个别会到 1 冒头，但是运行时基本都在 2 以上，可以在 dump 数据中分析)
+    
+    - `IOT_REPORT_SWITCH`： 阿里云平台参数上报开关（必要的时候，可以关闭运行参数的上报， 但是启动时相关参数还是正常上报的） 
+
+2.  SENSOR_CALIBRATION_CONF： /etc/elevatord/sensor_calibration.conf
+
+    传感器校准参数，不能删除。
+
+    -  `CALIBRATED`: 1/0 是否已经完成校准
+    -  `G_1000`： 校准后，计算的本地重力加速度的值 * 1000
+    -  `BIAS_ACCEL_X_1000`: 加速度 X 零偏值 * 1000
+    -  `BIAS_ACCEL_Y_1000`: 加速度 Y 零偏值 * 1000
+    -  `BIAS_ACCEL_Z_1000`: 加速度 Z 零偏值 * 1000
+    -  `PITCH_1000`: 安装俯仰角 * 1000
+    -  `ROLL_1000`: 安装翻滚角 * 1000
+
+# 气压更新策略
+
+1.  每次到达基层强制更新内存数据(还是修改为每次停靠都更新)
+2.  电梯静止 60s 情况下，当变化超过 10Pa 的时候，自动更新写入文件
+3.  上面策略是不稳定的，但是我又不能频繁写入；（要不要考虑 nand 寿命）
+
 # 电梯模拟操作说明
 
 1. 首先，在编译的时候需要开启 `USE_LOCAL_SIMULATE_DATA` 功能：

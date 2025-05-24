@@ -307,7 +307,6 @@ static int accelerometer_stream_calibration_completed(struct motion_stream* self
 }
 
 static int accelerometer_stream_reset(struct motion_stream* self) {
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     ekf_t* ekf = NULL;
     struct accelerometer_stream* ms = container_of(self, struct accelerometer_stream, self);
     if (!self || !ms) {

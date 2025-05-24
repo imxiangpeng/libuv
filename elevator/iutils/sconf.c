@@ -229,7 +229,7 @@ int sconf_load_with_proto(const char* path, struct sconf_proto* proto, size_t si
 
 // 0: not match
 // 1: matched
-static int match_filed(char* line, struct sconf_proto* proto, size_t size) {
+static int match_field(char* line, struct sconf_proto* proto, size_t size) {
     char* p = NULL;
     if (!line || !proto) {
         return 0;
@@ -244,17 +244,6 @@ static int match_filed(char* line, struct sconf_proto* proto, size_t size) {
 
     p = line;
 
-#if 0
-    p = strchr(line, '=');
-    if (!p || line == p) {
-        return 0;
-    }
-    
-    
-    while (p > line && *(p-1) && isspace((unsigned char)*(p-1))) {
-        --p;
-    }
-#endif
     // find space or =
     while (*p && *p != '=' && !isspace(*p))
         p++;
@@ -305,7 +294,7 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
     if (len > 0 && buf) {
         for (line = strtok_r(buf, "\n", &save_ptr); line;
              line = strtok_r(NULL, "\n", &save_ptr)) {
-            if (0 == match_filed(line, proto, size)) {
+            if (0 == match_field(line, proto, size)) {
                 // directly write origin data
                 futil_write_fd(fd, line, strlen(line));
                 futil_write_fd(fd, "\n", 1);  // append line eof

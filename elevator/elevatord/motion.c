@@ -15,6 +15,7 @@
 #include "hr_log.h"
 #include "motion.h"
 #include "moving_window.h"
+#include "sconf.h"
 #include "sensor.h"
 #include "time_utils.h"
 
@@ -35,8 +36,8 @@
 
 // 我们会保存过去 5s 的平均值 （不太准确，我们 moving window 也占用了 1秒，所以我们数据延迟 1 秒）
 // 然后计算过去 5s 的方差，如果小于门限，就认为静止
-#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
-#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
+//#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
+//#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
 
 // 海平面标准气压 (Pa)
 #define P0 101325.0
@@ -51,10 +52,11 @@ static const double G0 = 9.81;
 
 static struct motion_observer* _motion_observers[10] = {0};
 
-static int ACCELEROMETER_SAMPLE_RATE_HZ = 200;
-static double BAROMETER_SAMPLE_RATE_HZ = 50;//12.5f;
+static double ACCELEROMETER_SAMPLING_RATE_HZ = 100;
+static double BAROMETER_SAMPLING_RATE_HZ = 50;  // 12.5f;
 
-#define BAROMETER_PREDICT_STATIONARY_SLOPE 0.1
+static double BAROMETER_PREDICT_STATIONARY_SLOPE = 0.1;
+static double BAROMETER_PREDICT_STATIONARY_STDDEV = 1.5;
 
 // 经过测试 3/1/0.5 秒都与加速度以及实际测量值有较大偏差
 // 但是这三这个中感觉 1 秒效果比 3/0.5 两个的效果好
@@ -96,7 +98,7 @@ static double floor_baseline_pressure = 0;
 
 static double barometer_height_discontinuous = 0;
 
-#define MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY_S 60  // 60s
+static int MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = 60;  // 60s
 static int64_t _motion_stationary_update_pressure_threshold_time_ns = 0;
 // current stationary pressure begin point
 static double _motion_stationary_pressure = 0;
@@ -167,7 +169,7 @@ static double calculate_height_difference(double p0, double p1, double temperatu
 static void* _accelerometer_thread_routin(void* args) {
     (void)args;
 
-    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / ACCELEROMETER_SAMPLING_RATE_HZ;
 
     int floor_num = 0;
     char floor_label[64] = {0};
@@ -249,7 +251,7 @@ static void* _accelerometer_thread_routin(void* args) {
                     floor_baseline_pressure = barometer_pressure;
                     HR_LOGD("boot startup finished at: floor: %d, height:%f\n", num, height);
 
-                    floor_update_pressure_when_stationary(num, barometer_pressure, barometer_temperature);
+                    floor_update_pressure_when_stationary(num, barometer_pressure, barometer_temperature, 1);
                 } else {
                     HR_LOGE("we can not map to floor number ! pressure: %f, temp:%f\n", barometer_pressure, barometer_pressure);
                     _accelerometer_motion.height = 0;
@@ -436,13 +438,20 @@ static void* _accelerometer_thread_routin(void* args) {
                         HR_LOGD("adjust baseline floor from %d to %d\n", floor_baseline_num, floor_num);
                         floor_baseline_num = floor_base_floor();
                         floor_baseline_pressure = barometer_pressure;
+                        // update in memory
+                        floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 0);
                     }
                 } else {
                     HR_LOGD("mxp finished at unknown, but from acce: floor: %d, height:%f\n", floor_num, _accelerometer_motion.height);
                 }
                 _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
                 _accelerometer_motion.ev.temperature = barometer_temperature;
+                // 当我们在电梯中跳的时候，会触发加速度的动作，由于我们的门限不一定准确，
+                // 所以可能出现刚开始判定运动又停止的情况，导致上报一次距离为 0 的行程
+                // 我们是在这里处理还是在 hqliftd 里面过滤呢？感觉 hqliftd 里面更好一些
+                // if (fabs(distance) > 1) {
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
+                //}
 #endif
             }
             _accelerometer_motion.state = new_state;
@@ -510,13 +519,13 @@ static void* _accelerometer_thread_routin(void* args) {
             ((_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY) ||
              (_motion_stationary_pressure != 0 && fabs(_motion_stationary_pressure - barometer_pressure) < 10))) {
             if (_motion_stationary_update_pressure_threshold_time_ns == 0) {
-                _motion_stationary_update_pressure_threshold_time_ns = now + seconds_to_nanoseconds(MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY_S);
+                _motion_stationary_update_pressure_threshold_time_ns = now + seconds_to_nanoseconds(MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY);
                 _motion_stationary_pressure = barometer_pressure;
             }
             if (_motion_stationary_update_pressure_threshold_time_ns != 0 && now > _motion_stationary_update_pressure_threshold_time_ns) {
                 HR_LOGD("%s(%d): perform pressure update after stationary duration exceeds threshold\n", __FUNCTION__, __LINE__);
                 _motion_stationary_update_pressure_threshold_time_ns = 0;
-                floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature);
+                floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 1);
             }
         } else {
             _motion_stationary_update_pressure_threshold_time_ns = 0;
@@ -568,7 +577,7 @@ static void* _accelerometer_thread_routin(void* args) {
 static void* _barometer_thread_routin(void* args) {
     (void)args;
 
-    int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLE_RATE_HZ;
+    int64_t delta_time_ns = seconds_to_nanoseconds(1) / BAROMETER_SAMPLING_RATE_HZ;
 
     struct motion_stream* input = _barometer_motion.stream;
     double result[2] = {0};  // {pressure, temp}
@@ -609,7 +618,7 @@ static void* _barometer_thread_routin(void* args) {
 
         moving_window_slope(_barometer_motion.mw, &slope);
 
-        if (!isnan(slope) && slope < BAROMETER_PREDICT_STATIONARY_SLOPE && _barometer_motion.mw->stddev < 1) {
+        if (!isnan(slope) && slope < BAROMETER_PREDICT_STATIONARY_SLOPE && _barometer_motion.mw->stddev < BAROMETER_PREDICT_STATIONARY_STDDEV) {
             if ((_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY) == 0) {
                 _motion_init_status |= MOTION_INIT_STATUS_BAROMETER_STATIONARY;
                 HR_LOGD("%s(%d) barometer detect stationary mean:%f, stddev:%f, slope:%f\n", __FUNCTION__, __LINE__, _barometer_motion.mw->mean, _barometer_motion.mw->stddev, slope);
@@ -643,7 +652,7 @@ static void* _barometer_thread_routin(void* args) {
         // barometer_now = now;
 
         // use mean not current point
-        barometer_pressure = round(_barometer_motion.mw->mean * 100)/100;//pressure;
+        barometer_pressure = round(_barometer_motion.mw->mean * 100) / 100;  // pressure;
         // barometer_pressure = round(pressure * 100) / 100;
         barometer_temperature = round(temp * 100) / 100;
 
@@ -724,13 +733,57 @@ int motion_initalize(int argc, char** argv) {
     (void)argv;
     int ret = -1;
 
+    enum {
+        ACC_SAMPLING_RATE = 0,
+        BARO_SAMPLING_RATE,
+        PRESSURE_STATIONARY_SLOPE,
+        PRESSURE_STATIONARY_STDDEV,
+        PERIOD_UPDATE_PRESSURE,
+    };
+
+    struct sconf_proto elevatord_config[] = {
+        [ACC_SAMPLING_RATE] = {"ACCELEROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_NUMBER, {.number = ACCELEROMETER_SAMPLING_RATE_HZ}},
+        [BARO_SAMPLING_RATE] = {"BAROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_NUMBER, {.number = BAROMETER_SAMPLING_RATE_HZ}},
+        [PRESSURE_STATIONARY_SLOPE] = {"BAROMETER_PREDICT_STATIONARY_SLOPE", PROTO_VALUE_NUMBER, {.number = BAROMETER_PREDICT_STATIONARY_SLOPE}},
+        [PRESSURE_STATIONARY_STDDEV] = {"BAROMETER_PREDICT_STATIONARY_STDDEV", PROTO_VALUE_NUMBER, {.number = BAROMETER_PREDICT_STATIONARY_STDDEV}},
+        [PERIOD_UPDATE_PRESSURE] = {"MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY", PROTO_VALUE_INT64, {.int64 = MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY}},
+    };
+
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, elevatord_config, ARRAY_SIZE(elevatord_config));
+
+    // accel only accept 100/200
+    switch ((int)elevatord_config[ACC_SAMPLING_RATE].value.number) {
+        case 100:
+        case 200:
+            ACCELEROMETER_SAMPLING_RATE_HZ = elevatord_config[ACC_SAMPLING_RATE].value.number;
+            break;
+        default:
+            // ignore use origin
+            break;
+    }
+    // accel only accept 50/12.5
+    if (50.0 == elevatord_config[BARO_SAMPLING_RATE].value.number ||
+        12.5 == elevatord_config[BARO_SAMPLING_RATE].value.number) {
+        BAROMETER_SAMPLING_RATE_HZ = elevatord_config[BARO_SAMPLING_RATE].value.number;
+    }
+
+    HR_LOGD("accelerometer sampling rate:%fHz, barometer sampling rate:%fHz\n", ACCELEROMETER_SAMPLING_RATE_HZ, BAROMETER_SAMPLING_RATE_HZ);
+
+    BAROMETER_PREDICT_STATIONARY_SLOPE = elevatord_config[PRESSURE_STATIONARY_SLOPE].value.number;
+    BAROMETER_PREDICT_STATIONARY_STDDEV = elevatord_config[PRESSURE_STATIONARY_STDDEV].value.number;
+
+    HR_LOGD("pressure stationary slope threshold:%f, pressure stationary stddev threshold:%f\n", BAROMETER_PREDICT_STATIONARY_SLOPE, BAROMETER_PREDICT_STATIONARY_STDDEV);
+    
+    MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = elevatord_config[PERIOD_UPDATE_PRESSURE].value.int64;
+    HR_LOGD("motion update floor pressure period :%d seconds when stationary\n", MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY);
+
 #if DUMP_DATA_TO_FILE
     dump_data_init();
 #endif
 
     memset((void*)&_accelerometer_motion, 0, sizeof(_accelerometer_motion));
 
-    _accelerometer_motion.stream = accelerometer_stream_init(ACCELEROMETER_SAMPLE_RATE_HZ);
+    _accelerometer_motion.stream = accelerometer_stream_init(ACCELEROMETER_SAMPLING_RATE_HZ);
     // simulate data, initialize floor
     // _accelerometer_motion.height = -6.1;
 
@@ -748,7 +801,7 @@ int motion_initalize(int argc, char** argv) {
     // do not auto enter calibration
     // calibration will be do in accel thread accroding pressure
 
-    _barometer_motion.stream = barometer_stream_init(BAROMETER_SAMPLE_RATE_HZ);
+    _barometer_motion.stream = barometer_stream_init(BAROMETER_SAMPLING_RATE_HZ);
     if (!_barometer_motion.stream) {
         HR_LOGE("can not find barometer ...\n");
         return -1;
@@ -760,7 +813,7 @@ int motion_initalize(int argc, char** argv) {
         return -1;
     }
 
-    _barometer_motion.mw = moving_window_init((int)BAROMETER_SAMPLE_RATE_HZ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
+    _barometer_motion.mw = moving_window_init((int)BAROMETER_SAMPLING_RATE_HZ /** BAROMETER_WINDOW_DELAY_SECONDS*/);
     if (!_barometer_motion.mw) {
         return -1;
     }

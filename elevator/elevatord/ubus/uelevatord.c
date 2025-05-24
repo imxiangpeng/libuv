@@ -1,3 +1,7 @@
+// mxp, ubus elevatord object
+// 1. interface
+// 2. publish event
+
 #include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdint.h>

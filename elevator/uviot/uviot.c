@@ -80,8 +80,6 @@ static void _topic_period_timer_cb(uv_timer_t* handle) {
         return;
     }
 
-    HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
-
     // public topics
     void* payload = NULL;
     int len = 0;
@@ -101,7 +99,6 @@ static void iot__topic_timer_start(struct uviot__topic* t) {
     if (!t || !t->self)
         return;
     if (t->timer != NULL) {
-        printf("%s(%d): period:%d\n", __FUNCTION__, __LINE__, t->self->period);
         uv_timer_start(t->timer, _topic_period_timer_cb, t->self->period, t->self->period);
     }
 }
@@ -124,8 +121,6 @@ static void iot__topic_async_cb(uv_async_t* handle) {
     if (mosquitto_socket(t->iot->mosq) == -1) {
         return;
     }
-
-    HR_LOGD("%s(%d): publish topic: %s ...\n", __FUNCTION__, __LINE__, t->self->name);
 
     // public topics
     void* payload = NULL;
