@@ -1,0 +1,7 @@
+{
+	"name":	"ubusd",
+	"class":	"core",
+	"disabled":	0,
+	"oneshot":	0,
+	"argv":	["/usr/sbin/ubusd"]
+}

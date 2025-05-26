@@ -516,9 +516,10 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     }
 
     delta_p = pressure - fb->pressure;
-    HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f)\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure);
-
     _uncommit_pressure_delta += delta_p;
+
+    HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f), uncommit pressure delta:%f\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure, _uncommit_pressure_delta);
+
 #if 0
     if (persist != 0) {
         if (fabs(_uncommit_pressure_delta /*delta_p*/) < FLOOR_PRESSURE_THRESHOLD_DELTA) {
