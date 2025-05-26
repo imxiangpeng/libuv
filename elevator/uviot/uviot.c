@@ -363,12 +363,15 @@ static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle) {
     if (!mosq)
         return;
 
-    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect_async(mosq)) {
+    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect/*_async*/(mosq)) {
         HR_LOGD("%s(%d): failed reconnect\n", __FUNCTION__, __LINE__);
         return;
     }
 
     iot->sock = mosquitto_socket(mosq);
+    if (iot->sock == -1) {
+        return;
+    }
 
     // using uv_poll_init update socket
     // any memory leak ?

@@ -24,7 +24,6 @@ set(SOURCES main
     topic_houqi_liftfault
     topic_houqi_liftruninfo
     uelevator
-    platform
     elevator
     state_machine)
 
@@ -51,5 +50,6 @@ TARGET_LINK_LIBRARIES(hqliftd ${uuid_library})
 
 TARGET_LINK_LIBRARIES(hqliftd uviot)
 TARGET_LINK_LIBRARIES(hqliftd iutils)
+TARGET_LINK_LIBRARIES(hqliftd platform)
 
 #INSTALL(TARGETS hqliftd RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

@@ -18,7 +18,7 @@ struct iot_topic;
 struct uv_loop_s;
 
 struct uviot {
-    char id[128]; // client id
+    char id[256]; // client id
     char server[128];
     int port;
     int alive_time;

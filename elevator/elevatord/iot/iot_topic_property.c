@@ -15,6 +15,8 @@
 #include "iot_topic.h"
 
 #include "motion.h"
+#include "platform.h"
+
 #include "sconf.h"
 #include "sensor.h"
 
@@ -96,9 +98,6 @@ static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
 
 static void _observer_on_event(struct motion_event* data);
-
-static int unifykey_read(const char* key, char* data, size_t count);
-static int unifykey_write(const char* key, const char* value);
 
 static struct motion_observer _iot_property_observer = {
     // we use on_event only report when finished
@@ -247,28 +246,11 @@ static int _on_property_set_message(void* payload, int len) {
 
     val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "elevator_id"));
     if (val_str) {
-#if 0
         // burn elevator id
-        int result = -1;
-        char cmd[512] = {0};
-
-        // only me operate the deviceid field so do not wait lock
-        snprintf(cmd, sizeof(cmd),
-                 "echo 1 >  /sys/class/unifykeys/attach &&"
-                 // "while [ \"$(cat /sys/class/unifykeys/lock)\" != \"0\" ]; do sleep 0.1;done &&"
-                 "echo 1 >  /sys/class/unifykeys/lock && "
-                 "echo deviceid > /sys/class/unifykeys/name &&"
-                 "echo \"%s\" > /sys/class/unifykeys/write &&"
-                 "cat /sys/class/unifykeys/read &&"
-                 "echo 0 >  /sys/class/unifykeys/lock;",
-                 val_str);
-        // system(cmd);
-        _popen_result(&result, cmd, _elevator_id, sizeof(_elevator_id));
-#endif
         snprintf(_elevator_id, sizeof(_elevator_id), "%s", val_str);
         _properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
 
-        unifykey_write("deviceid", _elevator_id);
+        platform_set_property(PROPERTY_DEVICEID, _elevator_id);
 
         schedule_report();
 
@@ -327,7 +309,7 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
     }
     _iot = iot;
 
-    unifykey_read("deviceid", _elevator_id, sizeof(_elevator_id));
+    platform_get_property(PROPERTY_DEVICEID, _elevator_id, sizeof(_elevator_id));
 
     HR_LOGD("%s(%d): elevator id:%s\n", __FUNCTION__, __LINE__, _elevator_id);
 
@@ -415,72 +397,5 @@ static void schedule_report(void) {
 void report_floor_model_property() {
     _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
-}
-
-static int unifykey_node_write(const char* node, const char* value) {
-    ssize_t result = -1;
-    char path[256] = {0};
-
-    if (!node) {
-        return -1;
-    }
-    snprintf(path, sizeof(path), "/sys/class/unifykeys/%s", node);
-    int fd = open(path, O_WRONLY);
-    if (fd < 0) {
-        return -1;
-    }
-
-    // ignore value
-    result = futil_write_fd(fd, (void*)value, strlen(value));
-    close(fd);
-
-    return result;
-}
-
-static int unifykey_read(const char* key, char* data, size_t count) {
-    int fd = -1;
-    ssize_t len = 0;
-    if (!key || !data) {
-        return -1;
-    }
-    unifykey_node_write("attach", "1");
-    unifykey_node_write("lock", "1");
-    unifykey_node_write("name", key);
-
-    fd = open("/sys/class/unifykeys/read", O_RDONLY);
-    if (fd < 0) {
-        unifykey_node_write("lock", "0");
-        return -1;
-    }
-    len = read(fd, data, count);
-    close(fd);
-    fd = -1;
-
-    unifykey_node_write("lock", "0");
-    return len > 0 ? 0 : -1;
-}
-
-static int unifykey_write(const char* key, const char* value) {
-    int fd = -1;
-    ssize_t len = 0;
-    if (!key || !value) {
-        return -1;
-    }
-    unifykey_node_write("attach", "1");
-    unifykey_node_write("lock", "1");
-    unifykey_node_write("name", key);
-
-    // write only suport O_WRONLY
-    fd = open("/sys/class/unifykeys/write", O_WRONLY);
-    if (fd < 0) {
-        unifykey_node_write("lock", "0");
-        return -1;
-    }
-    len = futil_write_fd(fd, (void*)value, strlen(value));
-    close(fd);
-    fd = -1;
-
-    unifykey_node_write("lock", "0");
-    return len > 0 ? 0 : -1;
 }
 

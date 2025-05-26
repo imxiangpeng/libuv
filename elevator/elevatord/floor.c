@@ -21,14 +21,23 @@
 
 #define FLOOR_MODEL_VERSION "1.0"
 
+enum {
+    STORE_PERSIST = 1,
+    STORE_PERSIST_BACKUP = 1 << 1,
+    STORE_TMPFS = 1 << 2,
+};
+
 // this model is generated when user trigger floor calibration
 // we will not use pressure in this model
 // because pressure maybe update frequently
 #define FLOOR_MODEL_PATH "floor_model.json"  //"/etc/elevatord/floor_model.json"
 #define FLOOR_MODEL_BACKUP_PATH "/etc/elevatord/floor_model.1.json"
+#define FLOOR_MODEL_TMPFS_PATH "/tmp/elevatord_floor_model.json"  //"/etc/elevatord/floor_model.json"
 
 #define FLOOR_PREDICT_PRESSURE_DELTA 30    // 30Pa
 #define FLOOR_PRESSURE_THRESHOLD_DELTA 10  // 10Pa
+
+#define FLOOR_MODEL_HISTORY_COUNT 2
 
 static const double PRESSURE_L = 0.0065;
 static const double PRESSURE_R = 8.31432;
@@ -57,8 +66,9 @@ static int _floor_calibration_index = 0;
 
 static floor_calibration_cb _floor_calibration_cb = NULL;
 
+static double _uncommit_pressure_delta = 0;
+
 static int floor_load_model(const char* path) {
-    int ret = -1;
     ssize_t len = 0;
     char *data = NULL, *version = NULL, *date = NULL;
     cJSON *root = NULL, *ele = NULL, *floor_array = NULL;
@@ -168,7 +178,8 @@ static int floor_load_model(const char* path) {
 
     cJSON_Delete(root);
 
-    return ret;
+    _uncommit_pressure_delta = 0;
+    return 0;
 }
 
 static int _replace_floor_model_config(const char* path, char* data, int size) {
@@ -205,12 +216,16 @@ static int _replace_floor_model_config(const char* path, char* data, int size) {
     return 0;
 }
 
-static int floor_store_model(int update_backup) {
+static int floor_store_model(int mode) {
     int i = 0;
     struct tm tm;
     struct timespec ts;
     char tmp[64] = {0};
     cJSON *root = NULL, *floor_array = NULL;
+
+    if (!_building.model) {
+        return -1;
+    }
 
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
@@ -245,10 +260,18 @@ static int floor_store_model(int update_backup) {
 
     char* data = cJSON_Print(root);
     HR_LOGD("floor model:%s\n", data);
-    _replace_floor_model_config(FLOOR_MODEL_PATH, data, strlen(data));
-    if (update_backup != 0) {
+
+    if (STORE_PERSIST_BACKUP & mode) {
         _replace_floor_model_config(FLOOR_MODEL_BACKUP_PATH, data, strlen(data));
     }
+
+    if (STORE_PERSIST & mode) {
+        _replace_floor_model_config(FLOOR_MODEL_PATH, data, strlen(data));
+    }
+    if (STORE_TMPFS & mode) {
+        _replace_floor_model_config(FLOOR_MODEL_TMPFS_PATH, data, strlen(data));
+    }
+
     free(data);
     cJSON_Delete(root);
     return 0;
@@ -316,7 +339,7 @@ static void _observer_on_event(struct motion_event* data) {
 
                 // store model file before last calibration completed event
                 // so they can read model data
-                floor_store_model(1);  // update backup when calibration
+                floor_store_model(STORE_PERSIST | STORE_PERSIST_BACKUP);  // update backup when calibration
                 // reload or calc relative height
                 floor_load_model(FLOOR_MODEL_PATH);
 
@@ -340,12 +363,24 @@ static struct motion_observer _floor_observer = {
 };
 
 int floor_init() {
-    floor_load_model(FLOOR_MODEL_PATH);
+    int ret = -1;
+    struct stat st;
+
+    // load from tmpfs when it's exist
+    if (lstat(FLOOR_MODEL_TMPFS_PATH, &st) == 0) {
+        ret = floor_load_model(FLOOR_MODEL_TMPFS_PATH);
+    }
+    if (ret != 0) {
+        floor_load_model(FLOOR_MODEL_PATH);
+    }
+
     motion_register_observer(&_floor_observer);
     return 0;
 }
 
 int floor_deinit() {
+    // write floor model
+    floor_store_model(STORE_PERSIST | STORE_TMPFS);
     if (_building.model) {
         free(_building.model);
         _building.model = NULL;
@@ -457,9 +492,11 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     (void)num;
     (void)pressure;
     (void)temperature;
+    (void)persist;
     struct floor* fb = NULL;
 
     double delta_p = 0;
+    int mode = STORE_TMPFS;
 
     // not support when calibration
     if (_floor_calibration) {
@@ -478,14 +515,17 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         return -1;
     }
 
-    delta_p = fabs(pressure - fb->pressure);
+    delta_p = pressure - fb->pressure;
     HR_LOGD("%s(%d): floor:%d, store pressure:%f, new :%f (delta:%f)\n", __FUNCTION__, __LINE__, num, fb->pressure, pressure, pressure - fb->pressure);
 
+    _uncommit_pressure_delta += delta_p;
+#if 0
     if (persist != 0) {
-        if (delta_p < FLOOR_PRESSURE_THRESHOLD_DELTA) {
+        if (fabs(_uncommit_pressure_delta /*delta_p*/) < FLOOR_PRESSURE_THRESHOLD_DELTA) {
             return 0;  // no need update
         }
     }
+#endif
 
     fb->pressure = pressure;
     fb->temperature = temperature;
@@ -505,9 +545,27 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         }
     }
 
+#if 0
     if (persist != 0) {
-        floor_store_model(0);
+        _uncommit_pressure_delta = 0;
+        floor_store_model(STORE_PERSIST);
+    } else {
+        floor_store_model(STORE_TMPFS);
+
+        // also force update persist
+        if (fabs(_uncommit_pressure_delta) >= FLOOR_PRESSURE_THRESHOLD_DELTA){
+            _uncommit_pressure_delta = 0;
+            floor_store_model(STORE_PERSIST);
+        }
     }
+#endif
+    if (fabs(_uncommit_pressure_delta) >= FLOOR_PRESSURE_THRESHOLD_DELTA) {
+        _uncommit_pressure_delta = 0;
+        mode |= STORE_PERSIST;
+    }
+
+    floor_store_model(mode);
+
     return 0;
 }
 // height relative to base floor

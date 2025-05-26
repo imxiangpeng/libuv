@@ -80,5 +80,6 @@ TARGET_LINK_LIBRARIES(elevatord -lfftw3)
 TARGET_LINK_LIBRARIES(elevatord ${ubox_library} ${ubus_library} ${blob_library})
 TARGET_LINK_LIBRARIES(elevatord uviot)
 TARGET_LINK_LIBRARIES(elevatord iutils)
+TARGET_LINK_LIBRARIES(elevatord platform)
 
 #INSTALL(TARGETS elevatord RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

@@ -1,9 +1,9 @@
 // mxp, 20250421, support ali iot platform
 #define _GNU_SOURCE
 #include "iot.h"
-#include "uviot.h"
 #include <assert.h>
 #include <string.h>
+#include "uviot.h"
 
 #include <stdio.h>
 
@@ -15,6 +15,7 @@
 
 #include "hr_log.h"
 #include "iot_topic.h"
+#include "platform.h"
 
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883     // 8883 //1883
@@ -35,17 +36,20 @@ static long long time_ms() {
 }
 
 int iot_init(struct uv_loop_s* loop) {
-    char* hmac_secret = NULL;
+    char name[64] = {TIHUIYAN_DEVICE_NAME};
+
+    char hmac_secret[128] = {TIHUIYAN_DEVICE_SECRET};
 
     char* iot_content = NULL;
     unsigned char result[EVP_MAX_MD_SIZE] = {0};
     unsigned int len = EVP_MAX_MD_SIZE;
-
-    char* name = TIHUIYAN_DEVICE_NAME;
-    char* client_id = TIHUIYAN_PRODUCT_KEY "." TIHUIYAN_DEVICE_NAME;
     char* product_key = TIHUIYAN_PRODUCT_KEY;
 
+    // char* client_id = TIHUIYAN_PRODUCT_KEY "." TIHUIYAN_DEVICE_NAME;
+    char client_id[128] = {0};  // TIHUIYAN_PRODUCT_KEY "." TIHUIYAN_DEVICE_NAME;
+
     long long ts = time_ms();
+
     _iot = uviot_alloc(loop);
     if (!_iot)
         return -1;
@@ -53,7 +57,26 @@ int iot_init(struct uv_loop_s* loop) {
     snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
     _iot->port = BROKER_DEFAULT_PORT;
 
-    hmac_secret = TIHUIYAN_DEVICE_SECRET;
+    // get mac address into name buffer
+    platform_get_property(PROPERTY_MACADDR, name, sizeof(name));
+    // printf("mac:%s\n", name);
+    size_t i =0, j = 0;
+    for (; name[i] != '\0'; i++) {
+        if (name[i] != ':') {
+            name[j] = name[i];
+            j++;
+        }
+    }
+    name[j] = '\0';
+
+    printf("device name:%s\n", name);
+    platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
+    // printf("device secret:%s\n", hmac_secret);
+
+    // client can be mac or any other custom string
+    // we use format: TIHUIYAN_PRODUCT_KEY.TIHUIYAN_DEVICE_NAME
+    snprintf(client_id, sizeof(client_id), "%s.%s", TIHUIYAN_PRODUCT_KEY, name);
+
     // mqttClientId: clientId+"|securemode=3,signmethod=hmacsha1,timestamp=132323232|"
     // mqttUsername: deviceName+"&"+productKey
     // mqttPassword: sign_hmac(deviceSecret,content)
@@ -63,7 +86,7 @@ int iot_init(struct uv_loop_s* loop) {
     // "clientId" + {ClientId}+ "deviceName" + {deviceName }+ "productKey" + {productKey }+ "timestamp" + {timestamp}
     asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, ts);
 
-    HR_LOGD("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
+    // HR_LOGD("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
     HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
 
     assert(sizeof(_iot->password) >= EVP_MAX_MD_SIZE * 2 + 1);
@@ -72,7 +95,7 @@ int iot_init(struct uv_loop_s* loop) {
         sprintf(_iot->password + i * 2, "%02x", result[i]);
     }
     _iot->password[len * 2] = '\0';
-    HR_LOGD("iot password:%s\n", _iot->password);
+    // HR_LOGD("iot password:%s\n", _iot->password);
 
     // free memory
     free(iot_content);
@@ -80,11 +103,10 @@ int iot_init(struct uv_loop_s* loop) {
 
     // topic init early, we can observe motion event early before motion started
     iot_topic_init(_iot, product_key, name);
-    
+
     uviot_prepare(_iot);
     return 0;
 }
-
 
 int iot_deinit(void) {
     uviot_release(_iot);
