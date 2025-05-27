@@ -188,10 +188,12 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
         }
 
         case PROTO_VALUE_STRING:
-            if (proto[idx].value.string != NULL) {
+            // do not free other memory
+            // so you can pre assign string value as default value
+            /*if (proto[idx].value.string != NULL) {
                 free(proto[idx].value.string);
                 proto[idx].value.string = NULL;
-            }
+            }*/
 
             proto[idx].value.string = strdup(p);
             return 0;

@@ -4,8 +4,10 @@
 #define _XOPEN_SOURCE 600
 
 #include <cjson/cJSON.h>
+#include <curl/curl.h>
 #include <dirent.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,8 @@
 #include "file_util.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
+#include "sconf.h"
+
 #include "uviot.h"
 
 // #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
@@ -33,6 +37,8 @@
 // 2025-05-26_18-22-00.mp4
 #define MEDIA_RECORD_DATE_STRING_FORMAT "%Y-%m-%d_%H-%M-%S"
 
+static int _pipe_fd[2] = {-1, -1};
+
 static struct uviot* _iot = NULL;
 
 struct record {
@@ -40,10 +46,25 @@ struct record {
     char name[256];
 };
 
+static pthread_t _upload_tid = -1;
+
+enum {
+    FIELD_FTP_ADDRESS = 0,
+    FIELD_FTP_USERNAME,
+    FIELD_FTP_PASSWORD
+};
+
+struct sconf_proto _ftp_conf_fields[] = {
+    [FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = "ftp://ftp.hqszjs.com:2100"}},
+    [FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = "inspur"}},
+    [FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
+};
+
 extern void topic_houqi_liftstate_post(void);
 
 static int publish_upload_record_response();
 static int traverse_media_record_list(uint64_t begin, uint64_t end);
+static void* background_upload_thread_routin(void* args);
 
 // do not care timezone, so we can convert again
 static time_t command_date_format_string_to_seconds(const char* date) {
@@ -161,6 +182,43 @@ static int _on_command_message(void* payload, int len) {
 
     //
     if (0 == strcmp("recordDownload", type)) {
+        size_t id = -1;
+        double val = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "fileIndex"));
+        if (isnan(val) || val < 0) {
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        id = (int)val;
+
+        if (_pipe_fd[1] == -1) {
+            cJSON_Delete(root);
+            return -1;
+        }
+        // upload record in background;
+        write(_pipe_fd[1], (void*)&id, sizeof(id));
+#if 0
+        size = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
+
+        if (size < 0 || !data) {
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        if (size % sizeof(struct record) != 0) {
+            HR_LOGE("%s(%d): data maybe invalid ...\n", __FUNCTION__, __LINE__);
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        count = size / sizeof(struct record);
+
+        if ((int)val > (int)count - 1) {
+            cJSON_Delete(root);
+            return -1;
+        }
+
+#endif
         // todo
         cJSON_Delete(root);
         return 0;
@@ -275,11 +333,23 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     (void)public_key;
     (void)device_name;
 
+    pthread_attr_t attr;
     const char* serialno = elevator_serialno();  //"244200000E480001"; //elevator_deviceid();
 
     _iot = iot;
 
-    unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
+    // we will use default value when no setting or failed
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _ftp_conf_fields, sizeof(_ftp_conf_fields) / sizeof(_ftp_conf_fields[0]));
+
+    // ignore error
+    pipe(_pipe_fd);
+
+    pthread_attr_init(&attr);
+
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
+
+    // unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);
 
@@ -378,4 +448,140 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end) {
     hrbuffer_free(&record_lists);
 
     return count;
+}
+
+static int do_upload(const char* local_path, const char* remote_url) {
+    CURL* curl = NULL;
+    CURLcode res;
+    FILE* fp = NULL;
+    char userpwd[128] = {0};
+
+    if (!local_path || !remote_url) {
+        return -1;
+    }
+
+    fp = fopen(local_path, "rb");
+    if (!fp) {
+        return -1;
+    }
+
+    curl = curl_easy_init();
+
+    if (!curl) {
+        fclose(fp);
+        return -1;
+    }
+
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", _ftp_conf_fields[FIELD_FTP_USERNAME].value.string, _ftp_conf_fields[FIELD_FTP_PASSWORD].value.string);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_URL, remote_url);
+    curl_easy_setopt(curl, CURLOPT_READDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_FTP_CREATE_MISSING_DIRS, CURLFTP_CREATE_DIR_RETRY);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        HR_LOGE("Upload %s failed: %s\n", local_path, curl_easy_strerror(res));
+    } else {
+        HR_LOGD("Upload successful: %s\n", local_path);
+    }
+
+    curl_easy_cleanup(curl);
+    fclose(fp);
+    return -res;
+}
+static void* background_upload_thread_routin(void* args) {
+    (void)args;
+    size_t id = -1;
+    char name[256] = {0};
+
+    if (_pipe_fd[0] == -1) {
+        _upload_tid = -1;
+        return NULL;
+    }
+    while (1) {
+        size_t count = 0;
+        char* data = NULL;
+        char* remote_url = NULL;
+        char* local_path = NULL;
+        struct stat st;
+
+        ssize_t n = read(_pipe_fd[0], &id, sizeof(id));
+        if (n <= 0) {
+            continue;
+        }
+
+        printf("%s(%d): receive request id:%lu\n", __FUNCTION__, __LINE__, id);
+        ssize_t size = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
+
+        if (size < 0 || !data) {
+            printf("%s(%d): can not read file:%ld\n", __FUNCTION__, __LINE__, size);
+            continue;
+        }
+
+        if (size % sizeof(struct record) != 0) {
+            free(data);
+            HR_LOGE("%s(%d): data maybe invalid ...\n", __FUNCTION__, __LINE__);
+            continue;
+        }
+
+        count = size / sizeof(struct record);
+
+        if (id > count - 1) {
+            free(data);
+            continue;
+        }
+
+        struct record* r = (struct record*)data;
+        struct tm* tm = gmtime((const time_t*)&r->timestamp);
+        if (!tm) {
+            free(data);
+            continue;
+        }
+
+        asprintf(&local_path, IPC_MEDIA_RECORD_DIR "/%s", r->name);
+
+        if (!local_path) {
+            free(data);
+            continue;
+        }
+
+        printf("local path:%s\n", local_path);
+
+        if (lstat(local_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            free(data);
+            free(local_path);
+            continue;
+        }
+
+        memset((void*)name, 0, sizeof(name));
+
+        size_t s = strftime(name, sizeof(name), "%Y%m%d%H%M%S", tm);
+        name[s++] = '_';
+        time_t t = r->timestamp + MEDIA_RECORD_DURATION;
+        tm = gmtime((const time_t*)&t);
+        s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
+
+        //  http://gd.hqszjs.com:910/record/GD500107001385/20250526233500_20250526234000.mp4
+        asprintf(&remote_url, "%s/record/%s/%s.mp4", _ftp_conf_fields[FIELD_FTP_ADDRESS].value.string,
+                 elevator_deviceid(), name);
+        if (!remote_url) {
+            free(data);
+            free(local_path);
+            continue;
+        }
+        printf("remote url:%s\n", remote_url);
+
+        // upload video to ftp
+
+        do_upload(local_path, remote_url);
+
+        free(data);
+        free(local_path);
+        free(remote_url);
+    }
+
+    _upload_tid = -1;
+    return NULL;
 }
