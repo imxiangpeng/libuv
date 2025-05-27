@@ -12,13 +12,20 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 #include "elevator.h"
+#include "file_util.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
 #include "uviot.h"
 
 // #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
 #define IPC_MEDIA_RECORD_DIR "./media"
+#define IPC_MEDIA_RECORD_REQUEST_PLAYLIST \
+    IPC_MEDIA_RECORD_DIR                  \
+    "/"                                   \
+    ".command_playlist"
+
 #define MEDIA_RECORD_DURATION 300  // 5min
 
 // 2024-04-06 15:57:20
@@ -29,18 +36,17 @@
 static struct uviot* _iot = NULL;
 
 struct record {
-    uint64_t timestamp;
-    char name[128];
+    /*uint64_t*/ time_t timestamp;  // utc
+    char name[256];
 };
-
-struct hrbuffer _record_lists;
 
 extern void topic_houqi_liftstate_post(void);
 
 static int publish_upload_record_response();
 static int traverse_media_record_list(uint64_t begin, uint64_t end);
 
-static uint64_t command_date_format_string_to_seconds(const char* date) {
+// do not care timezone, so we can convert again
+static time_t command_date_format_string_to_seconds(const char* date) {
     struct tm tm;
     // must reset tm, because strptime not fill all fields
     memset((void*)&tm, 0, sizeof(tm));
@@ -48,10 +54,11 @@ static uint64_t command_date_format_string_to_seconds(const char* date) {
         return 0;
     }
 
-    return mktime(&tm);
+    // return mktime(&tm);
+    return timegm(&tm);  // do not care timezone
 }
 
-static uint64_t media_record_date_format_string_to_seconds(const char* date) {
+static time_t media_record_date_format_string_to_seconds(const char* date) {
     struct tm tm;
     // must reset tm, because strptime not fill all fields
     memset((void*)&tm, 0, sizeof(tm));
@@ -59,7 +66,8 @@ static uint64_t media_record_date_format_string_to_seconds(const char* date) {
         return 0;
     }
 
-    return mktime(&tm);
+    // return mktime(&tm);
+    return timegm(&tm);  // do not care timezone
 }
 static int _on_command_message(void* payload, int len) {
     char* type = NULL;
@@ -142,10 +150,6 @@ static int _on_command_message(void* payload, int len) {
             return -1;
         }
 
-        if (!_record_lists.data) {
-            hrbuffer_alloc(&_record_lists, sizeof(struct record) * 50);
-        }
-        hrbuffer_reset(&_record_lists);
         // we should review ipc media record dir and filter record files
         if (traverse_media_record_list(timestamp_begin, timestamp_end) > 0) {
             publish_upload_record_response();
@@ -165,29 +169,34 @@ static int _on_command_message(void* payload, int len) {
     return 0;
 }
 
-static int _on_command_response_publish(void** payload, int* len) {
+static int _on_command_upload_record_response_publish(void** payload, int* len) {
     (void)payload;
     (void)len;
 
-    // empty
-    if (!_record_lists.data || _record_lists.offset == 0) {
+    struct record* r = NULL;
+    size_t count = 0;
+
+    char* data = NULL;
+    ssize_t size = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
+
+    if (size < 0 || !data) {
         return -1;
     }
 
-    if (_record_lists.offset % sizeof(struct record) != 0) {
-        HR_LOGE("%s(%d): data maybe invalid ...\n");
+    if (size % sizeof(struct record) != 0) {
+        HR_LOGE("%s(%d): data maybe invalid ...\n", __FUNCTION__, __LINE__);
+        return -1;
     }
-    struct record* r = (struct record*)_record_lists.data;
 
-    size_t count = _record_lists.offset / sizeof(struct record);
+    count = size / sizeof(struct record);
 
-    for (size_t i = 0; i < count; i++) {
-        printf("%ld -> %ld : %s\n", i, r[i].timestamp, r[i].name);
-    }
+    r = (struct record*)data;
 
     cJSON* root = cJSON_CreateObject();
-    if (!root)
+    if (!root) {
+        free(data);
         return -1;
+    }
 
     cJSON_AddStringToObject(root, "type", "uploadRecordList");
     // houqi's macAddr is serialno, length must > 12
@@ -196,15 +205,34 @@ static int _on_command_response_publish(void** payload, int* len) {
 
     cJSON* arr = cJSON_AddArrayToObject(root, "RecordBean");
     for (size_t i = 0; i < count; i++) {
+        struct tm* tm = NULL;
+        char name[64] = {0};
         cJSON* item = cJSON_CreateObject();
         cJSON_AddItemToArray(arr, item);
         // printf("%ld -> %ld : %s\n", i, r[i].timestamp, r[i].name);
         cJSON_AddNumberToObject(item, "fileIndex", i);
-        cJSON_AddStringToObject(item, "fileName", r[i].name);
+        // should we convert file name?
+        tm = gmtime((const time_t*)&r[i].timestamp);
+        if (tm) {
+            // 20250206010000_20250206010500.mp4
+            size_t s = strftime(name, sizeof(name), "%Y%m%d%H%M%S", tm);
+            name[s++] = '_';
+            time_t t = r[i].timestamp + MEDIA_RECORD_DURATION;
+            tm = gmtime((const time_t*)&t);
+            s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
+
+            printf("name:%s\n", name);
+            cJSON_AddStringToObject(item, "fileName", name);
+        } else {
+            cJSON_AddStringToObject(item, "fileName", r[i].name);
+        }
     }
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+
+    free(data);
+    data = NULL;
 
     if (!*payload)
         return -1;
@@ -213,8 +241,6 @@ static int _on_command_response_publish(void** payload, int* len) {
 
     HR_LOGD("publish: %s\n", (char*)*payload);
 
-    // we should not release _record_lists
-    // recordDownload maybe called later
     return 0;
 }
 struct uviot_topic topic_command = {
@@ -240,7 +266,7 @@ struct uviot_topic topic_command_response = {
     .name = "Command/Response",
     .topic = {0},
     .type = TOPIC_TYPE_PUBLISH,
-    .callback.on_publish = _on_command_response_publish,
+    .callback.on_publish = _on_command_upload_record_response_publish,
 };
 
 // /API/V1/Down/序列号/Command/Response
@@ -253,18 +279,13 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
 
     _iot = iot;
 
+    unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);
 
     snprintf(topic_command_response.topic, sizeof(topic_command_response.topic), "/API/V1/Down/%s/Command/Response", serialno);
     uviot_topic_register(iot, &topic_command_response);
 
-    // hrbuffer_alloc(&_record_lists, sizeof(struct record) * 10);
-    // uint64_t b = command_date_format_string_to_seconds("2025-05-16 07:48:30");
-    // uint64_t b = command_date_format_string_to_seconds("2025-05-16 01:48:30");
-    // uint64_t e = command_date_format_string_to_seconds("2025-05-16 07:58:30");
-    // traverse_media_record_list(b, e);
-    // hrbuffer_free(&_record_lists);
     return 0;
 }
 
@@ -277,34 +298,46 @@ static int compare_record_by_timestamp(const void* a, const void* b) {
     const struct record* rb = (const struct record*)b;
     return (int)(ra->timestamp - rb->timestamp);
 }
+
 static int traverse_media_record_list(uint64_t begin, uint64_t end) {
     char* ptr = NULL;
-    char name[128] = {0};
+    // char name[64] = {0};
 
+    struct record media;
     struct dirent* entry = NULL;
     size_t count = 0;
+    struct hrbuffer record_lists = {.data = NULL, .offset = 0, .size = 0, .preallocated = 0};
 
     DIR* dir = opendir(IPC_MEDIA_RECORD_DIR);
     if (!dir) {
         return 0;
     }
-    struct record media;
+
+    if (hrbuffer_alloc(&record_lists, sizeof(struct record) * 50) < 0) {
+        // failed
+        return 0;
+    }
+
     while ((entry = readdir(dir)) != NULL) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
             continue;
         }
 
         if ((ptr = strstr(entry->d_name, ".mp4"))) {
-            memset((void*)name, 0, sizeof(name));
-            strncpy(name, entry->d_name, ptr - entry->d_name);
-            uint64_t ts = media_record_date_format_string_to_seconds(name);
+            // memset((void*)name, 0, sizeof(name));
+            // strncpy(name, entry->d_name, ptr - entry->d_name);
+            uint64_t ts = media_record_date_format_string_to_seconds(entry->d_name);
+            if (ts == 0) {
+                continue;
+            }
             // ts + duration > begin && ts < end
             if (ts + MEDIA_RECORD_DURATION > begin && ts < end) {
                 count++;
                 // printf("==>count:%ld begin:%ld, end:%ld, time:%ld, name:%s\n", count, begin, end, ts, name);
+                memset((void*)&media, 0, sizeof(media));
                 media.timestamp = ts;
-                snprintf(media.name, sizeof(media.name), "%s", name);
-                hrbuffer_append(&_record_lists, (void*)&media, sizeof(struct record));
+                snprintf(media.name, sizeof(media.name), "%s", entry->d_name);
+                hrbuffer_append(&record_lists, (void*)&media, sizeof(struct record));
             }
         }
     }
@@ -312,14 +345,37 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end) {
     closedir(dir);
 
     if (count != 0) {
-        qsort(_record_lists.data, count, sizeof(struct record), compare_record_by_timestamp);
+        qsort(record_lists.data, count, sizeof(struct record), compare_record_by_timestamp);
 
         // struct record* r = (struct record*)_record_lists.data;
 
         // for (size_t i = 0; i < count; i++) {
         //     printf("%ld -> %ld : %s\n", i, r[i].timestamp, r[i].name);
         // }
+        futil_write(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, record_lists.data, record_lists.offset);
+
+        // char* data = NULL;
+
+        // ssize_t len = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
+
+        // printf("read size:%ld\n", _record_lists.offset);
+        // if (len > 0 && data) {
+        //     size_t c = len / sizeof(struct record);
+
+        //     struct record* r = (struct record*)data;
+
+        //     for (size_t i = 0; i < c; i++) {
+        //         printf("read %ld -> %ld : %s\n", i, r[i].timestamp, r[i].name);
+        //     }
+        // }
+
+        // if (data) {
+        //     free(data);
+        //     data = NULL;
+        // }
     }
+
+    hrbuffer_free(&record_lists);
 
     return count;
 }

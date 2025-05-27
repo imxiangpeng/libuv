@@ -230,7 +230,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         hrbuffer_reset(&_historical.jitter_accel_array);
 
         if (fabs(_historical.distance) < 0.5) {
-            HR_LOGE("distance:%f is too maybe invalid data\n", _historical.distance);
+            HR_LOGE("distance:%f is too short! maybe invalid data\n", _historical.distance);
             return 0;
         }
 
