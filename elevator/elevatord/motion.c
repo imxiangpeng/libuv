@@ -36,8 +36,8 @@
 
 // 我们会保存过去 5s 的平均值 （不太准确，我们 moving window 也占用了 1秒，所以我们数据延迟 1 秒）
 // 然后计算过去 5s 的方差，如果小于门限，就认为静止
-//#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
-//#define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
+// #define BAROMETTER_PRESSURE_PREDICT_STATIONARY_THRESHOLD_SECONDS 5
+// #define BAROMETTER_PRESSURE_PREDICT_STATIONARY_STDDEV_THRESHOLD 0.5
 
 // 海平面标准气压 (Pa)
 #define P0 101325.0
@@ -74,7 +74,6 @@ static pthread_t _barometer_tid = 0;
 
 #define MAX_LINE_LENGTH 1000
 
-#define DUMP_DATA_TO_FILE 1
 // simulate using local csv files
 #if DUMP_DATA_TO_FILE
 static FILE* _dump_fp = NULL;
@@ -328,6 +327,14 @@ static void* _accelerometer_thread_routin(void* args) {
             new_state = CONSTANTING;
         }
 
+        // force reset when velocity too high
+        // should we according pressure
+        if (fabs(velocity) > 10 || fabs(distance) > 300) {
+            HR_LOGE("!!!!!!!! maybe should reset !!!!!\n");
+            input->reset(input);
+            goto next_iteration;
+        }
+
         // use high precision value, not round!
         _accelerometer_motion.velocity = result.velocity;  // velocity;
         _accelerometer_motion.distance = result.distance;  // distance;
@@ -426,7 +433,7 @@ static void* _accelerometer_thread_routin(void* args) {
                         HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
                         _accelerometer_motion.height = height;
                     }
-                    // _accelerometer_motion.height = height;
+
                     // update baseline pressure when we run it
                     if (floor_num == floor_baseline_num) {
                         floor_baseline_pressure = barometer_pressure;
@@ -438,6 +445,10 @@ static void* _accelerometer_thread_routin(void* args) {
                         HR_LOGD("adjust baseline floor from %d to %d\n", floor_baseline_num, floor_num);
                         floor_baseline_num = floor_base_floor();
                         floor_baseline_pressure = barometer_pressure;
+
+                        // reset accel height, when stopped at base floor
+                        // or always update accel height when stopped?
+                        _accelerometer_motion.height = height;
                         // update in memory
                         floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 0);
                     }
@@ -773,7 +784,7 @@ int motion_initalize(int argc, char** argv) {
     BAROMETER_PREDICT_STATIONARY_STDDEV = elevatord_config[PRESSURE_STATIONARY_STDDEV].value.number;
 
     HR_LOGD("pressure stationary slope threshold:%f, pressure stationary stddev threshold:%f\n", BAROMETER_PREDICT_STATIONARY_SLOPE, BAROMETER_PREDICT_STATIONARY_STDDEV);
-    
+
     MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = elevatord_config[PERIOD_UPDATE_PRESSURE].value.int64;
     HR_LOGD("motion update floor pressure period :%d seconds when stationary\n", MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY);
 

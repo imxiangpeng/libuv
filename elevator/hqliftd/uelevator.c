@@ -47,6 +47,7 @@ enum {
 static struct ubus_context* _ubus_ctx = NULL;
 
 static pthread_t _uobject_tid = 0;
+static int _request_exit = 0;
 static int _pipefd[2] = {-1, -1};  // [0]=read, [1]=write
 
 static struct ubus_subscriber _elevatord_subscriber;
@@ -453,7 +454,7 @@ static void* uelevator_thread_routin(void* args) {
 
     uloop_init();
 
-    while (1) {
+    while (_request_exit != 1) {
         _ubus_ctx = ubus_connect(UBUS_SOCK);
         if (_ubus_ctx) {
             break;
@@ -542,8 +543,12 @@ int uelevator_deinit(void) {
     if (_uobject_tid != 0) {
         HR_LOGD("uobject send exit ...\n");
         post_message(MSG_QUIT);
-        usleep(100);
-        pthread_cancel(_uobject_tid);
+
+        _request_exit = 1;
+        // usleep(100);
+        // do not use cancel, we request thread to exit normal
+        // otherwise release maybe not release
+        // pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");
 #if 0

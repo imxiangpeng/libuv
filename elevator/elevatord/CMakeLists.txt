@@ -19,6 +19,7 @@ FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_
 
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
+option(DUMP_DATA_TO_FILE "Dump result to local csv file" OFF)
 
 #INCLUDE_DIRECTORIES(j2s)
 
@@ -60,6 +61,12 @@ TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
 
 if(USE_LOCAL_SIMULATE_DATA)
 TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE USE_LOCAL_SIMULATE_DATA=1)
+endif()
+
+if(DUMP_DATA_TO_FILE)
+TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE DUMP_DATA_TO_FILE=1)
+else()
+TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE DUMP_DATA_TO_FILE=0)
 endif()
 
 TARGET_COMPILE_OPTIONS(elevatord PRIVATE -Wall -Wextra -Werror -Wno-unused-function)

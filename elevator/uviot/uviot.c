@@ -339,7 +339,7 @@ static void _on_publish(struct mosquitto* mosq, void* userdata, int mid) {
     (void)mosq;
     (void)userdata;
     (void)mid;
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    // HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }
 
 static void uviot_impl_loop_misc_timer_cb(uv_timer_t* handle) {
