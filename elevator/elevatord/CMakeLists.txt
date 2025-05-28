@@ -11,15 +11,12 @@ FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 
-
-
-
-
 #find_package(LibXml2 REQUIRED)
-
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 option(DUMP_DATA_TO_FILE "Dump result to local csv file" OFF)
+
+string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 
 #INCLUDE_DIRECTORIES(j2s)
 
@@ -68,6 +65,8 @@ TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE DUMP_DATA_TO_FILE=1)
 else()
 TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE DUMP_DATA_TO_FILE=0)
 endif()
+
+TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE ELEVATORD_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 
 TARGET_COMPILE_OPTIONS(elevatord PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 

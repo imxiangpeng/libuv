@@ -11,6 +11,8 @@ FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_
 FIND_LIBRARY(uuid_library NAMES uuid)
 FIND_LIBRARY(curl_library NAMES curl)
 
+string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
+
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
@@ -35,6 +37,7 @@ TARGET_COMPILE_OPTIONS(hqliftd PRIVATE -Wall -Wextra -Werror -Wno-unused-functio
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE LOG_TAG="hqliftd")
 # define config file when compile
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 
 # only on my pc
 target_include_directories(hqliftd PUBLIC /opt/3rdparty/include)

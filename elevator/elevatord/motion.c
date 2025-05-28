@@ -560,6 +560,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .floor = atoi(floor_label),
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
+            .temperature = barometer_temperature,
             .barometer_distance = barometer_distance,
         };
 

@@ -1,4 +1,8 @@
 // mxp, 20250502, implement houqi topic: /API/V1/Down/%s/Command
+// mxp, 20250528, implement uploadRecord & recordDownload
+// uploadRecord: list safe record list in file: IPC_MEDIA_RECORD_REQUEST_PLAYLIST
+// response file name using: %Y%m%d%H%M%S_%Y%m%d%H%M%S, such as: 20250516074334_20250516074834
+// upload record to ftp in background
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
@@ -6,6 +10,7 @@
 #include <cjson/cJSON.h>
 #include <curl/curl.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -28,7 +33,7 @@
 #define IPC_MEDIA_RECORD_REQUEST_PLAYLIST \
     IPC_MEDIA_RECORD_DIR                  \
     "/"                                   \
-    ".command_playlist"
+    ".command_upload_record_playlist"
 
 #define MEDIA_RECORD_DURATION 300  // 5min
 
@@ -42,7 +47,7 @@ static int _pipe_fd[2] = {-1, -1};
 static struct uviot* _iot = NULL;
 
 struct record {
-    /*uint64_t*/ time_t timestamp;  // utc
+    /*uint64_t*/ time_t timestamp;  // utc use timegm not mktime
     char name[256];
 };
 
@@ -155,6 +160,9 @@ static int _on_command_message(void* payload, int len) {
     if (0 == strcmp("uploadRecord", type)) {
         uint64_t timestamp_begin = 0, timestamp_end = 0;
         char *start_time = NULL, *end_time = NULL;
+
+        // remove old record list directly
+        unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
         // 2024-04-06 15:57:20
         start_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "startTime"));
         end_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "endTime"));
@@ -197,28 +205,7 @@ static int _on_command_message(void* payload, int len) {
         }
         // upload record in background;
         write(_pipe_fd[1], (void*)&id, sizeof(id));
-#if 0
-        size = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
 
-        if (size < 0 || !data) {
-            cJSON_Delete(root);
-            return -1;
-        }
-
-        if (size % sizeof(struct record) != 0) {
-            HR_LOGE("%s(%d): data maybe invalid ...\n", __FUNCTION__, __LINE__);
-            cJSON_Delete(root);
-            return -1;
-        }
-
-        count = size / sizeof(struct record);
-
-        if ((int)val > (int)count - 1) {
-            cJSON_Delete(root);
-            return -1;
-        }
-
-#endif
         // todo
         cJSON_Delete(root);
         return 0;
@@ -327,8 +314,7 @@ struct uviot_topic topic_command_response = {
     .callback.on_publish = _on_command_upload_record_response_publish,
 };
 
-// /API/V1/Down/序列号/Command/Response
-
+// some memory maybe not released, because no deinit interface
 int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)public_key;
     (void)device_name;
@@ -371,7 +357,6 @@ static int compare_record_by_timestamp(const void* a, const void* b) {
 
 static int traverse_media_record_list(uint64_t begin, uint64_t end) {
     char* ptr = NULL;
-    // char name[64] = {0};
 
     struct record media;
     struct dirent* entry = NULL;
@@ -501,11 +486,11 @@ static void* background_upload_thread_routin(void* args) {
         return NULL;
     }
     while (1) {
-        size_t count = 0;
-        char* data = NULL;
         char* remote_url = NULL;
         char* local_path = NULL;
         struct stat st;
+        int fd = -1;
+        struct record r;
 
         ssize_t n = read(_pipe_fd[0], &id, sizeof(id));
         if (n <= 0) {
@@ -513,44 +498,51 @@ static void* background_upload_thread_routin(void* args) {
         }
 
         printf("%s(%d): receive request id:%lu\n", __FUNCTION__, __LINE__, id);
-        ssize_t size = futil_read(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &data);
 
-        if (size < 0 || !data) {
-            printf("%s(%d): can not read file:%ld\n", __FUNCTION__, __LINE__, size);
+        if (lstat(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, &st) != 0 || !S_ISREG(st.st_mode)) {
             continue;
         }
 
-        if (size % sizeof(struct record) != 0) {
-            free(data);
+        if (st.st_size % sizeof(struct record) != 0) {
             HR_LOGE("%s(%d): data maybe invalid ...\n", __FUNCTION__, __LINE__);
             continue;
         }
 
-        count = size / sizeof(struct record);
-
-        if (id > count - 1) {
-            free(data);
+        if (id > (st.st_size / sizeof(struct record) - 1)) {
+            HR_LOGE("%s(%d): id out of range %ld > %ld ...\n", __FUNCTION__, __LINE__, id, st.st_size / sizeof(struct record) - 1);
+            continue;
+        }
+        // now we should seek to record
+        fd = open(IPC_MEDIA_RECORD_REQUEST_PLAYLIST, O_RDONLY);
+        if (fd < 0) {
+            HR_LOGE("%s(%d): can not open playlist file ...\n", __FUNCTION__, __LINE__);
             continue;
         }
 
-        struct record* r = (struct record*)data;
-        struct tm* tm = gmtime((const time_t*)&r->timestamp);
+        lseek(fd, id * sizeof(struct record), SEEK_SET);
+
+        memset((void*)&r, 0, sizeof(r));
+        ssize_t size = read(fd, &r, sizeof(r));
+        if (size != sizeof(r)) {
+            close(fd);
+            continue;
+        }
+        close(fd);
+        fd = -1;
+        struct tm* tm = gmtime((const time_t*)&r.timestamp);
         if (!tm) {
-            free(data);
             continue;
         }
 
-        asprintf(&local_path, IPC_MEDIA_RECORD_DIR "/%s", r->name);
+        asprintf(&local_path, IPC_MEDIA_RECORD_DIR "/%s", r.name);
 
         if (!local_path) {
-            free(data);
             continue;
         }
 
         printf("local path:%s\n", local_path);
 
         if (lstat(local_path, &st) != 0 || !S_ISREG(st.st_mode)) {
-            free(data);
             free(local_path);
             continue;
         }
@@ -559,7 +551,7 @@ static void* background_upload_thread_routin(void* args) {
 
         size_t s = strftime(name, sizeof(name), "%Y%m%d%H%M%S", tm);
         name[s++] = '_';
-        time_t t = r->timestamp + MEDIA_RECORD_DURATION;
+        time_t t = r.timestamp + MEDIA_RECORD_DURATION;
         tm = gmtime((const time_t*)&t);
         s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
 
@@ -567,7 +559,6 @@ static void* background_upload_thread_routin(void* args) {
         asprintf(&remote_url, "%s/record/%s/%s.mp4", _ftp_conf_fields[FIELD_FTP_ADDRESS].value.string,
                  elevator_deviceid(), name);
         if (!remote_url) {
-            free(data);
             free(local_path);
             continue;
         }
@@ -577,7 +568,6 @@ static void* background_upload_thread_routin(void* args) {
 
         do_upload(local_path, remote_url);
 
-        free(data);
         free(local_path);
         free(remote_url);
     }

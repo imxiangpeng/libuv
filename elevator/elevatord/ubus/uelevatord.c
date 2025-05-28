@@ -386,8 +386,8 @@ int uelevatord_deinit(void) {
     motion_unregister_observer(&_ubus_observer);
     if (_uobject_tid != 0) {
         uevelatord_post_message(MSG_QUIT);
-        // usleep(100);
         _request_exit = 1;
+        // do not call cancel,  wait thread finished!
         // pthread_cancel(_uobject_tid);
         pthread_join(_uobject_tid, NULL);
         HR_LOGD("uobject exit ...\n");

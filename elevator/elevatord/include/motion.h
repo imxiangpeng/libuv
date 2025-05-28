@@ -31,6 +31,7 @@ struct motion_status{
     int floor;
     int running;
     double pressure;
+    double temperature;
     double barometer_velocity;
     double barometer_distance;
 };

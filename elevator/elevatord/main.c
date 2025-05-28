@@ -58,6 +58,8 @@ int main(int argc, char** argv) {
     int floors_below_base = 0;
     int floors_above_base = 0;
 
+    printf("elevatord %s\n", ELEVATORD_BUILD_TIMESTAMP);
+
     argc--;
     argv++;
 
@@ -86,7 +88,7 @@ int main(int argc, char** argv) {
         argv++;
     }
 
-    printf("is_calibration:%d\n", is_calibration);
+    //printf("is_calibration:%d\n", is_calibration);
 
     struct sigaction action;
     memset(&action, 0, sizeof(action));

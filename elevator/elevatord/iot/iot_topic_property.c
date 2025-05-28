@@ -94,14 +94,18 @@ struct property {
     [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", P_STRING, {0}, 0},
 };
 
+static int _realtime_report_times = 0;
+static const int _realtime_report_fac = 60 * 100;  // 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
+
 static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
 
+static void _observer_on_status(struct motion_status* st);
 static void _observer_on_event(struct motion_event* data);
 
 static struct motion_observer _iot_property_observer = {
     // we use on_event only report when finished
-    // .on_status = _observer_on_status,
+    .on_status = _observer_on_status,
     .on_event = _observer_on_event,
     .on_sensor_calibration = _iot_motion_observer_on_sensor_calibration,
 };
@@ -364,6 +368,32 @@ static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_cali
         schedule_report();
     }
 }
+static void _observer_on_status(struct motion_status* st) {
+    if (!st) {
+        return;
+    }
+
+    // do not allow report property
+    if (report_switch_conf.value.int64 == 0) {
+        return;
+    }
+
+    _realtime_report_times++;
+    if (_realtime_report_times % _realtime_report_fac != 0) {
+        return;
+    }
+
+    _properties_tbl[PROPERTY_FLOOR].value.val_int64 = st->floor;
+    _properties_tbl[PROPERTY_FLOOR].dirty = 1;
+    _properties_tbl[PROPERTY_HEIGHT].value.val_double = round(st->height * 100) / 100;
+    _properties_tbl[PROPERTY_HEIGHT].dirty = 1;
+    _properties_tbl[PROPERTY_PRESSURE].value.val_double = round(st->pressure * 10) / 10;
+    _properties_tbl[PROPERTY_PRESSURE].dirty = 1;
+    _properties_tbl[PROPERTY_TEMPERATURE].value.val_double = round(st->temperature * 10) / 10;
+    _properties_tbl[PROPERTY_TEMPERATURE].dirty = 1;
+    
+    schedule_report();
+}
 
 static void _observer_on_event(struct motion_event* data) {
     if (!data)
@@ -398,4 +428,3 @@ void report_floor_model_property() {
     _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }
-

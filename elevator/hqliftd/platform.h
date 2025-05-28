@@ -25,4 +25,4 @@ typedef enum {
 
 // client should implement interface
 int platform_get_property(PROPERTY_e which, char* data, int len);
-#endif // DM_IMPL_
+#endif // PLATFORM_H

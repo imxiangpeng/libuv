@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    curl_global_init(CURL_GLOBAL_DEFAULT); 
+    curl_global_init(CURL_GLOBAL_DEFAULT);
 
     elevator_init();
 
@@ -99,13 +99,11 @@ int main(int argc, char** argv) {
 
     statemachine_deinit();
 
-
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     MAKE_VALGRIND_HAPPY(uv_default_loop());
-    
-    
-    curl_global_cleanup(); 
+
+    curl_global_cleanup();
     return 0;
 }
