@@ -411,7 +411,7 @@ static void* _accelerometer_thread_routin(void* args) {
 #else
                 // previous event pressure, maybe first event
                 double height = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
-                HR_LOGD("%s(%d): stopped, pressure detect height:%f vs acc height:%f\n", __FUNCTION__, __LINE__, height, distance);
+                HR_LOGD("%s(%d): stopped, pressure detect height delta :%f vs acc height delta :%f\n", __FUNCTION__, __LINE__, height, distance);
                 int num = 0;
                 char label[256] = {0};
                 double relative_height = 0;
@@ -427,19 +427,23 @@ static void* _accelerometer_thread_routin(void* args) {
 
                 HR_LOGD("mxp finished current pressure:%f, height: %f related to :%d floor\n", barometer_pressure, relative_height, floor_baseline_num);
                 if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
-                    if (floor_num != num) {
-                        HR_LOGE("pressure floor:%d not match with acc floor:%d, force sync\n", num, floor_num);
-                        floor_num = num;
-                        HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
-                        _accelerometer_motion.height = height;
-                    }
 
+                    HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
+
+                    if (num == floor_base_floor()) {
+                        if (floor_num != num) {
+                            HR_LOGE("pressure floor:%d not match with acc floor:%d, force sync\n", num, floor_num);
+                            floor_num = num;
+                        }
+                        // update later
+                        //HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
+                        //_accelerometer_motion.height = height;
+                    }
                     // update baseline pressure when we run it
                     if (floor_num == floor_baseline_num) {
                         floor_baseline_pressure = barometer_pressure;
                     }
 
-                    HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
                     // adjust base floor to base floor in model
                     if (floor_num == floor_base_floor()) {
                         HR_LOGD("adjust baseline floor from %d to %d\n", floor_baseline_num, floor_num);
@@ -455,6 +459,10 @@ static void* _accelerometer_thread_routin(void* args) {
                 } else {
                     HR_LOGD("mxp finished at unknown, but from acce: floor: %d, height:%f\n", floor_num, _accelerometer_motion.height);
                 }
+
+                // update height & floor
+                _accelerometer_motion.ev.height = _accelerometer_motion.height;
+                _accelerometer_motion.ev.floor = floor_num;
                 _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
                 _accelerometer_motion.ev.temperature = barometer_temperature;
                 // 当我们在电梯中跳的时候，会触发加速度的动作，由于我们的门限不一定准确，
@@ -523,6 +531,13 @@ static void* _accelerometer_thread_routin(void* args) {
             }
         }
 #endif
+
+        if (_accelerometer_motion.state == STOPPED) {
+            // update baseline pressure when we run it
+            if (floor_num == floor_baseline_num) {
+                floor_baseline_pressure = barometer_pressure;
+            }
+        }
         // 当长时间静止的时候，我们可能需要更新气压模型数据
         // 我们采用了两个门限，一个是来源于气压线程计算的斜率数据，一个是气压绝对值门限
         // 斜率数据，我们采用的窗口不够大，不适合单独长时间判断

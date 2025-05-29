@@ -486,6 +486,26 @@ static double calculate_base_pressure(double p1, double height, double temperatu
     return p0;
 }
 
+
+// int find_closest_ordered(double arr[], int size, double target) {
+//     int closest_index = 0;
+//     double min_diff = fabs(arr[0] - target);
+
+//     for (int i = 1; i < size; i++) {
+//         double diff = fabs(arr[i] - target);
+
+//         // 如果当前差值更小，则更新
+//         if (diff < min_diff) {
+//             min_diff = diff;
+//             closest_index = i;
+//         } else {
+//             // 差值开始增大，提前结束
+//             break;
+//         }
+//     }
+
+//     return closest_index;
+// }
 // force update floor_module.json when persist is not 0
 // otherwise update memory data only
 int floor_update_pressure_when_stationary(int num, double pressure, double temperature, int persist) {
