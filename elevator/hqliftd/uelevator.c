@@ -125,17 +125,17 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
     (void)req;
     (void)method;
 
-    char* str;
+    // char* str;
 
     if (!method) {
         return -1;
     }
 
-    str = blobmsg_format_json(msg, true);
-    HR_LOGE("%s(%d): receive ....\n", __FUNCTION__, __LINE__);
-    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
-    printf("{ \"%s\": %s }\n", method, str);
-    free(str);
+    // str = blobmsg_format_json(msg, true);
+    // HR_LOGE("%s(%d): receive ....\n", __FUNCTION__, __LINE__);
+    // HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
+    // printf("{ \"%s\": %s }\n", method, str);
+    // free(str);
 
     if (0 == strcmp(ELEVATORD_EVENT_REALTIME, method)) {
         // 实时数据处理
@@ -376,6 +376,11 @@ static void ubus_event_handler(struct ubus_context* ctx,
         }
     }
 }
+
+static struct ubus_event_handler _ubus_event = {
+    .cb = ubus_event_handler,
+};
+
 static void _reconnect_timer(struct uloop_timeout* timeout) {
     (void)timeout;
     int t = _UBUS_RETRY_TIMEOUT;
@@ -395,12 +400,13 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
 
     printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
 
-#if 0  // we should re subscriber event?
+#if 1  // we should re subscriber event?
 
+    _elevatord_object_id = 0;
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
-    ubus_register_event_handler(_ubus_ctx, &_object_event, "ubus.object.*");
-    ubus_register_event_handler(_ubus_ctx, &_object_event, "elevator.event.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "ubus.object.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "elevator.event.*");
 
     subscriber_elevatord_event();
 
@@ -409,7 +415,7 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 }
 
@@ -417,10 +423,6 @@ static void _connection_lost(struct ubus_context* ctx) {
     (void)ctx;
     _reconnect_timer(NULL);
 }
-
-static struct ubus_event_handler _ubus_event = {
-    .cb = ubus_event_handler,
-};
 
 static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
     (void)u;
@@ -470,10 +472,7 @@ static void* uelevator_thread_routin(void* args) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
-    HR_LOGE("Object not found... wait ...\n");
-
-    usleep(1000);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 
     memset(&_elevatord_subscriber, 0, sizeof(_elevatord_subscriber));

@@ -1,17 +1,34 @@
+
+// mxp, 20250529, eguard(elevator guard)
+// implement occlusion and e-bike entering elevator alarms
+
 #include <assert.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/poll.h>
 #include <unistd.h>
 #include <uv.h>
-#include "hr_log.h"
+#include "libubox/blob.h"
+#include "libubox/blobmsg.h"
+#include "libubox/blobmsg_json.h"
+#include "libubox/uloop.h"
+#include "libubus.h"
 
-#define DTOF_DISTANCE_THRESHOLD_MM 300   // 30cm
-#define DTOF_ALARM_CONFIRM_TIMEOUT 2000  // 2s
-#define ALARM_REPEAT_TIMEOUT 10000       // 10s
+#define UBUS_SOCK "/tmp/ubus.sock"
+
+#define _UBUS_RETRY_TIMEOUT (2)
+
+#define DTOF_DISTANCE_THRESHOLD_MM 300     // 30cm
+#define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
+#define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
+
+#define ELEVATOR_ALARM_EVENT_PREFIX "elevator.alarm."
 
 enum message {
+    MSG_QUIT = 0,
     EVENT_DTOF_DISTANCE_ALARM,
     EVENT_DTOF_DISTANCE_RESUME,
 };
@@ -19,65 +36,67 @@ enum message {
 enum alarm {
     ALARM_NONE = 0,
     ALARM_DTOF = 1,
-    ALARM_ELECTRIC_BICYCLE = 1 << 1,
+    ALARM_EBIKE = 1 << 1,
 };
 
-static enum alarm _alarm = ALARM_NONE;
+static uint32_t _alarm = ALARM_NONE;
 
-static int _pipefd[2] = {-1};
-static uv_poll_t _message_queue_poll;
-static uv_timer_t _dtof_detector_timer;
-static uv_thread_t _dtof_thread;
-static uv_work_t _play_work;
+static struct ubus_context* _ubus_ctx = NULL;
+static int _request_exit = 0;
+static int _pipefd[2] = {-1, -1};
+static int _playback_pipefd[2] = {-1, -1};
 
-static uv_async_t _dummy_keep_loop;
+static struct blob_buf _b;
 
-static void _dtof_detector_alarm_confirm(uv_timer_t* handle);
+static pthread_t _dtof_tid = -1;
+static pthread_t _playback_tid = -1;
 
-static void dummy_cb(uv_async_t* handle) {
-    (void)handle;
-}
+static struct uloop_timeout _alarm_timer;
 
-/* Fully close a loop */
-static void close_walk_cb(uv_handle_t* handle, void* arg) {
-    (void)arg;
-    if (!uv_is_closing(handle)) {
-        uv_close(handle, NULL);
+const char* _cared_ubus_event[] = {
+    "ubus.object.*",
+    ELEVATOR_ALARM_EVENT_PREFIX "*",
+};
+
+// you should adjust the array order
+// we will prefer play the first matched sound
+struct alarm_sound {
+    enum alarm alarm;
+    const char* sound;
+} _alarm_sounds[] = {
+    // 请勿遮挡相机谢谢合作.wav
+    {ALARM_DTOF, "./alarm_dtof.wav"},
+    // 为了你和他人的安全，请勿将电瓶车驶入电梯，谢谢合作
+    {ALARM_EBIKE, "./alarm_ebike.wav"},
+    {ALARM_NONE, NULL},
+};
+
+static void _alarm_event_confirm(struct uloop_timeout* t);
+
+static void message_post(int which) {
+    if (_pipefd[1] == -1) {
+        return;
     }
+    write(_pipefd[1], &which, sizeof(which));
 }
-
-static void close_loop(uv_loop_t* loop) {
-    (void)loop;
-    uv_walk(loop, close_walk_cb, NULL);
-    uv_run(loop, UV_RUN_DEFAULT);
-}
-#define MAKE_VALGRIND_HAPPY(loop)         \
-    do {                                  \
-        close_loop(loop);                 \
-        assert(0 == uv_loop_close(loop)); \
-        uv_library_shutdown();            \
-    } while (0)
 
 static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     (void)siginfo;
     (void)sigcontext;
 
-    HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
+    printf("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
     if (SIGUSR1 == signum || SIGTERM == signum) {
-        uv_stop(uv_default_loop());
-        uv_async_send(&_dummy_keep_loop);
-        uv_close((uv_handle_t*)&_dummy_keep_loop, NULL);
-    }
-}
+        _request_exit = 1;
 
-static int message_post(enum message message) {
-    if (_pipefd[1] == -1) {
-        return -1;
-    }
+        // wakeup playback thread
+        if (_playback_pipefd[1] != -1) {
+            int event = 1;
+            write(_playback_pipefd[1], &event, sizeof(event));
+        }
 
-    write(_pipefd[1], &message, sizeof(message));
-    return 0;
+        message_post(MSG_QUIT);
+    }
 }
 
 static int read_sensor_data(int* distance, int* confidence, int* count) {
@@ -95,105 +114,252 @@ static int read_sensor_data(int* distance, int* confidence, int* count) {
     return 0;
 }
 
-static int _play_work_busy = 0;
-
-static void _play_work_cb(uv_work_t* req) {
-    (void)req;
-    const char* path = "/data/notice.wav";
-    char cmd[256] = {0};
-    HR_LOGD("play ...\n");
-    // snprintf(cmd, sizeof(cmd), "ffmpeg -hide_banner -i %s -f wav - | aplay", path);
-    snprintf(cmd, sizeof(cmd), "aplay %s", path);
-    system(cmd);
-}
-
-static void _after_play_work_cb(uv_work_t* req, int status) {
-    (void)req;
-    (void)status;
-    HR_LOGD("finished ...\n");
-    _play_work_busy = 0;
-
-    if (0 != (_alarm & ALARM_DTOF)) {
-        uv_timer_start(&_dtof_detector_timer, _dtof_detector_alarm_confirm, ALARM_REPEAT_TIMEOUT, 0);
+static const char* get_alarm_sound(enum alarm a) {
+    const char* sound = NULL;
+    for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
+        if (_alarm_sounds[i].alarm == a) {
+            sound = _alarm_sounds[i].sound;
+            break;
+        }
     }
+    return sound;
 }
 
-// you should cancel timer within
-static void _dtof_detector_alarm_confirm(uv_timer_t* handle) {
-    if (!handle)
-        return;
+// match the first alarm in _alarm_sounds array
+static const char* get_alarm_sound_with_priority(uint32_t alarm) {
+    const char* sound = NULL;
+    for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
+        if ((_alarm_sounds[i].alarm & alarm) != 0) {
+            sound = _alarm_sounds[i].sound;
+            break;
+        }
+    }
+    return sound;
+}
 
-    HR_LOGD("%s(%d): come in...play sound\n", __FUNCTION__, __LINE__);
+static void* _playback_thread_routin(void* arg) {
+    (void)arg;
+    int event = -1;
+
+    char cmd[256] = {0};
+
+    while (_request_exit != 1) {
+        const char* sound = NULL;
+
+        struct pollfd fds = {
+            .fd = _playback_pipefd[0],
+            .events = POLLIN,
+        };
+
+        int ret = poll(&fds, 1, EGUARD_ALARM_REPEAT_DELAY);
+        if (ret < 0) {
+            printf("%s(%d): error ...\n", __FUNCTION__, __LINE__);
+            continue;
+        } else if (ret == 1) {
+            size_t rc = read(_playback_pipefd[0], &event, sizeof(event));
+            if (rc != sizeof(event)) {
+                continue;
+            }
+            printf("%s(%d): alarm:0x%x\n", __FUNCTION__, __LINE__, _alarm);
+        }
+
+        if (_request_exit == 1) {
+            break;
+        }
+        // == 0, timeout, play repeat!
+
+        if (_alarm == ALARM_NONE) {
+            continue;
+        }
+
+        // we should confirm event is exist!
+        // use global _alarm variable
+        sound = get_alarm_sound_with_priority(_alarm);
+
+        if (!sound) {
+            continue;
+        }
+
+        memset((void*)cmd, 0, sizeof(cmd));
+        // snprintf(cmd, sizeof(cmd), "ffmpeg -hide_banner -i %s -f wav - | aplay", path);
+        snprintf(cmd, sizeof(cmd), "aplay -q %s", sound);
+        system(cmd);
+
+        printf("play end ...\n");
+    }
+
+    return NULL;
+}
+// you should cancel timer within
+static void _alarm_event_confirm(struct uloop_timeout* t) {
+    if (!t)
+        return;
 
     // it will do nothing when eguard_alarm is started
     // so we can call repeated
     // hrsvc start eguard_alarm
 
-    if (_play_work_busy == 0) {
-        uv_queue_work(handle->loop, &_play_work, _play_work_cb, _after_play_work_cb);
-        return;
+    // wakeup playback thread directly
+    // playback will auto detect event type
+    if (_playback_pipefd[1] != -1) {
+        int event = 1;
+        write(_playback_pipefd[1], &event, sizeof(event));
     }
-    uv_timer_start(&_dtof_detector_timer, _dtof_detector_alarm_confirm, 1000, 0);
 }
 
-static void _dtof_detector_thread_routin(void* arg) {
+static void* _dtof_detector_thread_routin(void* arg) {
     (void)arg;
     int distance = 0, confidence = 0, count = 0;
 
-    printf("%s(%d): come in...\n", __FUNCTION__, __LINE__);
-
-    while (1) {
+    while (_request_exit != 1) {
         if (read_sensor_data(&distance, &confidence, &count) == 0) {
-            HR_LOGD("Distance: %d mm, Confidence: %d, Count: %d\n",
+            printf("Distance: %d mm, Confidence: %d, Count: %d\n",
                    distance, confidence, count);
 
-            if (confidence > 90) {
-                if (distance < DTOF_DISTANCE_THRESHOLD_MM) {
-                    message_post(EVENT_DTOF_DISTANCE_ALARM);
-                } else {
-                    message_post(EVENT_DTOF_DISTANCE_RESUME);
-                }
+            if (distance < DTOF_DISTANCE_THRESHOLD_MM && confidence > 90) {
+                message_post(EVENT_DTOF_DISTANCE_ALARM);
+            } else {
+                message_post(EVENT_DTOF_DISTANCE_RESUME);
             }
         }
         usleep(1000 * 200);
     }
+    return NULL;
 }
 
-static void _message_queue_handler(uv_poll_t* handle, int status, int events) {
-    (void)handle;
-    (void)status;
+static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
+    (void)u;
     (void)events;
+    int which = -1;
 
-    int event = -1;
-
-    if (!(events & UV_READABLE)) {
+    size_t rc = read(_pipefd[0], &which, sizeof(which));
+    if (rc != sizeof(which)) {
         return;
     }
 
-    size_t rc = read(handle->io_watcher.fd, &event, sizeof(event));
-    if (rc != sizeof(event)) {
-        return;
-    }
-
-    switch (event) {
+    switch (which) {
+        case MSG_QUIT:
+            printf("receive message:%d quit\n", which);
+            uloop_end();
+            break;
         case EVENT_DTOF_DISTANCE_ALARM:
-            HR_LOGD("alarm ...\n");
             if (0 == (_alarm & ALARM_DTOF)) {
+                printf("alarm ...\n");
                 _alarm |= ALARM_DTOF;
-                uv_timer_start(&_dtof_detector_timer, _dtof_detector_alarm_confirm, DTOF_ALARM_CONFIRM_TIMEOUT, 0);
+                _alarm_timer.cb = _alarm_event_confirm;
+                uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
             }
             break;
         case EVENT_DTOF_DISTANCE_RESUME:
-            HR_LOGD("resume ...\n");
-            _alarm &= ~ALARM_DTOF;
-            uv_timer_stop(&_dtof_detector_timer);
+            if (0 != (_alarm & ALARM_DTOF)) {
+                printf("resume ...\n");
+                _alarm &= ~ALARM_DTOF;
+                uloop_timeout_cancel(&_alarm_timer);
+            }
+            break;
+        default:
             break;
     }
+}
+
+static void ubus_event_handler(struct ubus_context* ctx,
+                               struct ubus_event_handler* ev,
+                               const char* type,
+                               struct blob_attr* msg) {
+    (void)ctx;
+    (void)ev;
+    (void)type;
+    (void)msg;
+
+    if (!type) {
+        return;
+    }
+
+    char* str = blobmsg_format_json(msg, true);
+    printf("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    free(str);
+
+    if (0 == strncmp(type, ELEVATOR_ALARM_EVENT_PREFIX, strlen(ELEVATOR_ALARM_EVENT_PREFIX))) {
+        const char* event = type + strlen(ELEVATOR_ALARM_EVENT_PREFIX);
+        printf("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
+        if (0 == strcmp("ebike", event)) {
+            struct blob_attr* tb[2] = {NULL};
+            static const struct blobmsg_policy policy[] = {
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0]) {
+                return;
+            }
+
+            int status = blobmsg_get_u32(tb[0]);
+            if (status == 0) {
+                if (0 != (_alarm & ALARM_EBIKE)) {
+                    printf("ebike resume ...\n");
+                    _alarm &= ~ALARM_EBIKE;
+                    uloop_timeout_cancel(&_alarm_timer);
+                }
+            } else {
+                if (0 == (_alarm & ALARM_EBIKE)) {
+                    printf("ebike alarm ...\n");
+                    _alarm |= ALARM_EBIKE;
+                    _alarm_timer.cb = _alarm_event_confirm;
+                    uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
+                }
+            }
+        }
+    }
+}
+
+static struct ubus_event_handler _ubus_event = {
+    .cb = ubus_event_handler,
+};
+
+static void _reconnect_timer(struct uloop_timeout* timeout) {
+    (void)timeout;
+    int t = _UBUS_RETRY_TIMEOUT;
+
+    static struct uloop_timeout retry = {
+        .cb = _reconnect_timer,
+    };
+
+    if (!_ubus_ctx)
+        return;
+
+    if (ubus_reconnect(_ubus_ctx, UBUS_SOCK) != 0) {
+        printf("failed to reconnect, trying again in %d seconds\n", t);
+        uloop_timeout_set(&retry, t * 1000);
+        return;
+    }
+
+    printf("reconnected to ubus, new id: %08x\n", _ubus_ctx->local_id);
+
+    // we should re subscriber event?
+
+    for (size_t i = 0; i < sizeof(_cared_ubus_event) / sizeof(_cared_ubus_event[0]); i++) {
+        ubus_register_event_handler(_ubus_ctx, &_ubus_event, _cared_ubus_event[i]);
+    }
+
+    ubus_add_uloop(_ubus_ctx);
+
+#ifdef FD_CLOEXEC
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+#endif
+}
+
+static void _connection_lost(struct ubus_context* ctx) {
+    (void)ctx;
+    _reconnect_timer(NULL);
 }
 
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
+
+    pthread_attr_t attr;
 
     struct sigaction action;
     memset(&action, 0, sizeof(action));
@@ -202,34 +368,87 @@ int main(int argc, char** argv) {
     sigaction(SIGUSR1, &action, NULL);
     sigaction(SIGTERM, &action, NULL);
 
+    memset((void*)&_alarm_timer, 0, sizeof(_alarm_timer));
+    memset((void*)&_b, 0, sizeof(_b));
+
     if (0 != pipe(_pipefd)) {
         return -1;
     }
 
-    uv_poll_init(uv_default_loop(), &_message_queue_poll, _pipefd[0]);
-    uv_poll_start(&_message_queue_poll, UV_READABLE, _message_queue_handler);
+    if (0 != pipe(_playback_pipefd)) {
+        close(_pipefd[0]);
+        close(_pipefd[1]);
 
-    uv_timer_init(uv_default_loop(), &_dtof_detector_timer);
+        _pipefd[0] = -1;
+        _pipefd[1] = -1;
+        return -1;
+    }
 
-    uv_thread_create(&_dtof_thread, _dtof_detector_thread_routin, NULL);
-    // uv_timer_start(&_dtof_detector_timer, _dtof_detector_run_once, 1000, 1000);
-    //
-    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+    fcntl(_playback_pipefd[0], F_SETFL, fcntl(_playback_pipefd[0], F_GETFL) | O_NONBLOCK);
 
-    uv_timer_stop(&_dtof_detector_timer);
-    uv_poll_stop(&_message_queue_poll);
-    uv_close((uv_handle_t*)&_message_queue_poll, NULL);
+    pthread_attr_init(&attr);
 
-    // run once after iot_finally release resource
-    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+    // pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&_dtof_tid, &attr, _dtof_detector_thread_routin, NULL);
+    pthread_create(&_playback_tid, &attr, _playback_thread_routin, NULL);
 
-    MAKE_VALGRIND_HAPPY(uv_default_loop());
+    struct uloop_fd pipe_fd = {
+        .fd = _pipefd[0],
+        .cb = _pipe_uloop_main_thread_handler,
+    };
+
+    blob_buf_init(&_b, 0);
+
+    uloop_init();
+
+    while (_request_exit != 1) {
+        _ubus_ctx = ubus_connect(UBUS_SOCK);
+        if (_ubus_ctx) {
+            break;
+        }
+        usleep(1000 * 1000);
+        // no need call testcancel because usleep is cancel point
+        pthread_testcancel();
+    }
+
+    _ubus_ctx->connection_lost = _connection_lost;
+
+    ubus_add_uloop(_ubus_ctx);
+
+#ifdef FD_CLOEXEC
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+#endif
+
+    for (size_t i = 0; i < sizeof(_cared_ubus_event) / sizeof(_cared_ubus_event[0]); i++) {
+        ubus_register_event_handler(_ubus_ctx, &_ubus_event, _cared_ubus_event[i]);
+    }
+
+    uloop_fd_add(&pipe_fd, ULOOP_READ);
+
+    uloop_run();
+
+    ubus_unregister_event_handler(_ubus_ctx, &_ubus_event);
+    ubus_free(_ubus_ctx);
+    _ubus_ctx = NULL;
+
+    uloop_done();
 
     close(_pipefd[0]);
     close(_pipefd[1]);
-
     _pipefd[0] = -1;
     _pipefd[1] = -1;
+
+    close(_playback_pipefd[0]);
+    close(_playback_pipefd[1]);
+    _playback_pipefd[0] = -1;
+    _playback_pipefd[1] = -1;
+
+    blob_buf_free(&_b);
+    
+    pthread_cancel(_dtof_tid);
+    pthread_cancel(_playback_tid);
+    pthread_join(_dtof_tid, NULL);
+    pthread_join(_playback_tid, NULL);
 
     return 0;
 }
