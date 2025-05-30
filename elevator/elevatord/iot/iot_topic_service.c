@@ -27,7 +27,7 @@ extern void report_hqliftd_config_property();
 #define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "thing.service.CalibrateAtFloorManually"
 #define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "thing.service.CalibrateAtHeightManually"
 #define SVC_METHOD_GET_HQLIFTD_CONFIG "thing.service.GetHQLiftdConfig"
-#define SVC_METHOD_SET_HQLIFTD_CONFIG "thing.service.SetHQLiftdConfig"
+#define SVC_METHOD_SET_FLOOR_MODEL "thing.service.SetFloorModel"
 
 enum {
     CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT = 0,
@@ -36,7 +36,7 @@ enum {
     CALIBRATION_TOPIC_CALIBRATE_AT_HEIGHT_MANUALLY,
     GET_HQLIFTD_CONFIG,
     // GET_HQLIFTD_CONFIG_REPLY,
-    SET_HQLIFTD_CONFIG,
+    SET_FLOOR_MODEL,
     _SERVICE_TOPIC_MAX
 };
 
@@ -65,13 +65,13 @@ static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
 static int _GetHQLiftdConfig(cJSON* params);
-static int _SetHQLiftdConfig(cJSON* params);
+static int _SetFloorModel(cJSON* params);
 static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_START_AUTO_FLOOR_CALIBRATION, _StartAutoFloorCalibration},
     {SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY, _CalibrateAtFloorManually},
     {SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY, _CalibrateAtHeightManually},
     {SVC_METHOD_GET_HQLIFTD_CONFIG, _GetHQLiftdConfig},
-    {SVC_METHOD_SET_HQLIFTD_CONFIG, _SetHQLiftdConfig},
+    {SVC_METHOD_SET_FLOOR_MODEL, _SetFloorModel},
     {NULL, NULL},  // keep it
 };
 
@@ -322,15 +322,10 @@ static int _GetHQLiftdConfig(cJSON* params) {
     return 0;
 }
 
-static int _SetHQLiftdConfig(cJSON* params) {
+static int _SetFloorModel(cJSON* params) {
     (void)params;
-    const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
-    if (val_str) {
-        futil_write(HQLIFTD_CONFIG_PATH, (void*)val_str, strlen(val_str));
-        report_hqliftd_config_property();
-
-        system("/etc/init.d/S68hqliftd restart 2>&1 > /dev/null");
-    }
+    #warning "xxxxxxxxxxxxxxxxxxxxxxxx"
+    // floor_update_floor_model_data();
     return 0;
 }
 #if 0

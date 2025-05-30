@@ -1,0 +1,327 @@
+200hz
+# 10 楼 10 98866
+
+# 到达 25 楼 25 98303， 实际高度 92.4，加速度 92.18， 气压92.84
+
+2458-05-30 15:07:39.498  2374  2377 elevatord: stopping-----------at 22, height:92.188351, pressure:98302.760000------------->
+2459-05-30 15:07:39.498  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :51.109651 vs acc height delta :50.373000
+2460:05-30 15:07:39.498  2374  2377 elevatord: mxp finished, baseline floor:10, relative to baseline :51.031241, calc real base relative height:92.846241
+2461-05-30 15:07:39.498  2374  2377 elevatord: mxp finished current pressure:98302.760000, height: 92.846241 related to :10 floor
+2462-05-30 15:07:39.498  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98302.760000 with floor:22 -> delta:12.940000
+2463-05-30 15:07:39.498  2374  2377 elevatord: mxp finished at : floor: 22, height:91.780000, while acc floor:22
+--
+到达 23 楼 98352， 实际高度 88.2， 加速度 88.05， 气压88.46
+2645-05-30 15:08:09.876  2374  2377 elevatord: stopping-----------at 21, height:88.058278, pressure:98351.130000------------->
+2646-05-30 15:08:09.876  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.514664 vs acc height delta :-4.130000
+2647:05-30 15:08:09.876  2374  2377 elevatord: mxp finished, baseline floor:10, relative to baseline :46.649175, calc real base relative height:88.464175
+2648-05-30 15:08:09.876  2374  2377 elevatord: mxp finished current pressure:98351.130000, height: 88.464175 related to :10 floor
+2649-05-30 15:08:09.876  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98351.130000 with floor:21 -> delta:10.740000
+2650-05-30 15:08:09.876  2374  2377 elevatord: mxp finished at : floor: 21, height:87.589000, while acc floor:21
+--
+到达 b2 99444 -9.1， 实际高度 -10， 加速度 -9.11， 气压-10.46
+2859-05-30 15:09:05.194  2374  2377 elevatord: accelerometer_stream_reset(475): 
+2860-05-30 15:09:05.194  2374  2377 elevatord: stopping-----------at -2, height:-9.114673, pressure:99447.660000------------->
+2861-05-30 15:09:05.194  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-99.158179 vs acc height delta :-97.173000
+2862:05-30 15:09:05.194  2374  2377 elevatord: mxp finished, baseline floor:10, relative to baseline :-52.275239, calc real base relative height:-10.460239
+2863-05-30 15:09:05.194  2374  2377 elevatord: mxp finished current pressure:99447.660000, height: -10.460239 related to :10 floor
+2864-05-30 15:09:05.194  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99447.660000 with floor:-2 -> delta:-3.350000
+2865-05-30 15:09:05.194  2374  2377 elevatord: mxp finished at : floor: -2, height:-10.021000, while acc floor:-2
+--
+到达 1 99331， 实际高度 0， 加速度 :0.839， 气压 -0.156
+3068-05-30 15:09:26.115  2374  2377 elevatord: accelerometer_stream_reset(475): 
+3069-05-30 15:09:26.115  2374  2377 elevatord: stopping-----------at 1, height:0.839530, pressure:99332.950000------------->
+3070-05-30 15:09:26.115  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :10.562473 vs acc height delta :9.954000
+3071:05-30 15:09:26.115  2374  2377 elevatord: mxp finished, baseline floor:10, relative to baseline :-41.971077, calc real base relative height:-0.156077
+3072-05-30 15:09:26.115  2374  2377 elevatord: mxp finished current pressure:99332.950000, height: -0.156077 related to :10 floor
+3073-05-30 15:09:26.115  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99332.950000 with floor:1 -> delta:-0.420000
+3074-05-30 15:09:26.115  2374  2377 elevatord: mxp finished at : floor: 1, height:0.000000, while acc floor:1
+--
+到达 4 楼 99144 16.8， 实际高度 16.8， 加速度 :16.86， 气压 16.95
+
+3509-05-30 15:09:47.652  2374  2377 elevatord: accelerometer_stream_reset(475): 
+3510-05-30 15:09:47.652  2374  2377 elevatord: stopping-----------at 4, height:16.864350, pressure:99144.400000------------->
+3511-05-30 15:09:47.652  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :16.883271 vs acc height delta :16.864000
+3512:05-30 15:09:47.652  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :16.952424, calc real base relative height:16.952424
+3513-05-30 15:09:47.652  2374  2377 elevatord: mxp finished current pressure:99144.400000, height: 16.952424 related to :1 floor
+3514-05-30 15:09:47.652  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99144.400000 with floor:4 -> delta:1.650000
+3515-05-30 15:09:47.652  2374  2377 elevatord: mxp finished at : floor: 4, height:16.809000, while acc floor:4
+--
+到达 17 楼， ， 实际高度 63， 加速度 :63.18， 气压 63.72
+4262-05-30 15:10:23.380  2374  2377 elevatord: accelerometer_stream_reset(475): 
+4263-05-30 15:10:23.380  2374  2377 elevatord: stopping-----------at 15, height:63.181614, pressure:98625.740000------------->
+4264-05-30 15:10:23.380  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :46.794388 vs acc height delta :46.317000
+4265:05-30 15:10:23.380  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :63.726178, calc real base relative height:63.726178
+4266-05-30 15:10:23.380  2374  2377 elevatord: mxp finished current pressure:98625.740000, height: 63.726178 related to :1 floor
+4267-05-30 15:10:23.380  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98625.740000 with floor:15 -> delta:12.910000
+4268-05-30 15:10:23.380  2374  2377 elevatord: mxp finished at : floor: 15, height:62.633000, while acc floor:15
+--
+到达 B1 b1 99399，  ， 实际高度 -6.1， 加速度 :-4.97， 气压 -6.17     ==================> 这次运行差得比较多 （1.13m），为什么呢？ 23 到 b2 都没有差这么多，为什么 17 到 b2 差了这么多？
+
+4564-05-30 15:11:03.409  2374  2377 elevatord: accelerometer_stream_reset(475): 
+4565-05-30 15:11:03.409  2374  2377 elevatord: stopping-----------at -1, height:-4.970493, pressure:99401.670000------------->
+4566-05-30 15:11:03.409  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-70.027107 vs acc height delta :-68.152000
+4567:05-30 15:11:03.409  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :-6.173311, calc real base relative height:-6.173311
+4568-05-30 15:11:03.409  2374  2377 elevatord: mxp finished current pressure:99401.670000, height: -6.173311 related to :1 floor
+4569-05-30 15:11:03.409  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99401.670000 with floor:-1 -> delta:-0.640000
+4570-05-30 15:11:03.409  2374  2377 elevatord: mxp finished at : floor: -1, height:-6.113000, while acc floor:-1
+--
+到达 22 22 98396 85.69， 实际高度 84， 加速度 85.69， 气压84.6 ==> 加速度还是维持了 1.69 的差值， 这个在b1 的时候已经积累了 1.13m
+
+5290-05-30 15:12:01.238  2374  2377 elevatord: accelerometer_stream_reset(475): 
+5291-05-30 15:12:01.238  2374  2377 elevatord: stopping-----------at 21, height:85.689697, pressure:98395.260000------------->
+5292-05-30 15:12:01.238  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :90.965826 vs acc height delta :90.660000
+5293:05-30 15:12:01.238  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :84.602241, calc real base relative height:84.602241
+5294-05-30 15:12:01.238  2374  2377 elevatord: mxp finished current pressure:98395.260000, height: 84.602241 related to :1 floor
+5295-05-30 15:12:01.238  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98395.260000 with floor:20 -> delta:13.910000
+5296-05-30 15:12:01.239  2374  2377 elevatord: mxp finished at : floor: 20, height:83.450000, while acc floor:21
+--
+到达 25 楼， 98300 94.08， 实际高度 92.4， 加速度 94.08， 气压 93.389 ==> 加速度差了1.6m（还是前面积累导致）, 气压差了 0.9， 这次气压有了偏差，
+5448-05-30 15:12:20.994  2374  2377 elevatord: accelerometer_stream_reset(475): 
+5449-05-30 15:12:20.994  2374  2377 elevatord: stopping-----------at 22, height:94.087463, pressure:98298.310000------------->
+5450-05-30 15:12:20.994  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :8.749767 vs acc height delta :8.398000
+5451:05-30 15:12:20.994  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :93.389723, calc real base relative height:93.389723
+5452-05-30 15:12:20.994  2374  2377 elevatord: mxp finished current pressure:98298.310000, height: 93.389723 related to :1 floor
+5453-05-30 15:12:20.994  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98298.310000 with floor:22 -> delta:19.210000
+5454-05-30 15:12:20.994  2374  2377 elevatord: mxp finished at : floor: 22, height:91.780000, while acc floor:22
+--
+到达 b1 99397 -3.9 ， 实际高度 -6.1， 加速度 :-3.978， 气压 -6.20 ==> 加速度偏差 2.122， 之前偏差1.6， 这次又增加了0.5 左右，气压还算不错。
+5651-05-30 15:13:11.540  2374  2377 elevatord: accelerometer_stream_reset(475): 
+5652-05-30 15:13:11.540  2374  2377 elevatord: stopping-----------at -1, height:-3.978468, pressure:99401.950000------------->
+5653-05-30 15:13:11.540  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-99.547970 vs acc height delta :-98.066000
+5654:05-30 15:13:11.540  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :-6.201099, calc real base relative height:-6.201099
+5655-05-30 15:13:11.540  2374  2377 elevatord: mxp finished current pressure:99401.950000, height: -6.201099 related to :1 floor
+5656-05-30 15:13:11.540  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99401.950000 with floor:-1 -> delta:-0.920000
+5657-05-30 15:13:11.540  2374  2377 elevatord: mxp finished at : floor: -1, height:-6.113000, while acc floor:-1
+--
+
+到达 17 楼， 98624 65.652， 实际高度 63， 加速度 :65.65， 气压 63.89， 加速度，还是前期积累的偏差 2.6， 这里开始因为差异已经达到 2.6米，楼层识别就开始出错了，不过气压的数据是准确的
+6072-05-30 15:13:52.277  2374  2377 elevatord: accelerometer_stream_reset(475): 
+6073-05-30 15:13:52.277  2374  2377 elevatord: stopping-----------at 16, height:65.652220, pressure:98624.360000------------->
+6074-05-30 15:13:52.277  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :70.146416 vs acc height delta :69.631000
+6075:05-30 15:13:52.277  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :63.892758, calc real base relative height:63.892758
+6076-05-30 15:13:52.277  2374  2377 elevatord: mxp finished current pressure:98624.360000, height: 63.892758 related to :1 floor
+6077-05-30 15:13:52.277  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98624.360000 with floor:15 -> delta:14.290000
+6078-05-30 15:13:52.277  2374  2377 elevatord: mxp finished at : floor: 15, height:62.633000, while acc floor:16
+--
+到达 15 楼 98715 14 cuo ， 实际高度 54.6， 加速度 :57.39， 气压 55.60，加速度，差值 2.7， 气压还是在 1 左右
+6305-05-30 15:14:12.118  2374  2377 elevatord: accelerometer_stream_reset(475): 
+6306-05-30 15:14:12.118  2374  2377 elevatord: stopping-----------at 14, height:57.395144, pressure:98716.070000------------->
+6307-05-30 15:14:12.118  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-8.392705 vs acc height delta :-8.257000
+6308:05-30 15:14:12.118  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :55.606113, calc real base relative height:55.606113
+6309-05-30 15:14:12.118  2374  2377 elevatord: mxp finished current pressure:98716.070000, height: 55.606113 related to :1 floor
+6310-05-30 15:14:12.118  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98716.070000 with floor:13 -> delta:14.190000
+6311-05-30 15:14:12.118  2374  2377 elevatord: mxp finished at : floor: 13, height:54.339000, while acc floor:14
+--
+到达 1 楼 99327  3m -> 0， 实际高度 0， 加速度 :3.37， 气压 0.53，可以看到这时加速度差值达到3.37米，然后在基层我们强制校准在这里归零， 这时的气压 99327， 我们之前应该是 99332
+6573-05-30 15:14:48.093  2374  2377 elevatord: accelerometer_stream_reset(475): 
+6574-05-30 15:14:48.093  2374  2377 elevatord: stopping-----------at 1, height:3.372229, pressure:99327.000000------------->
+6575-05-30 15:14:48.093  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-55.085662 vs acc height delta :-54.023000
+6576:05-30 15:14:48.094  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :0.535036, calc real base relative height:0.535036
+6577-05-30 15:14:48.094  2374  2377 elevatord: mxp finished current pressure:99327.000000, height: 0.535036 related to :1 floor
+6578-05-30 15:14:48.094  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99327.000000 with floor:1 -> delta:5.950000
+6579-05-30 15:14:48.094  2374  2377 elevatord: mxp finished at : floor: 1, height:0.000000, while acc floor:1
+--
+到达 15 98717 54.657  54， 实际高度 54.6， 加速度 :54.656， 气压 55.01，
+7315-05-30 15:15:26.185  2374  2377 elevatord: accelerometer_stream_reset(475): 
+7316-05-30 15:15:26.185  2374  2377 elevatord: stopping-----------at 13, height:54.656810, pressure:98716.830000------------->
+7317-05-30 15:15:26.185  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :55.226769 vs acc height delta :54.657000
+7318:05-30 15:15:26.185  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :55.013871, calc real base relative height:55.013871
+7319-05-30 15:15:26.185  2374  2377 elevatord: mxp finished current pressure:98716.830000, height: 55.013871 related to :1 floor
+7320-05-30 15:15:26.185  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98716.830000 with floor:13 -> delta:8.080000
+7321-05-30 15:15:26.185  2374  2377 elevatord: mxp finished at : floor: 13, height:54.339000, while acc floor:13
+--
+到达 21 楼 98440 79.8， 实际高度 79.8， 加速度 :79.89， 气压 80.38，
+7834-05-30 15:16:16.953  2374  2377 elevatord: accelerometer_stream_reset(475): 
+7835-05-30 15:16:16.953  2374  2377 elevatord: stopping-----------at 19, height:79.896719, pressure:98436.620000------------->
+7836-05-30 15:16:16.953  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :25.475401 vs acc height delta :25.240000
+7837:05-30 15:16:16.953  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :80.383511, calc real base relative height:80.383511
+7838-05-30 15:16:16.953  2374  2377 elevatord: mxp finished current pressure:98436.620000, height: 80.383511 related to :1 floor
+7839-05-30 15:16:16.953  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98436.620000 with floor:19 -> delta:13.370000
+7840-05-30 15:16:16.953  2374  2377 elevatord: mxp finished at : floor: 19, height:79.282000, while acc floor:19
+--
+到达 20 楼 98488 75.78， 实际高度 75.6 ， 加速度 :75.78， 气压 75.86，
+8155-05-30 15:16:38.777  2374  2377 elevatord: accelerometer_stream_reset(475): 
+8156-05-30 15:16:38.777  2374  2377 elevatord: stopping-----------at 18, height:75.782675, pressure:98486.450000------------->
+8157-05-30 15:16:38.778  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.530081 vs acc height delta :-4.114000
+8158:05-30 15:16:38.778  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :75.869337, calc real base relative height:75.869337
+8159-05-30 15:16:38.778  2374  2377 elevatord: mxp finished current pressure:98486.450000, height: 75.869337 related to :1 floor
+8160-05-30 15:16:38.778  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98486.450000 with floor:18 -> delta:9.450000
+8161-05-30 15:16:38.778  2374  2377 elevatord: mxp finished at : floor: 18, height:75.111000, while acc floor:18
+--
+到达 b1 99393  -4.936， 实际高度 -6.1 ， 加速度 :-4.943（偏差 1.2）， 气压 -6.35，============> 还是出错，感觉下降容易出错，是不是我们固定不稳定导致的，基础加速度发生了偏差
+8447-05-30 15:17:23.582  2374  2377 elevatord: accelerometer_stream_reset(475): 
+8448-05-30 15:17:23.582  2374  2377 elevatord: stopping-----------at -1, height:-4.943530, pressure:99397.670000------------->
+8449-05-30 15:17:23.582  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-82.332752 vs acc height delta :-80.726000
+8450:05-30 15:17:23.582  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :-6.355892, calc real base relative height:-6.355892
+8451-05-30 15:17:23.582  2374  2377 elevatord: mxp finished current pressure:99397.670000, height: -6.355892 related to :1 floor
+8452-05-30 15:17:23.582  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:99397.670000 with floor:-1 -> delta:-2.660000
+8453-05-30 15:17:23.582  2374  2377 elevatord: mxp finished at : floor: -1, height:-6.113000, while acc floor:-1
+--
+
+到达 25 楼 98302 93.9，实际高度 92.4， 加速度 93.93， 气压 92.89，加速度偏差 1.5， 之前已经偏差 1.2， 气压 0.5 还好
+
+9069-05-30 15:18:16.309  2374  2377 elevatord: accelerometer_stream_reset(475): 
+9070-05-30 15:18:16.309  2374  2377 elevatord: stopping-----------at 22, height:93.932776, pressure:98298.950000------------->
+9071-05-30 15:18:16.309  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :99.344313 vs acc height delta :98.876000
+9072:05-30 15:18:16.309  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :92.892240, calc real base relative height:92.892240
+9073-05-30 15:18:16.309  2374  2377 elevatord: mxp finished current pressure:98298.950000, height: 92.892240 related to :1 floor
+9074-05-30 15:18:16.309  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98298.950000 with floor:22 -> delta:13.640000
+9075-05-30 15:18:16.309  2374  2377 elevatord: mxp finished at : floor: 22, height:91.780000, while acc floor:22
+--
+到达 23 98347 89.79， 实际高度 88.2， 加速度 89.79， 气压 88.68， 加速度偏差 1.59， 气压 0.4
+
+9696-05-30 15:19:15.735  2374  2377 elevatord: accelerometer_stream_reset(475): 
+9697-05-30 15:19:15.735  2374  2377 elevatord: stopping-----------at 22, height:89.790934, pressure:98345.430000------------->
+9698-05-30 15:19:15.735  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.219169 vs acc height delta :-4.142000
+9699:05-30 15:19:15.735  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :88.684183, calc real base relative height:88.684183
+9700-05-30 15:19:15.736  2374  2377 elevatord: mxp finished current pressure:98345.430000, height: 88.684183 related to :1 floor
+9701-05-30 15:19:15.736  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98345.430000 with floor:21 -> delta:13.210000
+9702-05-30 15:19:15.736  2374  2377 elevatord: mxp finished at : floor: 21, height:87.589000, while acc floor:22
+--
+到达  22 楼， 98390 85.7， 实际高度 84， 加速度 85.70， 气压 84.66， 加速度偏差 1.7， 气压 0.6
+在下降过程中加速度偏差肉眼可见的偏大
+9756-05-30 15:19:31.529  2374  2377 elevatord: accelerometer_stream_reset(475): 
+9757-05-30 15:19:31.529  2374  2377 elevatord: stopping-----------at 21, height:85.708326, pressure:98389.790000------------->
+9758-05-30 15:19:31.529  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.157412 vs acc height delta :-4.083000
+9759:05-30 15:19:31.529  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :84.663628, calc real base relative height:84.663628
+9760-05-30 15:19:31.529  2374  2377 elevatord: mxp finished current pressure:98389.790000, height: 84.663628 related to :1 floor
+9761-05-30 15:19:31.529  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98389.790000 with floor:20 -> delta:14.350000
+9762-05-30 15:19:31.529  2374  2377 elevatord: mxp finished at : floor: 20, height:83.450000, while acc floor:21
+--
+到达 21 楼 98391 85.71 实际高度 79.8， 加速度 81.567， 气压 80.33， 加速度偏差 1.7， 气压 0.7
+10036-05-30 15:19:57.391  2374  2377 elevatord: accelerometer_stream_reset(475): 
+10037-05-30 15:19:57.391  2374  2377 elevatord: stopping-----------at 20, height:81.567725, pressure:98437.580000------------->
+10038-05-30 15:19:57.391  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.432791 vs acc height delta :-4.141000
+10039:05-30 15:19:57.391  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :80.335972, calc real base relative height:80.335972
+10040-05-30 15:19:57.391  2374  2377 elevatord: mxp finished current pressure:98437.580000, height: 80.335972 related to :1 floor
+10041-05-30 15:19:57.391  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98437.580000 with floor:19 -> delta:12.410000
+10042-05-30 15:19:57.391  2374  2377 elevatord: mxp finished at : floor: 19, height:79.282000, while acc floor:20
+--
+到达 20 楼 98484 77.45， 实际高度 75.6， 加速度 77.45， 气压 76.26， 加速度偏差 1.8，气压 0.6
+10578-05-30 15:20:26.334  2374  2377 elevatord: accelerometer_stream_reset(475): 
+10579-05-30 15:20:26.334  2374  2377 elevatord: stopping-----------at 19, height:77.450935, pressure:98482.490000------------->
+10580-05-30 15:20:26.334  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.436218 vs acc height delta :-4.117000
+10581:05-30 15:20:26.334  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :76.265459, calc real base relative height:76.265459
+10582-05-30 15:20:26.335  2374  2377 elevatord: mxp finished current pressure:98482.490000, height: 76.265459 related to :1 floor
+10583-05-30 15:20:26.335  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98482.490000 with floor:18 -> delta:13.410000
+10584-05-30 15:20:26.335  2374  2377 elevatord: mxp finished at : floor: 18, height:75.111000, while acc floor:19
+--
+
+到达 19 楼 98527 73.3， 实际高度 71.4， 加速度 73.3， 偏差了 1.9米， 气压 72.21， 气压偏差 0.8
+11121-05-30 15:21:08.437  2374  2377 elevatord: accelerometer_stream_reset(475): 
+11122-05-30 15:21:08.437  2374  2377 elevatord: stopping-----------at 18, height:73.315604, pressure:98527.240000------------->
+11123-05-30 15:21:08.437  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-3.928575 vs acc height delta :-4.135000
+11124:05-30 15:21:08.437  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :72.210943, calc real base relative height:72.210943
+11125-05-30 15:21:08.437  2374  2377 elevatord: mxp finished current pressure:98527.240000, height: 72.210943 related to :1 floor
+11126-05-30 15:21:08.437  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98527.240000 with floor:17 -> delta:14.300000
+11127-05-30 15:21:08.437  2374  2377 elevatord: mxp finished at : floor: 17, height:70.967000, while acc floor:18
+--
+到达 18 楼 98576 69.1  cuo 17， 实际高度 67.2， 加速度69.17，偏差 1.9， 气压67.74， 偏差  0.5 
+11272-05-30 15:21:26.675  2374  2377 elevatord: accelerometer_stream_reset(475): 
+11273-05-30 15:21:26.675  2374  2377 elevatord: stopping-----------at 17, height:69.173526, pressure:98576.620000------------->
+11274-05-30 15:21:26.675  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.481271 vs acc height delta :-4.142000
+11275:05-30 15:21:26.675  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :67.743097, calc real base relative height:67.743097
+11276-05-30 15:21:26.675  2374  2377 elevatord: mxp finished current pressure:98576.620000, height: 67.743097 related to :1 floor
+11277-05-30 15:21:26.675  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98576.620000 with floor:16 -> delta:10.770000
+11278-05-30 15:21:26.675  2374  2377 elevatord: mxp finished at : floor: 16, height:66.806000, while acc floor:17
+--
+到达 17 楼， 17 98624 16， 实际高度 63， 加速度65， 气压 63.5 加速度偏差 2.0 ， 肉眼偏差， 从 25 到 17 已经偏差了 0.5
+
+11747-05-30 15:21:54.330  2374  2377 elevatord: accelerometer_stream_reset(475): 
+11748-05-30 15:21:54.330  2374  2377 elevatord: stopping-----------at 16, height:65.029803, pressure:98623.510000------------->
+11749-05-30 15:21:54.330  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.215627 vs acc height delta :-4.144000
+11750:05-30 15:21:54.330  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :63.503969, calc real base relative height:63.503969
+11751-05-30 15:21:54.330  2374  2377 elevatord: mxp finished current pressure:98623.510000, height: 63.503969 related to :1 floor
+11752-05-30 15:21:54.330  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98623.510000 with floor:15 -> delta:9.890000
+11753-05-30 15:21:54.330  2374  2377 elevatord: mxp finished at : floor: 15, height:62.633000, while acc floor:16
+--
+到达 16， 16 98666 60.9 15， 实际高度 58.8， 加速度 60.9（偏差2.1）， 气压 59.53， 偏差 0.7
+11915-05-30 15:22:15.508  2374  2377 elevatord: accelerometer_stream_reset(475): 
+11916-05-30 15:22:15.508  2374  2377 elevatord: stopping-----------at 15, height:60.915747, pressure:98667.420000------------->
+11917-05-30 15:22:15.508  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-3.993704 vs acc height delta :-4.114000
+11918:05-30 15:22:15.508  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :59.533399, calc real base relative height:59.533399
+11919-05-30 15:22:15.508  2374  2377 elevatord: mxp finished current pressure:98667.420000, height: 59.533399 related to :1 floor
+11920-05-30 15:22:15.508  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98667.420000 with floor:14 -> delta:11.420000
+11921-05-30 15:22:15.508  2374  2377 elevatord: mxp finished at : floor: 14, height:58.513000, while acc floor:15
+--
+到达 15 楼， 98712 56.79， 实际高度 54.6， 加速度 56.79（2.2）， 气压 55.45， 偏差 0.8
+12549-05-30 15:22:40.883  2374  2377 elevatord: accelerometer_stream_reset(475): 
+12550-05-30 15:22:40.883  2374  2377 elevatord: stopping-----------at 14, height:56.794096, pressure:98712.560000------------->
+12551-05-30 15:22:40.883  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.220532 vs acc height delta :-4.122000
+12552:05-30 15:22:40.883  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :55.452455, calc real base relative height:55.452455
+12553-05-30 15:22:40.883  2374  2377 elevatord: mxp finished current pressure:98712.560000, height: 55.452455 related to :1 floor
+12554-05-30 15:22:40.883  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98712.560000 with floor:13 -> delta:12.350000
+12555-05-30 15:22:40.883  2374  2377 elevatord: mxp finished at : floor: 13, height:54.339000, while acc floor:14
+--
+到达 12 楼， 98756 52.666， 实际高度 50.4， 加速度 52.66（2.2）， 气压 51.47（1.2）气压为什么突然差了这么大？
+12727-05-30 15:22:57.557  2374  2377 elevatord: accelerometer_stream_reset(475): 
+12728-05-30 15:22:57.557  2374  2377 elevatord: stopping-----------at 13, height:52.665826, pressure:98756.570000------------->
+12729-05-30 15:22:57.557  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.164431 vs acc height delta :-4.128000
+12730:05-30 15:22:57.557  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :51.473011, calc real base relative height:51.473011
+12731-05-30 15:22:57.557  2374  2377 elevatord: mxp finished current pressure:98756.570000, height: 51.473011 related to :1 floor
+12732-05-30 15:22:57.557  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98756.570000 with floor:12 -> delta:14.500000
+12733-05-30 15:22:57.557  2374  2377 elevatord: mxp finished at : floor: 12, height:50.159000, while acc floor:13
+--
+
+到达 11  楼， 实际高度 46.2， 加速度 48.55（2.3）， 气压 47.4（1.2）
+13657-05-30 15:23:30.181  2374  2377 elevatord: accelerometer_stream_reset(475): 
+13658-05-30 15:23:30.181  2374  2377 elevatord: stopping-----------at 12, height:48.554625, pressure:98801.570000------------->
+13659-05-30 15:23:30.181  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.277958 vs acc height delta :-4.111000
+13660:05-30 15:23:30.181  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :47.408334, calc real base relative height:47.408334
+13661-05-30 15:23:30.181  2374  2377 elevatord: mxp finished current pressure:98801.570000, height: 47.408334 related to :1 floor
+13662-05-30 15:23:30.181  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98801.570000 with floor:11 -> delta:15.720000
+13663-05-30 15:23:30.181  2374  2377 elevatord: mxp finished at : floor: 11, height:45.976000, while acc floor:12
+--
+到达 10 楼 ， 实际高度 42， 加速度 44.4（2.4），气压 43 （1）
+13720-05-30 15:23:45.759  2374  2377 elevatord: accelerometer_stream_reset(475): 
+13721-05-30 15:23:45.759  2374  2377 elevatord: stopping-----------at 11, height:44.400647, pressure:98849.590000------------->
+13722-05-30 15:23:45.759  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :-4.457069 vs acc height delta :-4.154000
+13723:05-30 15:23:45.759  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :43.068544, calc real base relative height:43.068544
+13724-05-30 15:23:45.759  2374  2377 elevatord: mxp finished current pressure:98849.590000, height: 43.068544 related to :1 floor
+13725-05-30 15:23:45.759  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98849.590000 with floor:10 -> delta:13.710000
+13726-05-30 15:23:45.759  2374  2377 elevatord: mxp finished at : floor: 10, height:41.815000, while acc floor:11
+--
+14450-05-30 15:24:06.735  2374  2377 elevatord: accelerometer_stream_reset(475): 
+14451-05-30 15:24:06.735  2374  2377 elevatord: stopping-----------at 11, height:44.428488, pressure:98847.910000------------->
+14452-05-30 15:24:06.735  2374  2377 elevatord: _accelerometer_thread_routin(403): stopped, pressure detect height delta :0.060619 vs acc height delta :0.028000
+14453:05-30 15:24:06.735  2374  2377 elevatord: mxp finished, baseline floor:1, relative to baseline :43.221813, calc real base relative height:43.221813
+14454-05-30 15:24:06.735  2374  2377 elevatord: mxp finished current pressure:98847.910000, height: 43.221813 related to :1 floor
+14455-05-30 15:24:06.735  2374  2377 elevatord: floor_predict_with_pressure(470): matched pressure:98847.910000 with floor:10 -> delta:15.390000
+14456-05-30 15:24:06.735  2374  2377 elevatord: mxp finished at : floor: 10, height:41.815000, while acc floor:11
+
+
+
+总结，加速度出现偏差应该是校准问题，或者摄像头姿态发生了变化，我就是直接放在电源上面的。
+
+
+另外，我们楼层模型计算的高度本身是有误差的，也许要合理考虑
+
+05-30 15:05:39.138  2374  2374 elevatord: ========================= Floor Model Begin =========================
+05-30 15:05:39.138  2374  2374 elevatord: id:0, name:-2, height:3.908000, height_base:-10.021000, pressure:99446.770000
+05-30 15:05:39.138  2374  2374 elevatord: id:1, name:-1, height:6.113000, height_base:-6.113000, pressure:99403.200000
+05-30 15:05:39.138  2374  2374 elevatord: id:2, name:1, height:8.409000, height_base:0.000000, pressure:99335.090000
+05-30 15:05:39.138  2374  2374 elevatord: id:3, name:2, height:4.178000, height_base:8.409000, pressure:99241.480000
+05-30 15:05:39.138  2374  2374 elevatord: id:4, name:3, height:4.222000, height_base:12.587000, pressure:99195.010000
+05-30 15:05:39.138  2374  2374 elevatord: id:5, name:4, height:4.151000, height_base:16.809000, pressure:99148.080000
+05-30 15:05:39.138  2374  2374 elevatord: id:6, name:5, height:4.167000, height_base:20.960000, pressure:99101.970000
+05-30 15:05:39.138  2374  2374 elevatord: id:7, name:6, height:4.184000, height_base:25.127000, pressure:99055.700000
+05-30 15:05:39.138  2374  2374 elevatord: id:8, name:7, height:4.178000, height_base:29.311000, pressure:99009.270000
+05-30 15:05:39.138  2374  2374 elevatord: id:9, name:8, height:4.156000, height_base:33.489000, pressure:98962.930000
+05-30 15:05:39.138  2374  2374 elevatord: id:10, name:9, height:4.170000, height_base:37.645000, pressure:98916.860000
+05-30 15:05:39.138  2374  2374 elevatord: id:11, name:10, height:4.161000, height_base:41.815000, pressure:98870.660000
+05-30 15:05:39.138  2374  2374 elevatord: id:12, name:11, height:4.183000, height_base:45.976000, pressure:98824.590000
+05-30 15:05:39.138  2374  2374 elevatord: id:13, name:12, height:4.180000, height_base:50.159000, pressure:98778.290000
+05-30 15:05:39.140  2374  2374 elevatord: id:14, name:13, height:4.174000, height_base:54.339000, pressure:98732.060000
+05-30 15:05:39.141  2374  2374 elevatord: id:15, name:14, height:4.120000, height_base:58.513000, pressure:98685.920000
+05-30 15:05:39.141  2374  2374 elevatord: id:16, name:15, height:4.173000, height_base:62.633000, pressure:98640.400000
+05-30 15:05:39.141  2374  2374 elevatord: id:17, name:16, height:4.161000, height_base:66.806000, pressure:98594.330000
+05-30 15:05:39.141  2374  2374 elevatord: id:18, name:17, height:4.144000, height_base:70.967000, pressure:98548.410000
+05-30 15:05:39.141  2374  2374 elevatord: id:19, name:18, height:4.171000, height_base:75.111000, pressure:98502.700000
+05-30 15:05:39.141  2374  2374 elevatord: id:20, name:19, height:4.168000, height_base:79.282000, pressure:98456.720000
+05-30 15:05:39.141  2374  2374 elevatord: id:21, name:20, height:4.139000, height_base:83.450000, pressure:98410.800000
+05-30 15:05:39.141  2374  2374 elevatord: id:22, name:21, height:4.191000, height_base:87.589000, pressure:98365.220000
+05-30 15:05:39.141  2374  2374 elevatord: id:23, name:22, height:4.191000, height_base:91.780000, pressure:98319.100000
+05-30 15:05:39.141  2374  2374 elevatord: ========================= Floor Model End =========================
+
+
+

@@ -85,6 +85,7 @@ static double barometer_distance = 0;
 static double barometer_begin = 0;
 static double barometer_end = 0;
 static double barometer_pressure = 0;
+static double barometer_pressure_height_relative_base_floor = 0;
 static double barometer_temperature = 0;
 
 // 这里，我们定义基线楼层和气压
@@ -181,7 +182,7 @@ static void* _accelerometer_thread_routin(void* args) {
 #if DUMP_DATA_TO_FILE
     char buf[MAX_LINE_LENGTH] = {0};
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_mean,pressure_stddev\n");
+        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_mean,pressure_heigh_relative_base\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
@@ -423,9 +424,10 @@ static void* _accelerometer_thread_routin(void* args) {
                         HR_LOGD("mxp finished, baseline floor:%d, relative to baseline :%f, calc real base relative height:%f\n", floor_baseline_num, relative_height, relative_height + h);
                         relative_height += h;
                     }
+                    barometer_pressure_height_relative_base_floor = relative_height;
                 }
 
-                HR_LOGD("mxp finished current pressure:%f, height: %f related to :%d floor\n", barometer_pressure, relative_height, floor_baseline_num);
+                HR_LOGD("mxp finished current pressure:%f, height: %f vs %f pressure base:%d floor\n", barometer_pressure, relative_height, _accelerometer_motion.height, floor_baseline_num);
                 if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
 
                     HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
@@ -446,7 +448,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
                     // adjust base floor to base floor in model
                     if (floor_num == floor_base_floor()) {
-                        HR_LOGD("adjust baseline floor from %d to %d\n", floor_baseline_num, floor_num);
+                        HR_LOGD("adjust baseline floor from %d to %d: %f(%f)\n", floor_baseline_num, floor_num, barometer_pressure, barometer_pressure - floor_baseline_pressure);
                         floor_baseline_num = floor_base_floor();
                         floor_baseline_pressure = barometer_pressure;
 
@@ -560,7 +562,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, _accelerometer_motion.velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, _barometer_motion.mw->mean, _barometer_motion.mw->stddev);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, _accelerometer_motion.velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, _barometer_motion.mw->mean, barometer_pressure_height_relative_base_floor);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif

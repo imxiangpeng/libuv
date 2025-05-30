@@ -40,7 +40,8 @@ static char _elevator_id[128] = {0};
 static struct sconf_proto report_switch_conf = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}};
 
 enum {
-    PROPERTY_ELEVATOR_ID = 0,
+    PROPERTY_BUILD_TIMESTAMP = 0,
+    PROPERTY_ELEVATOR_ID,
     PROPERTY_BIAS_ACCEL_X,
     PROPERTY_BIAS_ACCEL_Y,
     PROPERTY_BIAS_ACCEL_Z,
@@ -74,6 +75,7 @@ struct property {
     } value;
     int dirty;
 } _properties_tbl[__PROPERTY_MAX] = {
+    [PROPERTY_BUILD_TIMESTAMP] = {"build_timestamp", P_STRING, {.val_str = ELEVATORD_BUILD_TIMESTAMP}, 1 /* report when startup*/},
     [PROPERTY_ELEVATOR_ID] = {"elevator_id", P_STRING, {.val_str = _elevator_id}, 1 /* report when startup*/},
     // calibration
     [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", P_DOUBLE, {0}, 0},
@@ -433,7 +435,7 @@ static void _observer_on_status(struct motion_status* st) {
     _properties_tbl[PROPERTY_PRESSURE].dirty = 1;
     _properties_tbl[PROPERTY_TEMPERATURE].value.val_double = round(st->temperature * 10) / 10;
     _properties_tbl[PROPERTY_TEMPERATURE].dirty = 1;
-    
+
     schedule_report();
 }
 
