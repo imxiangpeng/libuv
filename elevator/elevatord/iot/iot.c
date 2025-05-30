@@ -69,7 +69,7 @@ int iot_init(struct uv_loop_s* loop) {
     }
     name[j] = '\0';
 
-    printf("device name:%s\n", name);
+    // printf("device name:%s\n", name);
     platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
     // printf("device secret:%s\n", hmac_secret);
 

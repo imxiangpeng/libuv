@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
     uelevatord_init();
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
-    // iot_init(uv_default_loop());
+    iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     motion_deinitalize();
@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
 
     uelevatord_deinit();
 
-    // iot_deinit();
+    iot_deinit();
 
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

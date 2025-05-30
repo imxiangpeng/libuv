@@ -29,6 +29,7 @@
 enum {
     PROPERTY_TOPIC_POST = 0,
     PROPERTY_TOPIC_SET,
+    PROPERTY_TOPIC_GET,
     _PROPERTY_TOPIC_MAX,
 };
 
@@ -283,6 +284,42 @@ static int _on_property_set_message(void* payload, int len) {
     return 0;
 }
 
+static int _on_property_get_message(void* payload, int len) {
+    printf("get message %d -> %s\n", len, (char*)payload);
+    char* method = NULL;
+    //double val = 0;
+    //const char* val_str = NULL;
+    cJSON *root = NULL, *params = NULL, *ele = NULL;
+    if (!payload || len == 0) {
+        HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    root = cJSON_ParseWithLength((const char*)payload, len);
+    if (!root) {
+        return -1;
+    }
+
+    method = cJSON_GetStringValue(cJSON_GetObjectItem(root, "method"));
+    if (!method || 0 != strcmp("thing.service.property.get", method)) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    params = cJSON_GetObjectItem(root, "params");
+    if (!params) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON_ArrayForEach(ele, params) {
+        HR_LOGD("ele: %s -> type:%d\n", ele->string, ele->type);
+    }
+
+    return 0;
+}
+
+
 static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     [PROPERTY_TOPIC_POST] = {
         .name = "event/property/post",
@@ -300,6 +337,11 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     },*/
     [PROPERTY_TOPIC_SET] = {
         .name = "service/property/set",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_property_set_message,
+    },[PROPERTY_TOPIC_GET] = {
+        .name = "service/property/get",
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_property_set_message,
@@ -426,5 +468,11 @@ static void schedule_report(void) {
 
 void report_floor_model_property() {
     _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
+    uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
+}
+
+
+void report_hqliftd_config_property() {
+    _properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

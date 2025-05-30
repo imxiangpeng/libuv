@@ -19,19 +19,25 @@
 
 // defined in iot_topic_property.c
 extern void report_floor_model_property();
+extern void report_hqliftd_config_property();
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 #define SVC_METHOD_START_AUTO_FLOOR_CALIBRATION "thing.service.StartAutoFloorCalibration"
 #define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "thing.service.CalibrateAtFloorManually"
 #define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "thing.service.CalibrateAtHeightManually"
+#define SVC_METHOD_GET_HQLIFTD_CONFIG "thing.service.GetHQLiftdConfig"
+#define SVC_METHOD_SET_HQLIFTD_CONFIG "thing.service.SetHQLiftdConfig"
 
 enum {
     CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT = 0,
     CALIBRATION_TOPIC_START_AUTO_FLOOR_CALIBRATION,
     CALIBRATION_TOPIC_CALIBRATE_AT_FLOOR_MANUALLY,
     CALIBRATION_TOPIC_CALIBRATE_AT_HEIGHT_MANUALLY,
-    _CALIBRATION_TOPIC_MAX
+    GET_HQLIFTD_CONFIG,
+    // GET_HQLIFTD_CONFIG_REPLY,
+    SET_HQLIFTD_CONFIG,
+    _SERVICE_TOPIC_MAX
 };
 
 struct svc_action {
@@ -48,21 +54,28 @@ struct calibration_event {
     struct hr_list_head entry;
 };
 
+static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX];
+
 static HR_LIST_HEAD(_auto_floor_calibration_message_queue);
 static pthread_mutex_t _queue_mutex;
 static struct uviot* _iot = NULL;
-static struct uviot_topic _iot_calibration_topics[];
+static struct uviot_topic _iot_service_topics[];
 
 static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
+static int _GetHQLiftdConfig(cJSON* params);
+static int _SetHQLiftdConfig(cJSON* params);
 static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_START_AUTO_FLOOR_CALIBRATION, _StartAutoFloorCalibration},
     {SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY, _CalibrateAtFloorManually},
     {SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY, _CalibrateAtHeightManually},
+    {SVC_METHOD_GET_HQLIFTD_CONFIG, _GetHQLiftdConfig},
+    {SVC_METHOD_SET_HQLIFTD_CONFIG, _SetHQLiftdConfig},
     {NULL, NULL},  // keep it
 };
 
+static char _stored_id[64] = {0};
 static struct calibration_event* calibration_event_alloc() {
     struct calibration_event* e = (struct calibration_event*)calloc(1, sizeof(struct calibration_event));
     if (!e) {
@@ -92,7 +105,7 @@ static int send_calibration_event(struct calibration_event* m) {
     pthread_mutex_lock(&_queue_mutex);
     hr_list_add_tail(&m->entry, &_auto_floor_calibration_message_queue);
     pthread_mutex_unlock(&_queue_mutex);
-    return uviot_publish_async(_iot, &_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
+    return uviot_publish_async(_iot, &_iot_service_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
 }
 
 static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
@@ -142,7 +155,7 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
     if (!hr_list_empty(&_auto_floor_calibration_message_queue)) {
         // when queue is not empty, we should trigger again
         // because uv_async merges multiple requests and triggers the callback only once
-        return uviot_publish_async(_iot, &_iot_calibration_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
+        return uviot_publish_async(_iot, &_iot_service_topics[CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT]);
     }
 #endif
     return 0;
@@ -157,6 +170,7 @@ static int _on_reply_message(void* payload, int len) {
 }
 // {"BaseFloor":1,"FloorsBelow":2,"FloorsAbove":22}
 static int _on_svc_message(void* payload, int len) {
+    char* id = NULL;
     char* method = NULL;
     struct svc_action* act = NULL;
     cJSON *root = NULL, *params = NULL;
@@ -171,6 +185,14 @@ static int _on_svc_message(void* payload, int len) {
     if (!root) {
         return -1;
     }
+
+    id = cJSON_GetStringValue(cJSON_GetObjectItem(root, "id"));
+    if (!id) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    snprintf(_stored_id, sizeof(_stored_id), "%s", id);
 
     method = cJSON_GetStringValue(cJSON_GetObjectItem(root, "method"));
     if (!method) {
@@ -293,7 +315,57 @@ static int _CalibrateAtHeightManually(cJSON* params) {
     return 0;
 }
 
-static struct uviot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
+static int _GetHQLiftdConfig(cJSON* params) {
+    (void)params;
+    report_hqliftd_config_property();
+    // uviot_publish_async(_iot, &_iot_service_topics[GET_HQLIFTD_CONFIG_REPLY]);
+    return 0;
+}
+
+static int _SetHQLiftdConfig(cJSON* params) {
+    (void)params;
+    const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+    if (val_str) {
+        futil_write(HQLIFTD_CONFIG_PATH, (void*)val_str, strlen(val_str));
+        report_hqliftd_config_property();
+
+        system("/etc/init.d/S68hqliftd restart 2>&1 > /dev/null");
+    }
+    return 0;
+}
+#if 0
+// https://help.aliyun.com/zh/iot/user-guide/device-properties-events-and-services#section-jkt-v1x-y2b
+static int _on_get_hqliftd_config_publish(void** payload, int* len) {
+    cJSON *root = NULL, *data = NULL;
+    (void)data;
+    (void)payload;
+    (void)len;
+
+    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
+    root = cJSON_CreateObject();
+    if (!root)
+        return -1;
+
+    // test code, please only response when needed
+    cJSON_AddStringToObject(root, "id", _stored_id);
+    cJSON_AddStringToObject(root, "version", "1.0.0");
+    cJSON_AddStringToObject(root, "message", "success");
+
+    data = cJSON_AddObjectToObject(root, "data");
+    
+    cJSON_AddStringToObject(data, "data", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsuccess");
+    
+    *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!*payload)
+        return -1;
+
+    *len = strlen(*payload);
+
+    return 0;
+}
+#endif
+static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX] = {
     [CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT] = {
         .name = "event/AutoFloorCalibrationEvent/post",
         .topic = {0},
@@ -325,7 +397,26 @@ static struct uviot_topic _iot_calibration_topics[_CALIBRATION_TOPIC_MAX] = {
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
-};
+    [GET_HQLIFTD_CONFIG] = {
+        .name = "service/GetHQLiftdConfig",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
+#if 0    
+    [GET_HQLIFTD_CONFIG_REPLY] = {
+        .name = "service/GetHQLiftdConfig_reply",
+        .topic = {0},
+        .type = TOPIC_TYPE_PUBLISH,
+        .callback.on_publish = _on_get_hqliftd_config_publish,
+    },
+#endif
+    [SET_HQLIFTD_CONFIG] = {
+        .name = "service/SetHQLiftdConfig",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    }};
 
 int iot_topic_service_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)iot;
@@ -334,8 +425,8 @@ int iot_topic_service_init(struct uviot* iot, const char* public_key, const char
     }
     _iot = iot;
     pthread_mutex_init(&_queue_mutex, NULL);
-    for (size_t i = 0; i < ARRAY_SIZE(_iot_calibration_topics); i++) {
-        struct uviot_topic* t = &_iot_calibration_topics[i];
+    for (size_t i = 0; i < ARRAY_SIZE(_iot_service_topics); i++) {
+        struct uviot_topic* t = &_iot_service_topics[i];
         snprintf(t->topic, sizeof(t->topic), "/sys/%s/%s/thing/%s", public_key, device_name, t->name);
         uviot_topic_register(iot, t);
     }

@@ -59,6 +59,9 @@ int main(int argc, char** argv) {
     const char* elevator_no = NULL;
 
     struct sigaction action;
+
+    HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
+
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
