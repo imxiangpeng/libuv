@@ -182,7 +182,7 @@ static int floor_load_model(const char* path) {
     return 0;
 }
 
-static int _replace_floor_model_config(const char* path, char* data, int size) {
+static int _replace_floor_model_config(const char* path, const char* data, int size) {
     int fd = -1;
     char* tmp = NULL;
     int tmp_len = 0;
@@ -204,7 +204,7 @@ static int _replace_floor_model_config(const char* path, char* data, int size) {
 
     fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
 
-    futil_write_fd(fd, data, size);
+    futil_write_fd(fd, (char*)data, size);
 
     close(fd);
 
@@ -409,6 +409,7 @@ int floor_predict(double height, int* num, char* label, int length) {
     if (_floor_calibration) {
         return -1;
     }
+
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
         // HR_LOGD("%s(%d): height: %f, floor:%d, [%f,%f]\n", __FUNCTION__, __LINE__, height, f->num, f->height_relative - f->height / 2, f->height_relative + f->height / 2);
@@ -485,7 +486,6 @@ static double calculate_base_pressure(double p1, double height, double temperatu
     double p0 = p1 / pow(ratio, exponent);
     return p0;
 }
-
 
 // int find_closest_ordered(double arr[], int size, double target) {
 //     int closest_index = 0;
@@ -660,5 +660,60 @@ int floor_enter_calibration_with_callback(int base_floor, int floors_below_base,
         return -1;
     }
     _floor_calibration_cb = cb;
+    return 0;
+}
+
+// verify data format and write to persist floor model
+// reload at last!
+int floor_update_floor_model_data(const char* data) {
+    char *version = NULL, *date = NULL;
+    cJSON *root = NULL, *ele = NULL, *floor_array = NULL;
+    int floors = 0;
+    double base_num = 1;
+    if (!data) {
+        return -1;
+    }
+
+    root = cJSON_Parse(data);
+
+    if (!root) {
+        HR_LOGE("error:%s\n", cJSON_GetErrorPtr());
+        return -1;
+    }
+
+    version = cJSON_GetStringValue(cJSON_GetObjectItem(root, "version"));
+    date = cJSON_GetStringValue(cJSON_GetObjectItem(root, "date"));
+    base_num = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "base_num"));
+    floor_array = cJSON_GetObjectItem(root, "floor");
+    floors = cJSON_GetArraySize(floor_array);
+
+    if (!version || !date || isnan(base_num) || floors == 0) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    HR_LOGD("version: %s, date:%s, base:%f, floors:%d\n", version, date, base_num, floors);
+
+    cJSON_ArrayForEach(ele, floor_array) {
+        double num = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "num"));
+        const char* label = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "name"));
+        double height = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "height"));
+        // ignore pressure
+        // double pressure = cJSON_GetNumberValue(cJSON_GetObjectItem(ele, "pressure"));
+
+        if (isnan(num) || !label || isnan(height)) {
+            HR_LOGE("invalid .............\n");
+            cJSON_Delete(root);
+            return -1;
+        }
+    }
+
+    _replace_floor_model_config(FLOOR_MODEL_PATH, data, strlen(data));
+    // store model file before last calibration completed event
+    // so they can read model data
+    // floor_store_model(STORE_PERSIST /*| STORE_PERSIST_BACKUP*/);  // update backup when calibration
+    // reload or calc relative height
+    floor_load_model(FLOOR_MODEL_PATH);
+
     return 0;
 }

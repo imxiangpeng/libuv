@@ -27,7 +27,7 @@ extern void report_hqliftd_config_property();
 #define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "thing.service.CalibrateAtFloorManually"
 #define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "thing.service.CalibrateAtHeightManually"
 #define SVC_METHOD_GET_HQLIFTD_CONFIG "thing.service.GetHQLiftdConfig"
-#define SVC_METHOD_SET_FLOOR_MODEL "thing.service.SetFloorModel"
+#define SVC_METHOD_SET_FLOOR_MODEL "thing.service.SetFloorModelData"
 
 enum {
     CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT = 0,
@@ -65,13 +65,13 @@ static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
 static int _GetHQLiftdConfig(cJSON* params);
-static int _SetFloorModel(cJSON* params);
+static int _SetFloorModelData(cJSON* params);
 static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_START_AUTO_FLOOR_CALIBRATION, _StartAutoFloorCalibration},
     {SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY, _CalibrateAtFloorManually},
     {SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY, _CalibrateAtHeightManually},
     {SVC_METHOD_GET_HQLIFTD_CONFIG, _GetHQLiftdConfig},
-    {SVC_METHOD_SET_FLOOR_MODEL, _SetFloorModel},
+    {SVC_METHOD_SET_FLOOR_MODEL, _SetFloorModelData},
     {NULL, NULL},  // keep it
 };
 
@@ -322,10 +322,13 @@ static int _GetHQLiftdConfig(cJSON* params) {
     return 0;
 }
 
-static int _SetFloorModel(cJSON* params) {
+static int _SetFloorModelData(cJSON* params) {
     (void)params;
-    #warning "xxxxxxxxxxxxxxxxxxxxxxxx"
-    // floor_update_floor_model_data();
+    const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+    if (!val_str) {
+        return -1;
+    }
+    floor_update_floor_model_data(val_str);
     return 0;
 }
 #if 0
@@ -406,8 +409,8 @@ static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX] = {
         .callback.on_publish = _on_get_hqliftd_config_publish,
     },
 #endif
-    [SET_HQLIFTD_CONFIG] = {
-        .name = "service/SetHQLiftdConfig",
+    [SET_FLOOR_MODEL] = {
+        .name = "service/SetFloorModelData",
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,

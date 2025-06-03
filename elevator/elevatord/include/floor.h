@@ -18,4 +18,6 @@ int floor_enter_calibration(int base_floor, int floors_below_base, int floors_ab
 
 typedef void (*floor_calibration_cb)(int id, int floor, const char* label, double height, double pressure, int completed);
 int floor_enter_calibration_with_callback(int base_floor, int floors_below_base, int floors_above_base,floor_calibration_cb cb);
+
+int floor_update_floor_model_data(const char* data);
 #endif
