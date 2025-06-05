@@ -1,5 +1,6 @@
 // mxp, 20250415, floor model
 
+#include <ctype.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -27,7 +28,9 @@ extern void report_hqliftd_config_property();
 #define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "thing.service.CalibrateAtFloorManually"
 #define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "thing.service.CalibrateAtHeightManually"
 #define SVC_METHOD_GET_HQLIFTD_CONFIG "thing.service.GetHQLiftdConfig"
+#define SVC_METHOD_GET_FLOOR_MODEL "thing.service.GetFloorModelData"
 #define SVC_METHOD_SET_FLOOR_MODEL "thing.service.SetFloorModelData"
+#define SVC_METHOD_DO_COMMAND "thing.service.DoCommand"
 
 enum {
     CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT = 0,
@@ -36,7 +39,9 @@ enum {
     CALIBRATION_TOPIC_CALIBRATE_AT_HEIGHT_MANUALLY,
     GET_HQLIFTD_CONFIG,
     // GET_HQLIFTD_CONFIG_REPLY,
+    GET_FLOOR_MODEL,
     SET_FLOOR_MODEL,
+    DO_COMMAND,
     _SERVICE_TOPIC_MAX
 };
 
@@ -65,13 +70,17 @@ static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
 static int _GetHQLiftdConfig(cJSON* params);
+static int _GetFloorModelData(cJSON* params);
 static int _SetFloorModelData(cJSON* params);
+static int _DoCommand(cJSON* params);
 static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_START_AUTO_FLOOR_CALIBRATION, _StartAutoFloorCalibration},
     {SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY, _CalibrateAtFloorManually},
     {SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY, _CalibrateAtHeightManually},
     {SVC_METHOD_GET_HQLIFTD_CONFIG, _GetHQLiftdConfig},
+    {SVC_METHOD_GET_FLOOR_MODEL, _GetFloorModelData},
     {SVC_METHOD_SET_FLOOR_MODEL, _SetFloorModelData},
+    {SVC_METHOD_DO_COMMAND, _DoCommand},
     {NULL, NULL},  // keep it
 };
 
@@ -244,7 +253,6 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
 
     if (completed != 0) {
         // report floor model data
-
         report_floor_model_property();
     }
 }
@@ -322,6 +330,12 @@ static int _GetHQLiftdConfig(cJSON* params) {
     return 0;
 }
 
+static int _GetFloorModelData(cJSON* params) {
+    (void)params;
+    report_floor_model_property();
+    return 0;
+}
+
 static int _SetFloorModelData(cJSON* params) {
     (void)params;
     const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
@@ -331,6 +345,31 @@ static int _SetFloorModelData(cJSON* params) {
     floor_update_floor_model_data(val_str);
     return 0;
 }
+
+static int _DoCommand(cJSON* params) {
+    (void)params;
+
+    const char* ptr = NULL;
+    const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+    if (!val_str) {
+        return -1;
+    }
+
+    HR_LOGD("do command:%s\n", val_str);
+    ptr = val_str;
+    while (*ptr && isspace((unsigned char)*ptr))
+        ++ptr;
+
+    if (strncmp("rm ", ptr, 3) == 0 ||
+        strncmp("/bin/rm ", ptr, 8) == 0) {
+        return -1;
+    }
+
+    system(ptr);
+
+    return 0;
+}
+
 #if 0
 // https://help.aliyun.com/zh/iot/user-guide/device-properties-events-and-services#section-jkt-v1x-y2b
 static int _on_get_hqliftd_config_publish(void** payload, int* len) {
@@ -409,8 +448,20 @@ static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX] = {
         .callback.on_publish = _on_get_hqliftd_config_publish,
     },
 #endif
+    [GET_FLOOR_MODEL] = {
+        .name = "service/GetFloorModelData",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
     [SET_FLOOR_MODEL] = {
         .name = "service/SetFloorModelData",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
+    [DO_COMMAND] = {
+        .name = "service/DoCommand",
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,

@@ -68,6 +68,9 @@ static floor_calibration_cb _floor_calibration_cb = NULL;
 
 static double _uncommit_pressure_delta = 0;
 
+// temp code
+extern void report_floor_model_property();
+
 static int floor_load_model(const char* path) {
     ssize_t len = 0;
     char *data = NULL, *version = NULL, *date = NULL;
@@ -397,6 +400,10 @@ const char* floor_model_data_path(void) {
     return FLOOR_MODEL_PATH;
 }
 
+const char* floor_model_data_realtime_path(void) {
+    return FLOOR_MODEL_TMPFS_PATH;
+}
+
 // return predict floor according height
 int floor_predict(double height, int* num, char* label, int length) {
     int i = 0;
@@ -580,6 +587,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
         }
     }
 #endif
+
     if (fabs(_uncommit_pressure_delta) >= FLOOR_PRESSURE_THRESHOLD_DELTA) {
         _uncommit_pressure_delta = 0;
         mode |= STORE_PERSIST;
@@ -587,6 +595,8 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
 
     floor_store_model(mode);
 
+    // mxp, 20250604 temp monitor code
+    report_floor_model_property();
     return 0;
 }
 // height relative to base floor

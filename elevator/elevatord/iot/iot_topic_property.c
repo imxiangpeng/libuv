@@ -23,6 +23,7 @@
 #include "uviot.h"
 
 #define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH "EGUARD_ALARM_SWITCH"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -36,9 +37,6 @@ enum {
 static struct uviot* _iot = NULL;
 
 static char _elevator_id[128] = {0};
-
-static struct sconf_proto report_switch_conf = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}};
-
 enum {
     PROPERTY_BUILD_TIMESTAMP = 0,
     PROPERTY_ELEVATOR_ID,
@@ -55,6 +53,7 @@ enum {
     PROPERTY_FLOOR_MODEL,
     PROPERTY_REPORT_SWITCH,
     PROPERTY_HQLIFTD_CONFIG,
+    PROPERTY_EGUARD_ALARM_SWITCH,
     __PROPERTY_MAX
 };
 
@@ -95,7 +94,11 @@ struct property {
     [PROPERTY_FLOOR_MODEL] = {"floor_model", P_STRING, {0}, 0},
     [PROPERTY_REPORT_SWITCH] = {"report_switch", P_INT64, {0}, 0},
     [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", P_STRING, {0}, 0},
+    [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", P_INT64, {0}, 0},
 };
+
+static struct sconf_proto report_switch_conf = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}};
+static struct sconf_proto eguard_alarm_switch = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_INT64, {.int64 = 0}};
 
 static int _realtime_report_times = 0;
 static const int _realtime_report_fac = 60 * 100;  // 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
@@ -150,9 +153,25 @@ static int _on_publish(void** payload, int* len) {
 
                 // string point is null
                 // the value maybe should process manually
-                if (strcmp("floor_model", prop->name) == 0) {
+                if (strcmp(_properties_tbl[PROPERTY_FLOOR_MODEL].name, prop->name) == 0) {
                     char* data = NULL;
+                    char* tmpfs_data = NULL;
                     futil_read(floor_model_data_path(), &data);
+                    if (!data) {
+                        break;
+                    }
+
+                    futil_read(floor_model_data_realtime_path(), &tmpfs_data);
+
+                    if (tmpfs_data) {
+                        char* p = realloc(data, strlen(data) + strlen(tmpfs_data) + 1);
+                        if (p) {
+                            data = p;
+                            strcat(data, tmpfs_data);
+                        }
+                        free(tmpfs_data);
+                        tmpfs_data = NULL;
+                    }
 
                     cJSON_AddStringToObject(param, prop->name, data);
                     HR_LOGD("property report floor model:%s\n", data);
@@ -160,6 +179,9 @@ static int _on_publish(void** payload, int* len) {
                 } else if (strcmp("hqliftd_config", prop->name) == 0) {
                     char* data = NULL;
                     futil_read(HQLIFTD_CONFIG_PATH, &data);
+                    if (!data) {
+                        break;
+                    }
                     cJSON_AddStringToObject(param, prop->name, data);
                     free(data);
                 }
@@ -278,7 +300,21 @@ static int _on_property_set_message(void* payload, int len) {
     if (val_str) {
         futil_write(HQLIFTD_CONFIG_PATH, (void*)val_str, strlen(val_str));
         _properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
+        system("/etc/init.d/S68hqliftd restart 2>&1 > /dev/null");
         schedule_report();
+    }
+
+    val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].name));
+    if (!isnan(val)) {
+        // burn elevator id
+        _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
+        _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val_int64 = (int)val;
+
+        eguard_alarm_switch.value.int64 = (int)val;
+        sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &eguard_alarm_switch, 1);
+        schedule_report();
+
+        system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
     }
 
     cJSON_Delete(root);
@@ -289,8 +325,8 @@ static int _on_property_set_message(void* payload, int len) {
 static int _on_property_get_message(void* payload, int len) {
     printf("get message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
-    //double val = 0;
-    //const char* val_str = NULL;
+    // double val = 0;
+    // const char* val_str = NULL;
     cJSON *root = NULL, *params = NULL, *ele = NULL;
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
@@ -321,7 +357,6 @@ static int _on_property_get_message(void* payload, int len) {
     return 0;
 }
 
-
 static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     [PROPERTY_TOPIC_POST] = {
         .name = "event/property/post",
@@ -342,7 +377,8 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_property_set_message,
-    },[PROPERTY_TOPIC_GET] = {
+    },
+    [PROPERTY_TOPIC_GET] = {
         .name = "service/property/get",
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
@@ -368,6 +404,10 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
     _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = report_switch_conf.value.int64;
     // always report when startup
     _properties_tbl[PROPERTY_REPORT_SWITCH].dirty = 1;
+
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, &eguard_alarm_switch, 1);
+    _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val_int64 = eguard_alarm_switch.value.int64;
+    _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
 
     for (size_t i = 0; i < ARRAY_SIZE(_iot_property_topics); i++) {
         struct uviot_topic* t = &_iot_property_topics[i];
@@ -472,7 +512,6 @@ void report_floor_model_property() {
     _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }
-
 
 void report_hqliftd_config_property() {
     _properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;

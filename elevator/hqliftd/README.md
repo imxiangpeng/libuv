@@ -14,4 +14,4 @@
     - `FTP_ADDRESS=`
     - `FTP_USERNAME=`
     - `FTP_PASSWORD=`
-
+    - `LIFTFAULT_REPORT_SWITCH=`

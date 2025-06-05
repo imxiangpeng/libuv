@@ -52,7 +52,8 @@ static const double G0 = 9.81;
 
 static struct motion_observer* _motion_observers[10] = {0};
 
-static double ACCELEROMETER_SAMPLING_RATE_HZ = 100;
+// 事实证明采用 200Hz效果不如 100Hz， 200Hz 情况下，噪声更明显，感觉我们需要同步调整卡尔曼滤波参数
+static double ACCELEROMETER_SAMPLING_RATE_HZ = 400;
 static double BAROMETER_SAMPLING_RATE_HZ = 50;  // 12.5f;
 
 static double BAROMETER_PREDICT_STATIONARY_SLOPE = 0.1;
@@ -182,7 +183,7 @@ static void* _accelerometer_thread_routin(void* args) {
 #if DUMP_DATA_TO_FILE
     char buf[MAX_LINE_LENGTH] = {0};
     if (_dump_fp) {
-        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,pressure_height,pressure_mean,pressure_heigh_relative_base\n");
+        snprintf(buf, sizeof(buf), "now,accel,velocity,distance,height,pressure,temperature,pressure_height,pressure_mean,pressure_heigh_relative_base\n");
         fwrite(buf, 1, strlen(buf), _dump_fp);
     }
 #endif
@@ -417,6 +418,8 @@ static void* _accelerometer_thread_routin(void* args) {
                 char label[256] = {0};
                 double relative_height = 0;
 
+                _barometer_motion.height += height;
+
                 if (floor_baseline_pressure != 0) {
                     relative_height = calculate_height_difference(floor_baseline_pressure, barometer_pressure, barometer_temperature);
                     double h = 0;
@@ -427,23 +430,23 @@ static void* _accelerometer_thread_routin(void* args) {
                     barometer_pressure_height_relative_base_floor = relative_height;
                 }
 
-                HR_LOGD("mxp finished current pressure:%f, height: %f vs %f pressure base:%d floor\n", barometer_pressure, relative_height, _accelerometer_motion.height, floor_baseline_num);
+                HR_LOGD("mxp finished current pressure:%f(temp:%f), height: %f vs %f pressure base:%d floor (%f)\n", barometer_pressure, barometer_temperature, relative_height, _accelerometer_motion.height, floor_baseline_num, floor_baseline_pressure);
                 if (floor_predict_with_pressure(barometer_pressure, &height, &num, label, sizeof(label)) == 0) {
-
                     HR_LOGD("mxp finished at : floor: %d, height:%f, while acc floor:%d\n", num, height, floor_num);
 
-                    if (num == floor_base_floor()) {
-                        if (floor_num != num) {
-                            HR_LOGE("pressure floor:%d not match with acc floor:%d, force sync\n", num, floor_num);
-                            floor_num = num;
-                        }
-                        // update later
-                        //HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
-                        //_accelerometer_motion.height = height;
+                    // if (num == floor_base_floor()) {
+                    if (floor_num != num) {
+                        HR_LOGE("pressure floor:%d not match with acc floor:%d, force sync\n", num, floor_num);
+                        floor_num = num;
                     }
+                    // update later
+                    // HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
+                    //_accelerometer_motion.height = height;
+                    //}
                     // update baseline pressure when we run it
                     if (floor_num == floor_baseline_num) {
                         floor_baseline_pressure = barometer_pressure;
+                        floor_baseline_num = floor_num;
                     }
 
                     // adjust base floor to base floor in model
@@ -540,6 +543,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 floor_baseline_pressure = barometer_pressure;
             }
         }
+
         // 当长时间静止的时候，我们可能需要更新气压模型数据
         // 我们采用了两个门限，一个是来源于气压线程计算的斜率数据，一个是气压绝对值门限
         // 斜率数据，我们采用的窗口不够大，不适合单独长时间判断
@@ -551,9 +555,13 @@ static void* _accelerometer_thread_routin(void* args) {
                 _motion_stationary_pressure = barometer_pressure;
             }
             if (_motion_stationary_update_pressure_threshold_time_ns != 0 && now > _motion_stationary_update_pressure_threshold_time_ns) {
-                HR_LOGD("%s(%d): perform pressure update after stationary duration exceeds threshold\n", __FUNCTION__, __LINE__);
+                HR_LOGD("%s(%d): perform pressure update after stationary duration exceeds threshold, floor:%d, pressure:%f, temp:%f\n", __FUNCTION__, __LINE__, floor_num, barometer_pressure, barometer_temperature);
                 _motion_stationary_update_pressure_threshold_time_ns = 0;
                 floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 1);
+
+                // also update baseline floor to current floor
+                floor_baseline_pressure = barometer_pressure;
+                floor_baseline_num = floor_num;
             }
         } else {
             _motion_stationary_update_pressure_threshold_time_ns = 0;
@@ -562,7 +570,7 @@ static void* _accelerometer_thread_routin(void* args) {
 
 #if DUMP_DATA_TO_FILE
         if (_dump_fp) {
-            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, _accelerometer_motion.velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance, barometer_pressure, barometer_distance, _barometer_motion.mw->mean, barometer_pressure_height_relative_base_floor);
+            snprintf(buf, sizeof(buf), "%lf,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", (double)now / 1000000000.0, accel, _accelerometer_motion.velocity, distance, _accelerometer_motion.height, barometer_pressure, barometer_temperature, _barometer_motion.height, _barometer_motion.mw->mean, barometer_pressure_height_relative_base_floor);
             fwrite(buf, 1, strlen(buf), _dump_fp);
         }
 #endif
@@ -578,7 +586,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
             .temperature = barometer_temperature,
-            .barometer_distance = barometer_distance,
+            .barometer_distance = barometer_pressure_height_relative_base_floor /*barometer_distance*/,
         };
 
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
@@ -688,7 +696,7 @@ static void* _barometer_thread_routin(void* args) {
         if (_accelerometer_motion.state != STOPPED && prev_state == STOPPED) {
             prev_state = _accelerometer_motion.state;
             // we should record last 2 second pressure's avg
-            HR_LOGD("mxp last mean:%f vs current %f\n", _barometer_motion.mw->mean, pressure);
+            // HR_LOGD("mxp last mean:%f vs current %f\n", _barometer_motion.mw->mean, pressure);
             barometer_begin = pressure;
             prev_state = _accelerometer_motion.state;
             _barometer_motion.delay_stop_ts_ns = 0;
@@ -710,7 +718,7 @@ static void* _barometer_thread_routin(void* args) {
                 barometer_end = pressure;
                 // barometer_end = _barometer_motion.mw->mean;
 
-                barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
+                // barometer_distance += calculate_height_difference(barometer_begin, barometer_end, temp);
 
                 HR_LOGD("%s(%d): mxp finished ... now:%ld, pressure begin:%f, end:%f, height:%f, discontinus:%f\n",
                         __FUNCTION__, __LINE__,
@@ -1023,8 +1031,15 @@ int motion_calibrate_at_floor(int floor) {
 
     _accelerometer_motion.height = height;
     _barometer_motion.height = height;
+    barometer_distance = height;
+
+    // also reset baromerter baseline
+    floor_baseline_num = floor;
+    floor_baseline_pressure = barometer_pressure;
+    barometer_pressure_height_relative_base_floor = height;
 
     HR_LOGD("%s(%d): calibrate at floor %d -> height: %f success\n", __FUNCTION__, __LINE__, floor, height);
+    HR_LOGD("%s(%d): calibrate at floor %d -> height: %f success, baseline num:%d, baseline pressure:%f\n", __FUNCTION__, __LINE__, floor, height, floor_baseline_num, floor_baseline_pressure);
     return 0;
 }
 
@@ -1039,6 +1054,11 @@ int motion_calibrate_at_height(double height) {
         return -1;
     }
     HR_LOGD("%s(%d): calibrate at height %f -> floor: %d(%s) success\n", __FUNCTION__, __LINE__, height, floor, label);
+
+    // also reset baromerter baseline
+    floor_baseline_num = floor;
+    floor_baseline_pressure = barometer_pressure;
+    barometer_pressure_height_relative_base_floor = height;
     return 0;
 }
 static int notify_observer(enum motion_observer_action action, void* data) {

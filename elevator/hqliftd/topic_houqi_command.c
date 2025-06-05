@@ -3,6 +3,7 @@
 // uploadRecord: list safe record list in file: IPC_MEDIA_RECORD_REQUEST_PLAYLIST
 // response file name using: %Y%m%d%H%M%S_%Y%m%d%H%M%S, such as: 20250516074334_20250516074834
 // upload record to ftp in background
+// mxp, 20250604, update media record file name, format: 2025-05-26_18-22-00_duration.mp4
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
@@ -48,6 +49,7 @@ static struct uviot* _iot = NULL;
 
 struct record {
     /*uint64_t*/ time_t timestamp;  // utc use timegm not mktime
+    int duration;
     char name[256];
 };
 
@@ -262,11 +264,10 @@ static int _on_command_upload_record_response_publish(void** payload, int* len) 
             // 20250206010000_20250206010500.mp4
             size_t s = strftime(name, sizeof(name), "%Y%m%d%H%M%S", tm);
             name[s++] = '_';
-            time_t t = r[i].timestamp + MEDIA_RECORD_DURATION;
+            time_t t = r[i].timestamp + r[i].duration;
             tm = gmtime((const time_t*)&t);
             s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
 
-            printf("name:%s\n", name);
             cJSON_AddStringToObject(item, "fileName", name);
         } else {
             cJSON_AddStringToObject(item, "fileName", r[i].name);
@@ -379,18 +380,25 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end) {
         }
 
         if ((ptr = strstr(entry->d_name, ".mp4"))) {
+            int duration = MEDIA_RECORD_DURATION;
             // memset((void*)name, 0, sizeof(name));
             // strncpy(name, entry->d_name, ptr - entry->d_name);
             uint64_t ts = media_record_date_format_string_to_seconds(entry->d_name);
             if (ts == 0) {
                 continue;
             }
+
+            if (sscanf(entry->d_name, "%*d-%*d-%*d_%*d-%*d-%*d_%d", &duration) != 1) {
+                continue;
+            }
+
             // ts + duration > begin && ts < end
-            if (ts + MEDIA_RECORD_DURATION > begin && ts < end) {
+            if (ts + duration > begin && ts < end) {
                 count++;
                 // printf("==>count:%ld begin:%ld, end:%ld, time:%ld, name:%s\n", count, begin, end, ts, name);
                 memset((void*)&media, 0, sizeof(media));
                 media.timestamp = ts;
+                media.duration = duration;
                 snprintf(media.name, sizeof(media.name), "%s", entry->d_name);
                 hrbuffer_append(&record_lists, (void*)&media, sizeof(struct record));
             }
@@ -551,7 +559,7 @@ static void* background_upload_thread_routin(void* args) {
 
         size_t s = strftime(name, sizeof(name), "%Y%m%d%H%M%S", tm);
         name[s++] = '_';
-        time_t t = r.timestamp + MEDIA_RECORD_DURATION;
+        time_t t = r.timestamp + r.duration;
         tm = gmtime((const time_t*)&t);
         s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
 

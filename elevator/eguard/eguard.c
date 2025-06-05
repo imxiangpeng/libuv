@@ -16,16 +16,19 @@
 #include "libubox/blobmsg_json.h"
 #include "libubox/uloop.h"
 #include "libubus.h"
+#include "sconf.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
-#define DTOF_DISTANCE_THRESHOLD_MM 300     // 30cm
+#define DTOF_DISTANCE_THRESHOLD_MM 50      // 5cm // 30cm
 #define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
 #define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
 
 #define ELEVATOR_ALARM_EVENT_PREFIX "elevator.alarm."
+
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH "EGUARD_ALARM_SWITCH"
 
 enum message {
     MSG_QUIT = 0,
@@ -70,6 +73,8 @@ struct alarm_sound {
     {ALARM_EBIKE, "./alarm_ebike.wav"},
     {ALARM_NONE, NULL},
 };
+
+static struct sconf_proto eguard_alarm_switch = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_INT64, {.int64 = 0}};
 
 static void _alarm_event_confirm(struct uloop_timeout* t);
 
@@ -177,6 +182,11 @@ static void* _playback_thread_routin(void* arg) {
         sound = get_alarm_sound_with_priority(_alarm);
 
         if (!sound) {
+            continue;
+        }
+
+        if (eguard_alarm_switch.value.int64 == 0) {
+            printf("eguard is not enabled\n");
             continue;
         }
 
@@ -371,6 +381,8 @@ int main(int argc, char** argv) {
     memset((void*)&_alarm_timer, 0, sizeof(_alarm_timer));
     memset((void*)&_b, 0, sizeof(_b));
 
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &eguard_alarm_switch, 1);
+
     if (0 != pipe(_pipefd)) {
         return -1;
     }
@@ -444,7 +456,7 @@ int main(int argc, char** argv) {
     _playback_pipefd[1] = -1;
 
     blob_buf_free(&_b);
-    
+
     pthread_cancel(_dtof_tid);
     pthread_cancel(_playback_tid);
     pthread_join(_dtof_tid, NULL);

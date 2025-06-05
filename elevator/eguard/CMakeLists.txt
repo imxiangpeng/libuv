@@ -24,7 +24,7 @@ TARGET_COMPILE_OPTIONS(eguard PRIVATE -Wall -Wextra -Werror -Wno-unused-function
 
 TARGET_COMPILE_DEFINITIONS(eguard PRIVATE LOG_TAG="eguard")
 # define config file when compile
-TARGET_COMPILE_DEFINITIONS(eguard PRIVATE EGUARD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
+TARGET_COMPILE_DEFINITIONS(eguard PRIVATE EGUARD_CONFIG_PATH="/etc/elevatord/elevatord.conf")
 
 # only on my pc
 target_include_directories(eguard PUBLIC /opt/3rdparty/include)
@@ -35,3 +35,4 @@ TARGET_LINK_LIBRARIES(eguard ${libuv_library})
 TARGET_LINK_LIBRARIES(eguard ${ubox_library} ${ubus_library} ${blob_library})
 
 TARGET_LINK_LIBRARIES(eguard pthread)
+TARGET_LINK_LIBRARIES(eguard iutils)

@@ -12,6 +12,7 @@
 #include "elevator.h"
 #include "hr_list.h"
 #include "hr_log.h"
+#include "sconf.h"
 #include "time_utils.h"
 #include "uelevator.h"
 #include "uviot.h"
@@ -35,6 +36,8 @@ static HR_LIST_HEAD(_lift_fault_message_queue);
 static HR_LIST_HEAD(_lift_fault_idle_queue);
 
 static pthread_mutex_t _queue_lock;
+
+static struct sconf_proto fault_report_switch = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}};
 
 static int to_houqi_fault(enum elevator_exception fault) {
     switch (fault) {
@@ -80,6 +83,7 @@ static int _on_publish(void** payload, int* len) {
     pthread_mutex_lock(&_queue_lock);
     if (hr_list_empty(&_lift_fault_message_queue)) {
         pthread_mutex_unlock(&_queue_lock);
+        cJSON_Delete(root);
         return -1;
     }
 
@@ -148,6 +152,12 @@ static int _on_publish(void** payload, int* len) {
         HR_INIT_LIST_HEAD(&e->entry);
         free(e);
     }
+
+    if (fault_report_switch.value.int64 == 0) {
+        cJSON_Delete(root);
+        return 0;
+    }
+
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!*payload)
@@ -172,6 +182,8 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     _iot = iot;
 
     pthread_mutex_init(&_queue_lock, NULL);
+
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &fault_report_switch, 1);
 
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;

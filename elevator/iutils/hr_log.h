@@ -22,12 +22,20 @@ extern "C" {
 #endif
 
 typedef enum {
+  HR_LOG_TYPE_SYSLOG = 0,
+  HR_LOG_TYPE_PRINTF,
+  HR_LOG_TYPE_FILE,
+  HR_LOG_TYPE_RSYSLOG,
+} hr_log_type;
+
+typedef enum {
   HR_LOG_VERBOSE = 0,
   HR_LOG_DEBUG,
   HR_LOG_WARN,
   HR_LOG_ERROR
 } hr_log_priority;
 
+void hr_log_global_init(hr_log_type type);
 int _hr_log_printf(int prio, const char* tag, const char *fmt, ...);
 #ifndef LOG_NDEBUG
 #define HR_LOGV(...) ((void)HR_LOG(VERBOSE, LOG_TAG, __VA_ARGS__))

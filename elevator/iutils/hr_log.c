@@ -13,9 +13,16 @@
 
 #include "hr_log.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <pthread.h>
+#include <resolv.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/syslog.h>
 #include <sys/time.h>
@@ -23,16 +30,29 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include "file_util.h"
 
 #define LOG_BUF_SIZE 1024 * 2
 
-#define HRLOG_OUTPUT_FILE 1
+// #define RSYSLOG_SERVER "1.20222202.xyz"
+#define RSYSLOG_SERVER "192.168.58.100"
+#define RSYSLOG_PORT "514"
 
-#if HRLOG_OUTPUT_FILE
-#include <pthread.h>
-static FILE* persist_fp = NULL;
+#define HRLOG_OUTPUT_FILE 0
+
+static hr_log_type _type = HR_LOG_TYPE_SYSLOG;
+static char _hostname[256] = {0};
 
 static pthread_once_t persist_once_control = PTHREAD_ONCE_INIT;
+
+static struct rsock {
+    int sock;
+    struct addrinfo* res;
+} _rsyslog = {-1, NULL};
+
+#if HRLOG_OUTPUT_FILE
+static FILE* persist_fp = NULL;
+
 // static pthread_mutex_t persist_lock = PTHREAD_MUTEX_INITIALIZER;
 static void init_persist_output() {
     struct tm tm;
@@ -67,6 +87,99 @@ static void init_persist_output() {
     setbuf(persist_fp, NULL);
 }
 #endif
+
+static void _init(void) {
+    // openlog(NULL, LOG_PID, LOG_USER);
+    const char* serial_field = "androidboot.serialno=";
+    char cmdline[LINE_MAX] = {0};
+
+    FILE* f = fopen("/proc/cmdline", "r");
+    if (f) {
+        if (NULL != fgets(cmdline, sizeof(cmdline), f)) {
+            char* ptr = strstr(cmdline, "androidboot.serialno=");
+            if (ptr) {
+                char* end = strchr(ptr + strlen(serial_field), ' ');
+                if (end) {
+                    strncpy(_hostname, ptr + strlen(serial_field), end - (ptr + strlen(serial_field)));
+                }
+            }
+        }
+        fclose(f);
+    }
+    if (strlen(_hostname) == 0) {
+        gethostname(_hostname, sizeof(_hostname));
+    }
+#if HRLOG_OUTPUT_FILE
+    init_persist_output();
+#endif
+}
+
+static int rsyslog(const char* message) {
+    int offset = 0;
+    char buffer[1024];
+
+    struct tm tm;
+    struct timespec ts;
+
+    if (_rsyslog.sock == -1) {
+        int sock = -1;
+        struct addrinfo hints, *res;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        if (getaddrinfo(RSYSLOG_SERVER, RSYSLOG_PORT, &hints, &res) != 0) {
+            res_init();
+            perror("DNS resolution failed");
+            return -1;
+        }
+
+        sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (sock < 0) {
+            perror("socket failed");
+            freeaddrinfo(res);
+            return -1;
+        }
+
+        fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
+
+        _rsyslog.sock = sock;
+        _rsyslog.res = res;
+    }
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    offset = snprintf(buffer, sizeof(buffer), "<28>");
+    if (offset <= 0) {
+        return -1;
+    }
+
+    // time
+    size_t size = strftime(buffer + offset, sizeof(buffer) - offset, "%b %d %H:%M:%S", &tm);
+
+    offset += size;
+
+    snprintf(buffer + offset, sizeof(buffer) - offset, " %s %s", _hostname, message);
+
+    int ret = sendto(_rsyslog.sock, buffer, strlen(buffer), 0,
+                     (const struct sockaddr*)_rsyslog.res->ai_addr, _rsyslog.res->ai_addrlen);
+
+    if (ret == -1) {
+        switch (errno) {
+            printf("sock maybe broken : %d!!!!!!!", errno);
+            case ECONNRESET:
+            case ENOTCONN:
+            case EPIPE:
+                close(_rsyslog.sock);
+                _rsyslog.sock = -1;
+                freeaddrinfo(_rsyslog.res);
+                _rsyslog.res = NULL;
+        }
+    }
+
+    return 0;
+}
 
 int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     int ret = -1;
@@ -121,42 +234,18 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     }
     va_end(ap);
 
+    pthread_once(&persist_once_control, _init);
+
 #if HRLOG_OUTPUT_FILE
     // syslog(LOG_SYSLOG, "%s", buf);
-    pthread_once(&persist_once_control, init_persist_output);
-#if 0
-    if (!persist_fp) {
-        char path[256] = "./hrlog-";
-        char* ptr = path + strlen(path);
-        FILE* f = fopen("/proc/self/comm", "r");
-        if (f) {
-            fscanf(f, "%s", ptr);
-            printf("Process name: %s\n", ptr);
-            fclose(f);
-        }
-
-        ptr = path + strlen(path);
-        sprintf(ptr, "-%d-", getpid());
-        ptr = path + strlen(path);
-        strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M", &tm);
-        strcat(path, ".log");
-        printf("path:%s\n", path);
-        persist_fp = fopen(path, "w");
-        if (!persist_fp) {
-            printf("failed create output ..\n");
-        }
-
-        setbuf(persist_fp, NULL);
-    }
-#endif
-
     if (persist_fp) {
         fprintf(persist_fp, "%s", buf);
     } else {
         syslog(LOG_SYSLOG, "%s", buf);
     }
 #else
-    printf("%s", buf);
+    rsyslog(buf);
+    // printf("%s", buf);
     // syslog(LOG_SYSLOG, "%s", buf);
 #endif
 
