@@ -32,7 +32,7 @@ static int _on_publish(void** payload, int* len) {
     if (!payload || !len)
         return -1;
 
-    elevator_get_status(&st);
+    uelevator_get_status(&st);
 
     if (0 != uelevator_get_historical(&his)) {
         return -1;

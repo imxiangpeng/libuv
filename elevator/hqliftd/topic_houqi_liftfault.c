@@ -94,12 +94,12 @@ static int _on_publish(void** payload, int* len) {
 
     uuid_generate(uuid);
 
-    //uuid_unparse(uuid, uuid_str);
+    uuid_unparse(uuid, uuid_str);
     // only use 20 char
-    for (size_t i = 0; i <sizeof(uuid)/sizeof(uuid[0]); i++) {
-        snprintf(&uuid_str[i * 2], 3,"%02x", uuid[i]);
-    }
-    uuid_str[20] = '\0';
+    // for (size_t i = 0; i <sizeof(uuid)/sizeof(uuid[0]); i++) {
+    //     snprintf(&uuid_str[i * 2], 3,"%02x", uuid[i]);
+    // }
+    // uuid_str[20] = '\0';
 
     printf("uuid:%s\n", uuid_str);
 
@@ -249,6 +249,7 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     }
 
     if (!e) {
+        pthread_mutex_unlock(&_queue_lock);
         return -1;
     }
     // take off from idle queue

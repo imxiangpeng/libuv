@@ -48,7 +48,8 @@ static int _on_publish(void** payload, int* len) {
     _running_direction = st.direction;
     //}
 
-    if (st.speed == 0) {
+    // mxp, 20250609, add threshold, because ekf maybe generate invalid speed when stationary
+    if (st.speed <= 0.1) {
         _running_direction = 3;
     }
 

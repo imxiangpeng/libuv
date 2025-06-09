@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <uv.h>
 #include "elevator.h"
 #include "file_util.h"
 #include "hr_buffer.h"
@@ -42,6 +43,12 @@
 #define COMMAND_DATE_STRING_FORMAT "%Y-%m-%d %H:%M:%S"
 // 2025-05-26_18-22-00.mp4
 #define MEDIA_RECORD_DATE_STRING_FORMAT "%Y-%m-%d_%H-%M-%S"
+
+// mxp, 20250609, do not send video without stop
+// houqi's sim is data limited about 85G
+// houqi platform calls the sendvideo command approximately every 10 seconds.
+#define SENDVIDEO_COMMAND_TIMEOUT (60 * 1000)  // 1min
+static uv_timer_t _timer;
 
 static int _pipe_fd[2] = {-1, -1};
 
@@ -97,6 +104,13 @@ static time_t media_record_date_format_string_to_seconds(const char* date) {
     // return mktime(&tm);
     return timegm(&tm);  // do not care timezone
 }
+
+static void _sendvideo_command_timeout(uv_timer_t* handle) {
+    (void)handle;
+    HR_LOGD("send video timeout, stop it\n");
+    system("ipc-property set /ipc/livertmp/enabled false");
+}
+
 static int _on_command_message(void* payload, int len) {
     char* type = NULL;
     cJSON* root = NULL;
@@ -117,28 +131,34 @@ static int _on_command_message(void* payload, int len) {
         return -1;
     }
 
-    if (0 == strcmp("Sendstate", type)) {
+    if (0 == strcasecmp("Sendstate", type)) {
         topic_houqi_liftstate_post();
         cJSON_Delete(root);
         return 0;
     }
 
-    if (0 == strcmp("Sendvideo", type)) {
+    if (0 == strcasecmp("Sendvideo", type)) {
         // todo
         cJSON_Delete(root);
 
         // ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/LC40025120000001
         // ipc-property set /ipc/livertmp/enabled true
 
-        char cmd[512] = {0};
-        snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
-        system(cmd);
+        // mxp, 20250609, do not restart when timer is not fired
+        if (!uv_is_active((uv_handle_t*)&_timer)) {
+            char cmd[512] = {0};
+            snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
+            system(cmd);
+        }
 
+        uv_timer_stop(&_timer);
+        // stop video after SENDVIDEO_COMMAND_TIMEOUT ms
+        uv_timer_start(&_timer, _sendvideo_command_timeout, SENDVIDEO_COMMAND_TIMEOUT, 0);
         return 0;
     }
 
     // same rtmp url with Sendvideo
-    if (0 == strcmp("videoPlayBack", type)) {
+    if (0 == strcasecmp("videoPlayBack", type)) {
         char *start_time = NULL, *end_time = NULL;
         int file_index = -1;
         double val = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "fileIndex"));
@@ -159,7 +179,7 @@ static int _on_command_message(void* payload, int len) {
     }
 
     //
-    if (0 == strcmp("uploadRecord", type)) {
+    if (0 == strcasecmp("uploadRecord", type)) {
         uint64_t timestamp_begin = 0, timestamp_end = 0;
         char *start_time = NULL, *end_time = NULL;
 
@@ -191,7 +211,7 @@ static int _on_command_message(void* payload, int len) {
     }
 
     //
-    if (0 == strcmp("recordDownload", type)) {
+    if (0 == strcasecmp("recordDownload", type)) {
         size_t id = -1;
         double val = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "fileIndex"));
         if (isnan(val) || val < 0) {
@@ -250,7 +270,7 @@ static int _on_command_upload_record_response_publish(void** payload, int* len) 
     cJSON_AddStringToObject(root, "macAddr", elevator_serialno());  // elevator_mac
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
-    cJSON* arr = cJSON_AddArrayToObject(root, "RecordBean");
+    cJSON* arr = cJSON_AddArrayToObject(root, "recordList");
     for (size_t i = 0; i < count; i++) {
         struct tm* tm = NULL;
         char name[64] = {0};
@@ -337,6 +357,11 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
 
     // unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
+
+    // init timer for sendvideo command timeout
+    memset((void*)&_timer, 0, sizeof(_timer));
+    uv_timer_init(uv_default_loop(), &_timer);
+
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);
 

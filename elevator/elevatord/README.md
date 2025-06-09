@@ -19,6 +19,9 @@
     - `BAROMETER_PREDICT_STATIONARY_STDDEV`: 气压判定静止标准差(1.5, 我们测试一般在 1 以下，但是个别会到 1 冒头，但是运行时基本都在 2 以上，可以在 dump 数据中分析)
     
     - `IOT_REPORT_SWITCH`： 阿里云平台参数上报开关（必要的时候，可以关闭运行参数的上报， 但是启动时相关参数还是正常上报的） 
+    - `EGUARD_ALARM_SWITCH`: 0/1 配置 eguard 是否播放音频通知
+    - `EGUARD_DTOF_SWITCH`: 0/1 配置是否开启遮挡检测
+    - `EGUARD_DTOF_OCCLUSION_DISTANCE`: 配置 DTOF 遮挡检测距离，单位毫米
 
 2.  SENSOR_CALIBRATION_CONF： /etc/elevatord/sensor_calibration.conf
 

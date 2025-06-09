@@ -11,6 +11,8 @@ FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 
+FIND_LIBRARY(libuv_library NAMES uv)
+
 #find_package(LibXml2 REQUIRED)
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
@@ -84,6 +86,10 @@ TARGET_LINK_LIBRARIES(elevatord ncurses)
 TARGET_LINK_LIBRARIES(elevatord -lssl -lcrypto)
 TARGET_LINK_LIBRARIES(elevatord -lfftw3)
 TARGET_LINK_LIBRARIES(elevatord ${ubox_library} ${ubus_library} ${blob_library})
+TARGET_LINK_LIBRARIES(elevatord unwind unwind-generic)
+# sudo apt install libdw-dev
+TARGET_LINK_LIBRARIES(elevatord dw elf)
+
 TARGET_LINK_LIBRARIES(elevatord uviot)
 TARGET_LINK_LIBRARIES(elevatord iutils)
 TARGET_LINK_LIBRARIES(elevatord platform)

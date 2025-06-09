@@ -46,23 +46,7 @@ const char* elevator_deviceid(void) {
     // return _device_id;
     return "GD500103000086";
 }
-int elevator_get_status(struct elevator_status* st) {
-    if (!st) {
-        return -1;
-    }
 
-    return 0;
-}
-
-int elevator_passenger_count(void) {
-    return 6;
-}
-int elevator_passenger_count_in(void) {
-    return 2;
-}
-int elevator_passenger_count_out(void) {
-    return 1;
-}
 
 double elevator_temperature(void) {
     double temp = 15.0;

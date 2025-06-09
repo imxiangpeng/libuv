@@ -22,13 +22,11 @@
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
-#define DTOF_DISTANCE_THRESHOLD_MM 50      // 5cm // 30cm
+#define DTOF_OCCLUSION_DISTANCE_MM 100        // 5cm // 30cm
 #define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
 #define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
 
 #define ELEVATOR_ALARM_EVENT_PREFIX "elevator.alarm."
-
-#define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH "EGUARD_ALARM_SWITCH"
 
 enum message {
     MSG_QUIT = 0,
@@ -74,7 +72,19 @@ struct alarm_sound {
     {ALARM_NONE, NULL},
 };
 
-static struct sconf_proto eguard_alarm_switch = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_INT64, {.int64 = 0}};
+enum {
+    OPTION_EGUARD_ALARM_SWITCH = 0,
+    OPTION_EGUARD_DTOF_SWITCH,
+    OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
+
+};
+// default not enable
+
+static struct sconf_proto _eguard_options[] = {
+    [OPTION_EGUARD_ALARM_SWITCH] = {"EGUARD_ALARM_SWITCH", PROTO_VALUE_INT64, {.int64 = 0}},
+    [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
+    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_INT64, {.int64 = DTOF_OCCLUSION_DISTANCE_MM}},
+};
 
 static void _alarm_event_confirm(struct uloop_timeout* t);
 
@@ -185,7 +195,7 @@ static void* _playback_thread_routin(void* arg) {
             continue;
         }
 
-        if (eguard_alarm_switch.value.int64 == 0) {
+        if (_eguard_options[OPTION_EGUARD_ALARM_SWITCH].value.int64 == 0) {
             printf("eguard is not enabled\n");
             continue;
         }
@@ -226,10 +236,12 @@ static void* _dtof_detector_thread_routin(void* arg) {
             printf("Distance: %d mm, Confidence: %d, Count: %d\n",
                    distance, confidence, count);
 
-            if (distance < DTOF_DISTANCE_THRESHOLD_MM && confidence > 90) {
-                message_post(EVENT_DTOF_DISTANCE_ALARM);
-            } else {
-                message_post(EVENT_DTOF_DISTANCE_RESUME);
+            if (_eguard_options[OPTION_EGUARD_DTOF_SWITCH].value.int64 != 0) {
+                if (distance < _eguard_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64 && confidence > 90) {
+                    message_post(EVENT_DTOF_DISTANCE_ALARM);
+                } else {
+                    message_post(EVENT_DTOF_DISTANCE_RESUME);
+                }
             }
         }
         usleep(1000 * 200);
@@ -381,7 +393,7 @@ int main(int argc, char** argv) {
     memset((void*)&_alarm_timer, 0, sizeof(_alarm_timer));
     memset((void*)&_b, 0, sizeof(_b));
 
-    sconf_load_with_proto(EGUARD_CONFIG_PATH, &eguard_alarm_switch, 1);
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
 
     if (0 != pipe(_pipefd)) {
         return -1;

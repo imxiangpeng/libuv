@@ -32,13 +32,13 @@
 #include <unistd.h>
 #include "file_util.h"
 
-#define LOG_BUF_SIZE 1024 * 2
+#define LOG_BUF_SIZE LINE_MAX // 1024 * 2
 
 // #define RSYSLOG_SERVER "1.20222202.xyz"
 #define RSYSLOG_SERVER "192.168.58.100"
 #define RSYSLOG_PORT "514"
 
-#define HRLOG_OUTPUT_FILE 0
+#define HRLOG_OUTPUT_FILE 1
 
 static hr_log_type _type = HR_LOG_TYPE_SYSLOG;
 static char _hostname[256] = {0};
@@ -116,7 +116,7 @@ static void _init(void) {
 
 static int rsyslog(const char* message) {
     int offset = 0;
-    char buffer[1024];
+    char buffer[LINE_MAX] = {0};
 
     struct tm tm;
     struct timespec ts;
@@ -130,13 +130,11 @@ static int rsyslog(const char* message) {
 
         if (getaddrinfo(RSYSLOG_SERVER, RSYSLOG_PORT, &hints, &res) != 0) {
             res_init();
-            perror("DNS resolution failed");
             return -1;
         }
 
         sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
         if (sock < 0) {
-            perror("socket failed");
             freeaddrinfo(res);
             return -1;
         }

@@ -43,7 +43,7 @@ static const double PRESSURE_L = 0.0065;
 static const double PRESSURE_R = 8.31432;
 static const double PRESSURE_M = 0.0289644;
 
-static const double G0 = 9.81;
+static const double G0 = 9.80665;
 struct floor {
     int num;
     char label[64];  // name
@@ -57,8 +57,9 @@ struct building_model {
     int base_floor_num;
     int floors_below_base;
     int floor_nums;
+    double temperature;
     struct floor* model;
-} _building = {0, 0, 0, NULL};
+} _building = {0, 0, 0, 0, NULL};
 
 // only support one caller
 static int _floor_calibration = 0;
@@ -452,7 +453,7 @@ int floor_predict_with_pressure(double pressure, double* height, int* num, char*
     for (i = 0; i < _building.floor_nums; i++) {
         struct floor* f = &_building.model[i];
         double delta_p = fabs(pressure - _building.model[i].pressure);
-        // HR_LOGD("%s(%d): pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
+        HR_LOGD("%s(%d): pressure:%f with floor:%d -> %f-> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure, pressure - f->pressure);
         if (delta_p < FLOOR_PREDICT_PRESSURE_DELTA) {
             // should verify next floor
             if (i < _building.floor_nums - 1) {
@@ -464,7 +465,7 @@ int floor_predict_with_pressure(double pressure, double* height, int* num, char*
             *num = f->num;
             *height = f->height_relative;
             snprintf(label, length, "%s", f->label);
-            HR_LOGD("%s(%d): matched pressure:%f with floor:%d -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure - pressure);
+            HR_LOGD("%s(%d): matched pressure:%f with floor:%d -> %f -> delta:%f\n", __FUNCTION__, __LINE__, pressure, f->num, f->pressure, pressure - f->pressure);
             return 0;
         }
     }
@@ -475,7 +476,12 @@ int floor_predict_with_pressure(double pressure, double* height, int* num, char*
     return -1;
 }
 
+// The pressure has already been temperature-compensated,
+// so we will no longer consider the effect of temperature here.
+// 但是我通过 result 结果分析发现，其实是在考虑温度因素情况下才是准确的
+// 否则我们的数据与加速度结果偏差就会比较大
 static double calculate_height_difference(double p0, double p1, double temperature) {
+    (void)temperature;
     static double fac = PRESSURE_L * PRESSURE_R / PRESSURE_M / G0;
     return ((temperature + 273.15) / PRESSURE_L) * (1 - pow(p1 / p0, fac /*0.190284*/));
 }
@@ -561,6 +567,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     for (int i = 0; i < _building.floor_nums; i++) {
         struct floor* fr = &_building.model[i];
         if (fb != fr) {
+
             double p0 = calculate_base_pressure(pressure, fb->height_relative - fr->height_relative, temperature);
             if (p0 > 0) {
                 p0 = round(p0 * 100) / 100;
@@ -570,6 +577,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
                 fr->pressure = p0;
                 fr->temperature = temperature;
             }
+
         }
     }
 

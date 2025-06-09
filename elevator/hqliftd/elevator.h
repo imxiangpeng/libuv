@@ -82,11 +82,11 @@ int elevator_init(void);
 const char* elevator_serialno(void);
 const char* elevator_mac(void);
 const char* elevator_deviceid(void);
-int elevator_get_status(struct elevator_status* st);
+// int elevator_get_status(struct elevator_status* st);
 
-int elevator_passenger_count(void);
-int elevator_passenger_count_in(void);
-int elevator_passenger_count_out(void);
+// int elevator_passenger_count(void);
+// int elevator_passenger_count_in(void);
+// int elevator_passenger_count_out(void);
 double elevator_temperature(void);
 
 int elevator_light_brightness();
