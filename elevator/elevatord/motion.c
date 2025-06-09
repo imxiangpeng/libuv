@@ -99,7 +99,7 @@ static double barometer_pressure_height_relative_base_floor = 0;
 
 static double barometer_height_discontinuous = 0;
 
-static int MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = 60 * 5;  // 60s
+static int MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = 60;  // 60s
 static int64_t _motion_stationary_update_pressure_threshold_time_ns = 0;
 // current stationary pressure begin point
 static double _motion_stationary_pressure = 0;

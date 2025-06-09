@@ -237,13 +237,20 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
 // the same fault can not report more than once, before it end
 int elevator_fault_resolved(enum elevator_exception fault) {
-    struct lift_fault_event* e = NULL;
+    struct lift_fault_event* e = NULL, *f = NULL;
     // we should lookup in idle list
     // ignore when can not find
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
     pthread_mutex_lock(&_queue_lock);
-    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
-        if (e->type == fault) {
+
+    if (hr_list_empty(&_lift_fault_message_queue)) {
+        pthread_mutex_unlock(&_queue_lock);
+        return -1;
+    }
+
+    hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
+        if (f->type == fault) {
+            e = f;
             break;
         }
     }
@@ -252,6 +259,7 @@ int elevator_fault_resolved(enum elevator_exception fault) {
         pthread_mutex_unlock(&_queue_lock);
         return -1;
     }
+
     // take off from idle queue
     hr_list_del(&e->entry);
 
