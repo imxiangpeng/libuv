@@ -7,7 +7,7 @@ int floor_deinit();
 int floor_base_floor(void);
 const char* floor_model_data_path(void);
 const char* floor_model_data_realtime_path(void);
-int floor_predict(double height, int *num, char* label, int length);
+int floor_predict(double height, int *num, char* label, int length, double *delta);
 
 int floor_predict_with_pressure(double pressure, double* height, int* num, char* label, int length);
 

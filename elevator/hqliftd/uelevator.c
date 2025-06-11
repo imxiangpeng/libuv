@@ -175,11 +175,10 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             }
         }
 
-        HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
-                _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
+        // HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
+        //        _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
 
     } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
-        HR_LOGE("%s(%d): motion come in \n", __FUNCTION__, __LINE__);
         struct blob_attr* tb[__M_MAX] = {NULL};
         blobmsg_parse(motion_policy, __M_MAX, tb, blobmsg_data(msg),
                       blobmsg_data_len(msg));
@@ -197,8 +196,6 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
         // directly pass for LiftRunInfo
-
-        HR_LOGE("%s(%d): historical come in \n", __FUNCTION__, __LINE__);
         struct blob_attr* cur = NULL;
         size_t rem;
         struct blob_attr* tb[__HI_MAX] = {NULL};

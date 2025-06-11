@@ -24,13 +24,17 @@ extern void report_hqliftd_config_property();
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-#define SVC_METHOD_START_AUTO_FLOOR_CALIBRATION "thing.service.StartAutoFloorCalibration"
-#define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "thing.service.CalibrateAtFloorManually"
-#define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "thing.service.CalibrateAtHeightManually"
-#define SVC_METHOD_GET_HQLIFTD_CONFIG "thing.service.GetHQLiftdConfig"
-#define SVC_METHOD_GET_FLOOR_MODEL "thing.service.GetFloorModelData"
-#define SVC_METHOD_SET_FLOOR_MODEL "thing.service.SetFloorModelData"
-#define SVC_METHOD_DO_COMMAND "thing.service.DoCommand"
+#define SVC_METHOD_PREFIX "thing.service."
+#define SVC_METHOD_START_AUTO_FLOOR_CALIBRATION "StartAutoFloorCalibration"
+#define SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY "CalibrateAtFloorManually"
+#define SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY "CalibrateAtHeightManually"
+#define SVC_METHOD_GET_HQLIFTD_CONFIG "GetHQLiftdConfig"
+#define SVC_METHOD_GET_FLOOR_MODEL "GetFloorModelData"
+#define SVC_METHOD_SET_FLOOR_MODEL "SetFloorModelData"
+#define SVC_METHOD_START_SSH_TUNNEL "StartSSHTunnel"
+#define SVC_METHOD_STOP_SSH_TUNNEL "StopSSHTunnel"
+#define SVC_METHOD_REBOOT "Reboot"
+#define SVC_METHOD_DO_COMMAND "DoCommand"
 
 enum {
     CALIBRATION_TOPIC_AUTO_FLOOR_CALIBRATION_EVENT = 0,
@@ -41,6 +45,9 @@ enum {
     // GET_HQLIFTD_CONFIG_REPLY,
     GET_FLOOR_MODEL,
     SET_FLOOR_MODEL,
+    START_SSH_TUNNEL,
+    STOP_SSH_TUNNEL,
+    REBOOT,
     DO_COMMAND,
     _SERVICE_TOPIC_MAX
 };
@@ -66,12 +73,15 @@ static pthread_mutex_t _queue_mutex;
 static struct uviot* _iot = NULL;
 static struct uviot_topic _iot_service_topics[];
 
+static int _Reboot(cJSON* params);
 static int _StartAutoFloorCalibration(cJSON* params);
 static int _CalibrateAtFloorManually(cJSON* params);
 static int _CalibrateAtHeightManually(cJSON* params);
 static int _GetHQLiftdConfig(cJSON* params);
 static int _GetFloorModelData(cJSON* params);
 static int _SetFloorModelData(cJSON* params);
+static int _StartSSHTunnel(cJSON* params);
+static int _StopSSHTunnel(cJSON* params);
 static int _DoCommand(cJSON* params);
 static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_START_AUTO_FLOOR_CALIBRATION, _StartAutoFloorCalibration},
@@ -80,6 +90,9 @@ static struct svc_action _svc_action_tbl[] = {
     {SVC_METHOD_GET_HQLIFTD_CONFIG, _GetHQLiftdConfig},
     {SVC_METHOD_GET_FLOOR_MODEL, _GetFloorModelData},
     {SVC_METHOD_SET_FLOOR_MODEL, _SetFloorModelData},
+    {SVC_METHOD_START_SSH_TUNNEL, _StartSSHTunnel},
+    {SVC_METHOD_STOP_SSH_TUNNEL, _StopSSHTunnel},
+    {SVC_METHOD_REBOOT, _Reboot},
     {SVC_METHOD_DO_COMMAND, _DoCommand},
     {NULL, NULL},  // keep it
 };
@@ -183,6 +196,7 @@ static int _on_svc_message(void* payload, int len) {
     char* method = NULL;
     struct svc_action* act = NULL;
     cJSON *root = NULL, *params = NULL;
+    int skip_length = 0;
 
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
@@ -208,6 +222,14 @@ static int _on_svc_message(void* payload, int len) {
         cJSON_Delete(root);
         return -1;
     }
+
+    skip_length = strlen(SVC_METHOD_PREFIX);
+    if (0 != strncmp(method, SVC_METHOD_PREFIX, skip_length)) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    method += skip_length;
 
     params = cJSON_GetObjectItem(root, "params");
     if (!params) {
@@ -346,6 +368,24 @@ static int _SetFloorModelData(cJSON* params) {
     return 0;
 }
 
+static int _StartSSHTunnel(cJSON* params) {
+    (void)params;
+    system("/etc/init.d/ssh_tunnel restart");
+    return 0;
+}
+
+static int _StopSSHTunnel(cJSON* params) {
+    (void)params;
+    system("/etc/init.d/ssh_tunnel stop");
+    return 0;
+}
+
+static int _Reboot(cJSON* params) {
+    (void)params;
+    system("sync;reboot");
+    return 0;
+}
+
 static int _DoCommand(cJSON* params) {
     (void)params;
 
@@ -417,25 +457,25 @@ static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX] = {
         .callback.on_message = _on_reply_message,
     },*/
     [CALIBRATION_TOPIC_START_AUTO_FLOOR_CALIBRATION] = {
-        .name = "service/StartAutoFloorCalibration",
+        .name = "service/" SVC_METHOD_START_AUTO_FLOOR_CALIBRATION,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
     [CALIBRATION_TOPIC_CALIBRATE_AT_FLOOR_MANUALLY] = {
-        .name = "service/CalibrateAtFloorManually",
+        .name = "service/" SVC_METHOD_CALIBRATE_AT_FLOOR_MANUALLY,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
     [CALIBRATION_TOPIC_CALIBRATE_AT_HEIGHT_MANUALLY] = {
-        .name = "service/CalibrateAtHeightManually",
+        .name = "service/" SVC_METHOD_CALIBRATE_AT_HEIGHT_MANUALLY,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
     [GET_HQLIFTD_CONFIG] = {
-        .name = "service/GetHQLiftdConfig",
+        .name = "service/" SVC_METHOD_GET_HQLIFTD_CONFIG,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
@@ -449,23 +489,42 @@ static struct uviot_topic _iot_service_topics[_SERVICE_TOPIC_MAX] = {
     },
 #endif
     [GET_FLOOR_MODEL] = {
-        .name = "service/GetFloorModelData",
+        .name = "service/" SVC_METHOD_GET_FLOOR_MODEL,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
     [SET_FLOOR_MODEL] = {
-        .name = "service/SetFloorModelData",
+        .name = "service/" SVC_METHOD_SET_FLOOR_MODEL,
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
+    [START_SSH_TUNNEL] = {
+        .name = "service/" SVC_METHOD_START_SSH_TUNNEL,
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
+    [STOP_SSH_TUNNEL] = {
+        .name = "service/" SVC_METHOD_STOP_SSH_TUNNEL,
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_svc_message,
+    },
+    [REBOOT] = {
+        .name = "service/" SVC_METHOD_REBOOT,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
     },
     [DO_COMMAND] = {
-        .name = "service/DoCommand",
+        .name = "service/" SVC_METHOD_DO_COMMAND,
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_svc_message,
-    }};
+    },
+};
 
 int iot_topic_service_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)iot;

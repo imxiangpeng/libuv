@@ -126,15 +126,14 @@ union calibration_data {
 };
 #endif
 struct sconf_proto calibration_config[] = {
-        [E_CALIBRATED] = {"CALIBRATED", PROTO_VALUE_INT64, {.int64 = 0}},
-        [E_G_1000] = {"G_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-        [E_BIAS_ACCEL_X_1000] = {"BIAS_ACCEL_X_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-        [E_BIAS_ACCEL_Y_1000] = {"BIAS_ACCEL_Y_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-        [E_BIAS_ACCEL_Z_1000] = {"BIAS_ACCEL_Z_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-        [E_PITCH_1000] = {"PITCH_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-        [E_ROLL_1000] = {"ROLL_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    };
-
+    [E_CALIBRATED] = {"CALIBRATED", PROTO_VALUE_INT64, {.int64 = 0}},
+    [E_G_1000] = {"G_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_BIAS_ACCEL_X_1000] = {"BIAS_ACCEL_X_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_BIAS_ACCEL_Y_1000] = {"BIAS_ACCEL_Y_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_BIAS_ACCEL_Z_1000] = {"BIAS_ACCEL_Z_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_PITCH_1000] = {"PITCH_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_ROLL_1000] = {"ROLL_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+};
 
 // clang-format off
 static const _float_t pdiag[EKF_N] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
@@ -238,9 +237,9 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         self->zero_bias_accels[1] /= self->calibration_retries_max;
         self->zero_bias_accels[2] /= self->calibration_retries_max;
 
-        //self->zero_bias_accels[0] = round(self->zero_bias_accels[0] * 1000) / 1000;
-        //self->zero_bias_accels[1] = round(self->zero_bias_accels[1] * 1000) / 1000;
-        //self->zero_bias_accels[2] = round(self->zero_bias_accels[2] * 1000) / 1000;
+        // self->zero_bias_accels[0] = round(self->zero_bias_accels[0] * 1000) / 1000;
+        // self->zero_bias_accels[1] = round(self->zero_bias_accels[1] * 1000) / 1000;
+        // self->zero_bias_accels[2] = round(self->zero_bias_accels[2] * 1000) / 1000;
 
         self->G = calculate_stationary_veritical_acceleration(self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2]);
 
@@ -250,8 +249,8 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         self->zero_bias_pitch = atan2(self->zero_bias_accels[0] /*x*/,
                                       sqrt(self->zero_bias_accels[0] * self->zero_bias_accels[0] + self->zero_bias_accels[1] * self->zero_bias_accels[1] + self->zero_bias_accels[2] * self->zero_bias_accels[2]));
 
-        //self->zero_bias_pitch = round(self->zero_bias_pitch * 1000) / 1000;
-        //self->zero_bias_roll = round(self->zero_bias_roll * 1000) / 1000;
+        // self->zero_bias_pitch = round(self->zero_bias_pitch * 1000) / 1000;
+        // self->zero_bias_roll = round(self->zero_bias_roll * 1000) / 1000;
 
         float az_world = self->zero_bias_accels[0] * sin(self->zero_bias_pitch) - self->zero_bias_accels[1] * sin(self->zero_bias_roll) * cos(self->zero_bias_pitch) + self->zero_bias_accels[2] * cos(self->zero_bias_roll) * cos(self->zero_bias_pitch);
         HR_LOGD("%s(%d) G:%f vs %f\n", __FUNCTION__, __LINE__, self->G, az_world);
@@ -288,11 +287,11 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         calibration_config[E_CALIBRATED].value.int64 = self->is_calibration_completed;
         calibration_config[E_G_1000].value.number = self->G * 1000;
         calibration_config[E_BIAS_ACCEL_X_1000].value.number = self->zero_bias_accels[0] * 1000;
-        calibration_config[E_BIAS_ACCEL_Y_1000].value.number  = self->zero_bias_accels[1] * 1000;
-        calibration_config[E_BIAS_ACCEL_Z_1000].value.number  = self->zero_bias_accels[2] * 1000;
+        calibration_config[E_BIAS_ACCEL_Y_1000].value.number = self->zero_bias_accels[1] * 1000;
+        calibration_config[E_BIAS_ACCEL_Z_1000].value.number = self->zero_bias_accels[2] * 1000;
         calibration_config[E_PITCH_1000].value.number = self->zero_bias_pitch * 1000;
         calibration_config[E_ROLL_1000].value.number = self->zero_bias_roll * 1000;
-        
+
         sconf_save_with_proto(SENSOR_CALIBRATION_CONF, calibration_config, ARRAY_SIZE(calibration_config));
 #endif
 
@@ -407,7 +406,7 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     // }
 
     HR_LOGD("filtered accel:%f %f %f\n", accel_filtered[0], accel_filtered[1], accel_filtered[2]);
-    _ekf_run_model(s, accel.x/*accel_filtered*/, dt);
+    _ekf_run_model(s, accel.x /*accel_filtered*/, dt);
 
     s->distance = s->ekf.x[0];
     s->velocity = s->ekf.x[1];
@@ -447,10 +446,13 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         _fft_process(s, fft_accels, IMU_AXES);
     }
 
-    p->jitter_accel = s->fft[0].jitter_accel;
-    p->jitter_frequency = s->fft[0].jitter_frequency;
-#if 1
-    for (size_t i = 1; i < ARRAY_SIZE(s->fft); i++) {
+    // mxp, 20250609, houqi's elevator jitter is very noticeable.
+    // so we only care the last z axis
+    p->jitter_accel = s->fft[IMU_AXES - 1].jitter_accel;
+    p->jitter_frequency = s->fft[IMU_AXES - 1].jitter_frequency;
+
+#if 0
+    for (size_t i = IMU_AXES - 2; i >= 0; i++) {
         if (s->fft[i].jitter_accel > p->jitter_accel) {
             p->jitter_accel = s->fft[i].jitter_accel;
             p->jitter_frequency = s->fft[i].jitter_frequency;
@@ -711,8 +713,8 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
                                                         self->ekf.x[4] - self->zero_bias_accels[1],
                                                         self->ekf.x[5] - self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
 #endif
-    // double linear = calculate_stationary_veritical_acceleration(self->ekf.x[3], self->ekf.x[4], self->ekf.x[5]);
-    double linear = calculate_stationary_veritical_acceleration(accel[0], accel[1], accel[2]);
+        // double linear = calculate_stationary_veritical_acceleration(self->ekf.x[3], self->ekf.x[4], self->ekf.x[5]);
+        double linear = calculate_stationary_veritical_acceleration(accel[0], accel[1], accel[2]);
         // mxp, 20250509, no need process manully when we use pitch to calc accel
         // if (self->inverted) {
         //     linear_accel *= -1.0;

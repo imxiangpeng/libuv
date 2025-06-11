@@ -291,7 +291,7 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 }
 
@@ -329,7 +329,7 @@ static void* uelevatord_thread_routin(void* args) {
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
-    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(g_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
+    fcntl(_ubus_ctx->sock.fd, F_SETFD, fcntl(_ubus_ctx->sock.fd, F_GETFD) | FD_CLOEXEC);
 #endif
 
     rc = ubus_add_object(_ubus_ctx, &_elevatord_object);

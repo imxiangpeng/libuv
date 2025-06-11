@@ -68,6 +68,12 @@ double elevator_temperature(void) {
 
 // houqi LiftState: lightVariationAmplitude 0-255
 // in_voltage2_input [ 0 - 700 ]
+
+static int map_range(int value, int in_min, int in_max, int out_min, int out_max) {
+    if (value < in_min) value = in_min;
+    if (value > in_max) value = in_max;
+    return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 int elevator_light_brightness() {
     int brightness = 100;  // 0-255
     const char* brightness_channel = "/sys/bus/iio/devices/iio:device1/in_voltage2_input";
@@ -81,8 +87,17 @@ int elevator_light_brightness() {
         return brightness;
     }
 
-    // round to nearest integer
-    brightness = (int)((brightness * 255) / 700);
     fclose(fp);
+
+    // mxp, 20250610, 我们发现电梯中因为光源朝向问题我们检测到的亮度都比较低,
+    // 在 A4 电梯中发现平常亮度为 150/170 左右，所以，我们就简单暴力的方案
+    // 如果当前值大于 255 直接取 255， 否则直接使用当前值
+    // round to nearest integer
+    // brightness = (int)((brightness * 255) / 700);
+    if (brightness >= 255) {
+        brightness = 255;
+    }
+
+    printf("bright:%d\n", brightness);
     return brightness;
 }

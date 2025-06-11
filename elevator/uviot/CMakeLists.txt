@@ -15,10 +15,12 @@ ADD_LIBRARY(uviot STATIC uviot.c ../iutils/hr_log.c)
 target_include_directories(uviot PUBLIC .)
 
 target_compile_options(uviot PRIVATE -fvisibility=hidden)
+
+TARGET_COMPILE_DEFINITIONS(uviot PRIVATE LOG_TAG="uviot")
+
 TARGET_LINK_LIBRARIES(uviot ${libmosquitto_library})
 TARGET_LINK_LIBRARIES(uviot ${libuv_library})
 # TARGET_LINK_LIBRARIES(uviot iutils)
 
 
 add_subdirectory(examples)
-

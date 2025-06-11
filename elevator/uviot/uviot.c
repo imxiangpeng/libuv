@@ -71,6 +71,22 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events);
 
 static void uviot__close_uv_dynamic_handle(uv_handle_t* handle);
 
+// wrapper mosquitto_publish, process error code
+static int uviot_mosquitto_publish(struct uviot_impl* iot, int* mid, const char* topic, int payloadlen, const void* payload, int qos, bool retain) {
+    if (!iot)
+        return -1;
+    int rc = mosquitto_publish(iot->mosq, mid, topic, payloadlen, payload, qos, retain);
+
+    // 20250611, only care CONN_LOST, other events maybe trigger disconnect callback
+    if (rc == MOSQ_ERR_CONN_LOST) {
+        HR_LOGE("publish failed, we reconnect again: rc:%d, errno:%d\n", rc, errno);
+        uv_timer_stop(&iot->timer);
+        uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 0, 1000);
+    }
+
+    return rc;
+}
+
 static void _topic_period_timer_cb(uv_timer_t* handle) {
     if (!handle || !handle->data)
         return;
@@ -85,9 +101,9 @@ static void _topic_period_timer_cb(uv_timer_t* handle) {
     int len = 0;
     t->self->callback.on_publish(&payload, &len);
     if (payload != NULL && len > 0) {
-        int rc = mosquitto_publish(t->iot->mosq, &t->mid, t->self->topic,
-                                   len, (const void*)payload,
-                                   0, false);
+        int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
+                                         len, (const void*)payload,
+                                         0, false);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d\n", rc);
         }
@@ -127,11 +143,11 @@ static void iot__topic_async_cb(uv_async_t* handle) {
     int len = 0;
     t->self->callback.on_publish(&payload, &len);
     if (payload != NULL && len > 0) {
-        int rc = mosquitto_publish(t->iot->mosq, &t->mid, t->self->topic,
-                                   len, (const void*)payload,
-                                   0, false);
+        int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
+                                         len, (const void*)payload,
+                                         0, false);
         if (rc != MOSQ_ERR_SUCCESS) {
-            HR_LOGE("publish failed :%d\n", rc);
+            HR_LOGE("publish failed :%d, errno:%d\n", rc, errno);
         }
         free(payload);
     }
@@ -215,9 +231,9 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                 if (p->self->auto_public != 0) {
                     p->self->callback.on_publish(&payload, &len);
                     if (payload != NULL && len > 0) {
-                        int rc = mosquitto_publish(mosq, &p->mid, p->self->topic,
-                                                   len, (const void*)payload,
-                                                   0, false);
+                        int rc = uviot_mosquitto_publish(iot, &p->mid, p->self->topic,
+                                                         len, (const void*)payload,
+                                                         0, false);
                         if (rc != MOSQ_ERR_SUCCESS) {
                             HR_LOGE("publish failed :%d\n", rc);
                         }
@@ -362,7 +378,7 @@ static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle) {
     if (!mosq)
         return;
 
-    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect/*_async*/(mosq)) {
+    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect /*_async*/ (mosq)) {
         HR_LOGD("%s(%d): failed reconnect\n", __FUNCTION__, __LINE__);
         return;
     }

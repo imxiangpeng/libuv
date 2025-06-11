@@ -19,12 +19,18 @@
 
 #include "cjson/cJSON.h"
 #include "elevator.h"
-#include "hr_log.h"
 #include "sconf.h"
 #include "uelevator.h"
 #include "uviot.h"
 
 #define EVENT_LIFTSTATE_TOPIC_NAME "LiftState"
+
+// mxp, 20250611, LiftState reporting is disabled by default
+// when receiving the Sendstate command,
+// periodic reporting will be enabled and will continue for a duration of 1 minute.
+// see command implement for more information
+static int _auto_report_enabled = 0;
+
 static struct uviot* _iot = NULL;
 
 static enum elevator_direction _running_direction = ELEVATOR_DIR_STATIONARY;
@@ -35,10 +41,17 @@ static int _on_publish(void** payload, int* len) {
     struct tm tm;
     struct timespec ts;
     char tmp[256] = {0};
-    printf("liftstate publish \n");
-    // char tmp[256] = {0};
 
     struct elevator_status st;
+
+    if (!payload || !len) {
+        return -1;
+    }
+
+    if (_auto_report_enabled == 0) {
+        *len = 0;
+        return 0;
+    }
 
     uelevator_get_status(&st);
 
@@ -130,6 +143,13 @@ int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const 
 }
 
 // trigger publish immediately
-void topic_houqi_liftstate_post(void) {
+static void topic_houqi_liftstate_post(void) {
     uviot_publish_async(_iot, &_topic_liftstate);
+}
+
+void topic_houqi_liftstate_report_enable(int en) {
+    _auto_report_enabled = (en != 0) ? 1 : 0;
+    if (_auto_report_enabled == 1) {
+        uviot_publish_async(_iot, &_topic_liftstate);
+    }
 }

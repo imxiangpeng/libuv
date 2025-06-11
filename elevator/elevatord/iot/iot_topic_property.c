@@ -39,8 +39,11 @@ enum {
 static struct uviot* _iot = NULL;
 
 static char _elevator_id[128] = {0};
+static char _sw_version[64] = {0};
+
 enum {
     PROPERTY_BUILD_TIMESTAMP = 0,
+    PROPERTY_SW_VERSION,
     PROPERTY_ELEVATOR_ID,
     PROPERTY_BIAS_ACCEL_X,
     PROPERTY_BIAS_ACCEL_Y,
@@ -79,6 +82,7 @@ struct property {
     int dirty;
 } _properties_tbl[__PROPERTY_MAX] = {
     [PROPERTY_BUILD_TIMESTAMP] = {"build_timestamp", P_STRING, {.val_str = ELEVATORD_BUILD_TIMESTAMP}, 1 /* report when startup*/},
+    [PROPERTY_SW_VERSION] = {"sw_version", P_STRING, {.val_str = _sw_version}, 1 /* report when startup*/},
     [PROPERTY_ELEVATOR_ID] = {"elevator_id", P_STRING, {.val_str = _elevator_id}, 1 /* report when startup*/},
     // calibration
     [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", P_DOUBLE, {0}, 0},
@@ -428,6 +432,23 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .callback.on_message = _on_property_set_message,
     }};
 
+static void read_sw_version(void) {
+    char* eol = NULL;
+    FILE *fp = NULL;
+
+    fp = fopen("/etc/sw-versions", "r");
+    if (!fp) {
+        return;
+    }
+
+    fgets(_sw_version, sizeof(_sw_version), fp);
+
+    eol = strchr(_sw_version, '\n');
+    if (eol) *eol = '\0';
+
+    fclose(fp);
+}
+
 int iot_topic_property_init(struct uviot* iot, const char* public_key, const char* device_name) {
     (void)iot;
 
@@ -441,6 +462,11 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
     HR_LOGD("%s(%d): elevator id:%s\n", __FUNCTION__, __LINE__, _elevator_id);
 
     _properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
+
+    read_sw_version();
+    HR_LOGD("%s(%d): sw version:%s\n", __FUNCTION__, __LINE__, _sw_version);
+
+    _properties_tbl[PROPERTY_SW_VERSION].dirty = 1;
 
     // should load from config
     sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));

@@ -48,7 +48,10 @@
 // houqi's sim is data limited about 85G
 // houqi platform calls the sendvideo command approximately every 10 seconds.
 #define SENDVIDEO_COMMAND_TIMEOUT (60 * 1000)  // 1min
-static uv_timer_t _timer;
+#define SENDSTATE_COMMAND_TIMEOUT (60 * 1000)  // 1min
+
+static uv_timer_t _sendvideo_timer;
+static uv_timer_t _sendstate_timer;
 
 static int _pipe_fd[2] = {-1, -1};
 
@@ -74,7 +77,7 @@ struct sconf_proto _ftp_conf_fields[] = {
     [FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
 };
 
-extern void topic_houqi_liftstate_post(void);
+extern void topic_houqi_liftstate_report_enable(int on);
 
 static int publish_upload_record_response();
 static int traverse_media_record_list(uint64_t begin, uint64_t end);
@@ -111,6 +114,12 @@ static void _sendvideo_command_timeout(uv_timer_t* handle) {
     system("ipc-property set /ipc/livertmp/enabled false");
 }
 
+static void _sendstate_command_timeout(uv_timer_t* handle) {
+    (void)handle;
+    HR_LOGD("send state timeout, stop it\n");
+    topic_houqi_liftstate_report_enable(0);
+}
+
 static int _on_command_message(void* payload, int len) {
     char* type = NULL;
     cJSON* root = NULL;
@@ -132,7 +141,11 @@ static int _on_command_message(void* payload, int len) {
     }
 
     if (0 == strcasecmp("Sendstate", type)) {
-        topic_houqi_liftstate_post();
+        topic_houqi_liftstate_report_enable(1);
+
+        uv_timer_stop(&_sendstate_timer);
+        uv_timer_start(&_sendstate_timer, _sendstate_command_timeout, SENDSTATE_COMMAND_TIMEOUT, 0);
+
         cJSON_Delete(root);
         return 0;
     }
@@ -145,15 +158,15 @@ static int _on_command_message(void* payload, int len) {
         // ipc-property set /ipc/livertmp/enabled true
 
         // mxp, 20250609, do not restart when timer is not fired
-        if (!uv_is_active((uv_handle_t*)&_timer)) {
+        if (!uv_is_active((uv_handle_t*)&_sendvideo_timer)) {
             char cmd[512] = {0};
             snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
             system(cmd);
         }
 
-        uv_timer_stop(&_timer);
+        uv_timer_stop(&_sendvideo_timer);
         // stop video after SENDVIDEO_COMMAND_TIMEOUT ms
-        uv_timer_start(&_timer, _sendvideo_command_timeout, SENDVIDEO_COMMAND_TIMEOUT, 0);
+        uv_timer_start(&_sendvideo_timer, _sendvideo_command_timeout, SENDVIDEO_COMMAND_TIMEOUT, 0);
         return 0;
     }
 
@@ -288,6 +301,8 @@ static int _on_command_upload_record_response_publish(void** payload, int* len) 
             tm = gmtime((const time_t*)&t);
             s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
 
+            // buffer large enough, it's safe
+            strcat(name, ".mp4");
             cJSON_AddStringToObject(item, "fileName", name);
         } else {
             cJSON_AddStringToObject(item, "fileName", r[i].name);
@@ -358,9 +373,11 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
 
     // unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
 
-    // init timer for sendvideo command timeout
-    memset((void*)&_timer, 0, sizeof(_timer));
-    uv_timer_init(uv_default_loop(), &_timer);
+    // init timer for sendvideo & sendsate command timeout
+    memset((void*)&_sendvideo_timer, 0, sizeof(_sendvideo_timer));
+    memset((void*)&_sendstate_timer, 0, sizeof(_sendstate_timer));
+    uv_timer_init(uv_default_loop(), &_sendvideo_timer);
+    uv_timer_init(uv_default_loop(), &_sendstate_timer);
 
     snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
     uviot_topic_register(iot, &topic_command);

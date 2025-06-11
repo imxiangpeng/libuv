@@ -406,10 +406,10 @@ const char* floor_model_data_realtime_path(void) {
 }
 
 // return predict floor according height
-int floor_predict(double height, int* num, char* label, int length) {
+int floor_predict(double height, int* num, char* label, int length, double *delta) {
     int i = 0;
 
-    if (!num || !label) {
+    if (!num || !label || !delta) {
         return -1;
     }
 
@@ -427,6 +427,7 @@ int floor_predict(double height, int* num, char* label, int length) {
             height < f->height_relative + f->height / 2) {
             *num = f->num;
             snprintf(label, length, "%s", f->label);
+            *delta = height - f->height_relative;
             return 0;
         }
     }
