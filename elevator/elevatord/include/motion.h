@@ -74,4 +74,6 @@ int motion_calibrate_at_floor(int floor);
 int motion_calibrate_at_height(double height);
 // imu calibration
 int motion_enter_sensor_calibration();
+
+double motion_accelerometer_sampling_rate(void);
 #endif

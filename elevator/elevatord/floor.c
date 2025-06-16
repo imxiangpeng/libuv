@@ -406,10 +406,10 @@ const char* floor_model_data_realtime_path(void) {
 }
 
 // return predict floor according height
-int floor_predict(double height, int* num, char* label, int length, double *delta) {
+int floor_predict(double height, int* num, char* label, int length, double* delta) {
     int i = 0;
 
-    if (!num || !label || !delta) {
+    if (!num || !label) {
         return -1;
     }
 
@@ -427,7 +427,9 @@ int floor_predict(double height, int* num, char* label, int length, double *delt
             height < f->height_relative + f->height / 2) {
             *num = f->num;
             snprintf(label, length, "%s", f->label);
-            *delta = height - f->height_relative;
+            if (delta != NULL) {
+                *delta = height - f->height_relative;
+            }
             return 0;
         }
     }
@@ -568,7 +570,6 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     for (int i = 0; i < _building.floor_nums; i++) {
         struct floor* fr = &_building.model[i];
         if (fb != fr) {
-
             double p0 = calculate_base_pressure(pressure, fb->height_relative - fr->height_relative, temperature);
             if (p0 > 0) {
                 p0 = round(p0 * 100) / 100;
@@ -578,7 +579,6 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
                 fr->pressure = p0;
                 fr->temperature = temperature;
             }
-
         }
     }
 

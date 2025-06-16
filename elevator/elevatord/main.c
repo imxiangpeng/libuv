@@ -232,6 +232,7 @@ static int elevatord_main(int argc, char** argv) {
 
     motion_run();
 
+    // must called after motion_initalize
     uelevatord_init();
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);

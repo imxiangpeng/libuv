@@ -63,7 +63,8 @@ static struct hrbuffer _jitter_freq_buffer;
 
 // 500ms or 1s report to ubus client
 static int _realtime_report_times = 0;
-static const int _realtime_report_fac = 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
+// adjust according accelerometer's sampling rate
+static int _realtime_report_fac = DEFAULT_ACCELEROMETER_SAMPLING_RATE_HZ;  // 10 * sampling_rate = 100 * 1/100 = 1s
 
 static enum motion_state _running_state = STOPPED;
 static enum motion_direction _running_direction = DIRECTION_NONE;
@@ -353,6 +354,8 @@ int uelevatord_init(void) {
     if (_uobject_tid != 0) {
         return -1;
     }
+
+    _realtime_report_fac = (int)motion_accelerometer_sampling_rate();
 
     if (pipe(_pipefd) < 0) {
         perror("pipe");

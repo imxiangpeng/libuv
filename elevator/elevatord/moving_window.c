@@ -113,3 +113,32 @@ int moving_window_slope(struct moving_window* w, double* val) {
     *val = (w->size * sum_xy - sum_x * sum_y) / denom;
     return 0;
 }
+
+
+int moving_window_covariance(struct moving_window* w, double* val) {
+    if (!w || !val || w->size < 3) {
+        *val = NAN;
+        return -1;
+    }
+
+    // [ 1, 2, 3, ..., n - 1 ]
+    double sum_x = (double)(w->size - 1) * w->size / 2.0;
+    double sum_y = w->sum;
+    double sum_xy = 0;
+    double sum_x2 = 0;
+    double denom = 0;
+
+    for (int i = 0; i < w->size; i++) {
+        sum_xy += i * w->data[i];
+        sum_x2 += i * i;
+    }
+
+    denom = w->size * sum_x2 - sum_x * sum_x;
+    if (fabs(denom) < 1e-12) {
+        *val = NAN;
+        return -2;
+    }
+
+    *val = (w->size * sum_xy - sum_x * sum_y) / denom;
+    return 0;
+}

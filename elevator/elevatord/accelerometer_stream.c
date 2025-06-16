@@ -142,16 +142,16 @@ double Q[EKF_N * EKF_N] = {
     1e-1, 0, 0, 0, 0, 0,
     0, 1e-1, 0, 0, 0, 0,
     0, 0, 1e-3, 0, 0, 0,
-    0, 0, 0, 1e-3, 0, 0,
-    0, 0, 0, 0, 1e-3, 0,
-    0, 0, 0, 0, 0, 1e-3,
+    0, 0, 0, 1e-2, 0, 0,
+    0, 0, 0, 0, 1e-2, 0,
+    0, 0, 0, 0, 0, 1e-2,
 };
 
 static const double R[EKF_M * EKF_M] = {
     1e-1, 0, 0, 0,
-    0, 1e-3, 0, 0,
-    0, 0, 1e-3, 0,
-    0, 0, 0, 1e-3,
+    0, 1e-2, 0, 0,
+    0, 0, 1e-2, 0,
+    0, 0, 0, 1e-2,
 };
 // clang-format on
 
@@ -199,7 +199,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
 
     for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
         int ret = moving_window_update(self->calibration_mw[i], accel[i]);
-        // HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw[i]->stddev, self->calibration_mw[i]->mean, self->calibration_retries_max);
+        HR_LOGD("%s(%d): ret:%d, stddev:%f, mean:%f, max:%d\n", __FUNCTION__, __LINE__, ret, self->calibration_mw[i]->stddev, self->calibration_mw[i]->mean, self->calibration_retries_max);
         if (ret != 0 || isnan(self->calibration_mw[i]->stddev)) {
             ready &= 0;
             continue;
@@ -212,6 +212,9 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
     }
 
     for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
+        double slope = 0;
+        moving_window_slope(self->calibration_mw[i], &slope);
+        HR_LOGD("aixes:%d stddev:%f, cover:%f, slope:%f\n", i, self->calibration_mw[i]->stddev, self->calibration_mw[i]->stddev * self->calibration_mw[i]->stddev, slope);
         if (self->calibration_mw[i]->stddev >= ACCEL_JITTER_STD_THRESHOLD) {
             self->calibration_retries = 0;
             return;
@@ -222,6 +225,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         self->calibration_data[self->calibration_retries].x[i] = self->calibration_mw[i]->mean;
     }
 
+    HR_LOGD("%s(%d): calibration retries:%d\n", __FUNCTION__, __LINE__, self->calibration_retries);
     self->calibration_retries++;
     if (self->calibration_retries == self->calibration_retries_max) {
         self->zero_bias_accels[0] = 0;
@@ -574,6 +578,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     }
 
     for (size_t i = 0; i < ARRAY_SIZE(s->calibration_mw); i++) {
+        // 0.5s
         s->calibration_mw[i] = moving_window_init(sampling_frequency / 2);
     }
 
@@ -588,7 +593,7 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     }
 
     s->is_calibration_completed = 0;
-    s->calibration_retries_max = s->sampling_frequency * 2;
+    s->calibration_retries_max = s->sampling_frequency /** 2*/;
     // s->calibration_data = (double*)calloc(sizeof(double), s->calibration_retries_max);
     s->calibration_data = (struct axis_mean*)calloc(sizeof(*s->calibration_data), s->calibration_retries_max);
 
@@ -786,6 +791,9 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         // F[1] = 0;
         // F[EKF_N + 1] = 0;
         //}
+    }
+
+    if (fabs(linear_accel) < ZUPT_ACC_THRESHOLD) {
     }
 
     HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
