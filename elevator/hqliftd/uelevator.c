@@ -3,11 +3,11 @@
 
 #include "uelevator.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 
-#include <math.h>
 #include "elevator.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
@@ -326,9 +326,10 @@ static void ubus_event_handler(struct ubus_context* ctx,
         }
     } else if (strncmp(type, ELEVATOR_EVENT_PREFIX, strlen(ELEVATOR_EVENT_PREFIX)) == 0) {
         const char* event = type + strlen(ELEVATOR_EVENT_PREFIX);
-        HR_LOGD("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
+        // HR_LOGD("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
         // door
         // person
+        // ebike
 
         if (0 == strcmp("door", event)) {
             static const struct blobmsg_policy policy[] = {
@@ -370,6 +371,24 @@ static void ubus_event_handler(struct ubus_context* ctx,
 
             num = blobmsg_get_u32(tb[0]);
             _status.passenger_count = num;
+        } else if (0 == strcmp("ebike", event)) {
+            static const struct blobmsg_policy policy[] = {
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0]) {
+                return;
+            }
+
+            if (blobmsg_get_u32(tb[0]) == 1) {
+                HR_LOGD("receive ebike fire event!\n");
+            } else {
+                HR_LOGD("receive ebike cancel event!\n");
+            }
         }
     }
 }
@@ -403,7 +422,7 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
     ubus_register_event_handler(_ubus_ctx, &_ubus_event, "ubus.object.*");
-    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "elevator.event.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, ELEVATOR_EVENT_PREFIX "*");
 
     subscriber_elevatord_event();
 

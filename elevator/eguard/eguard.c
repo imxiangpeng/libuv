@@ -26,7 +26,7 @@
 #define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
 #define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
 
-#define ELEVATOR_ALARM_EVENT_PREFIX "elevator.alarm."
+#define ELEVATOR_ALARM_EVENT_PREFIX "elevator.event."
 
 enum message {
     MSG_QUIT = 0,

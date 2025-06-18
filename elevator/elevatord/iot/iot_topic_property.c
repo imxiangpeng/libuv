@@ -121,7 +121,7 @@ static struct sconf_proto _elevatord_options[] = {
 };
 
 static int _realtime_report_times = 0;
-static const int _realtime_report_fac = 60 * 100;  // 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
+static const int _realtime_report_fac = 60 * DEFAULT_ACCELEROMETER_SAMPLING_RATE_HZ;  // 100;  // 10 * sampling_rate = 100 * 1/100 = 1s
 
 static void schedule_report(void);
 static void _iot_motion_observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);

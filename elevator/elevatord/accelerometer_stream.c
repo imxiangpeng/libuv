@@ -3,13 +3,14 @@
 #include "accelerometer_stream.h"
 
 #include <assert.h>
+#include <fftw3.h>
+#include <limits.h>
 #include <math.h>
 #include <stddef.h>
-
-#include <fftw3.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "butterworth_filter.h"
@@ -27,9 +28,12 @@
 #define ZUPT_ACC_THRESHOLD 0.09
 // 这里不能采用 0.1 不然会飞出去，出现无法归零的情况
 #define ZUPT_SPEED_THRESHOLD 0.2
+#define ZUPT_STDDEV_THRESHOLD 0.02
+#define ZUPT_SLOPE_THRESHOLD 0.01
 
 // force cut 10Hz
-#define BUTTERWORTH_CUTOFF_FREQUENCY 10
+#define BUTTERWORTH_CUTOFF_FREQUENCY 2
+#define BUTTERWORTH_CUTOFF_FREQUENCY2 2
 
 #define ACCEL_JITTER_THRESHOLD 0.35
 
@@ -89,6 +93,10 @@ struct accelerometer_stream {
     int64_t now;
 
     struct fft_stream fft[IMU_AXES];
+
+    // mxp, 20250616, add delay accel window, used to detect accel feature
+    struct moving_window* accel_slice;
+    struct butterworth_filter* accel_slice_filter;
 };
 
 enum calibration_field {
@@ -158,12 +166,22 @@ static const double R[EKF_M * EKF_M] = {
 static const double ACCEL_JITTER_STD_THRESHOLD = 0.03;
 static const double G = 9.81;
 
-// static double _velocity = 0;
-// static double _distance = 0;
+static double _velocity = 0;
+static double _distance = 0;
+static double _slope = 0;
+
+// mxp, 20250616 更新 ZUPT 方案
+// 1. +速度过零强制归零+
+// 2. 添加加速度 slice 窗口，延迟加速度数据
+// 3. 将加速度延迟传递给 ekf
+// 4. 判断 slice 窗口中加速度方差或者斜率判断加速度是否趋向静止
+static double _zupt_velocity_detector = 0;
+// static int _zupt_velocity_cross_zero = 0;
 
 // static double _bw_velocity = 0;
 // static double _bw_distance = 0;
 
+static FILE* _dump_fp = NULL;
 static void _ekf_run_model(struct accelerometer_stream* self, double input[IMU_AXES], double dt);
 static int _fft_process(struct accelerometer_stream* self, double* a, int len);
 
@@ -410,7 +428,8 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
     // }
 
     HR_LOGD("filtered accel:%f %f %f\n", accel_filtered[0], accel_filtered[1], accel_filtered[2]);
-    _ekf_run_model(s, accel.x /*accel_filtered*/, dt);
+    // _ekf_run_model(s, accel.x /*accel_filtered*/, dt);
+    _ekf_run_model(s, accel_filtered, dt);
 
     s->distance = s->ekf.x[0];
     s->velocity = s->ekf.x[1];
@@ -435,11 +454,20 @@ static int accelerometer_stream_read(struct motion_stream* self, void* data, siz
         // method two: using accel - filtered value
         // now we use first
 #if 1
+#if 0        
         double fft_accels[IMU_AXES] = {
             accel_filtered[0] - s->zero_bias_accels[0] /*- s->ekf.x[3]*/,
             accel_filtered[1] - s->zero_bias_accels[1] /*- s->ekf.x[4]*/,
             accel_filtered[2] - s->zero_bias_accels[2] /*- s->ekf.x[5]*/,
         };
+#endif
+        
+        double fft_accels[IMU_AXES] = {
+            accel.x[0] - s->zero_bias_accels[0] /*- s->ekf.x[3]*/,
+            accel.x[1] - s->zero_bias_accels[1] /*- s->ekf.x[4]*/,
+            accel.x[2] - s->zero_bias_accels[2] /*- s->ekf.x[5]*/,
+        };
+       
 #else
         double fft_accels[IMU_AXES] = {
             accel_filtered[0] - s->ekf.x[3],
@@ -554,12 +582,46 @@ static int accelerometer_stream_close(struct motion_stream* self) {
     s->sensor = NULL;
     return 0;
 }
+static int dump_data_init(void) {
+    char buf[LINE_MAX] = {0};
+    char path[256] = "accel-";
+    char* ptr = path + strlen(path);
+    struct tm tm;
+    struct timespec ts;
+
+    if (_dump_fp) {
+        fclose(_dump_fp);
+        _dump_fp = NULL;
+    }
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    strftime(ptr, sizeof(path) - strlen(path) - 1, "%Y-%m-%d-%H-%M-%S", &tm);
+    strcat(path, ".csv");
+    HR_LOGD("dump path:%s\n", path);
+
+    FILE* fp = fopen(path, "w+");
+    if (!fp) {
+        perror("open error:");
+        fclose(fp);
+        return -1;
+    }
+
+    _dump_fp = fp;
+
+    snprintf(buf, sizeof(buf), "linear,accel,velocity,distance,slope,stddev,mean,v,d\n");
+    fwrite(buf, 1, strlen(buf), _dump_fp);
+    return 0;
+}
 
 struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     struct accelerometer_stream* s = (struct accelerometer_stream*)calloc(1, sizeof(struct accelerometer_stream));
     if (!s) {
         return NULL;
     }
+
+    dump_data_init();
 
     s->G = G;
     s->sampling_frequency = sampling_frequency;
@@ -597,6 +659,9 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
     // s->calibration_data = (double*)calloc(sizeof(double), s->calibration_retries_max);
     s->calibration_data = (struct axis_mean*)calloc(sizeof(*s->calibration_data), s->calibration_retries_max);
 
+    s->accel_slice = moving_window_init(32); // 32 slice, do not use too large
+
+    s->accel_slice_filter = butterworth_filter_init(BUTTERWORTH_CUTOFF_FREQUENCY2, sampling_frequency);
     // config load
     // CALIBRATED=1
     // G_1000=9812
@@ -660,6 +725,16 @@ int accelerometer_stream_deinit(struct motion_stream* self) {
     struct accelerometer_stream* s = container_of(self, struct accelerometer_stream, self);
     if (!self || !s) {
         return -1;
+    }
+
+    if (s->accel_slice) {
+        moving_window_release(s->accel_slice);
+        s->accel_slice = NULL;
+    }
+    
+    if (s->accel_slice_filter) {
+            butterworth_filter_deinit(s->accel_slice_filter);
+            s->accel_slice_filter = NULL;
     }
 
     for (size_t i = 0; i < ARRAY_SIZE(s->calibration_mw); i++) {
@@ -726,6 +801,14 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         // }
         HR_LOGD("%s(%d): linear %f vs %f = %f, linear - G:%f\n", __FUNCTION__, __LINE__, linear_accel, linear, linear_accel - linear, linear - self->G);
     }
+
+    // linear_accel = butterworth_filter_process(self->accel_slice_filter, linear_accel);
+    moving_window_update(self->accel_slice, linear_accel);
+    // wait full window
+    if (isnan(self->accel_slice->stddev)) {
+        return;
+    }
+
     // clang-format off
     // F_k
     double F[EKF_N * EKF_N] = {
@@ -774,8 +857,9 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     }
 
     HR_LOGD("a:%f, x:%f-%f-%f-%f-%f-%f\n", linear_accel, ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
-
-    if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < ZUPT_SPEED_THRESHOLD /*0.1*/) && fabs(linear_accel) < ZUPT_ACC_THRESHOLD /*0.09*/)) {
+#if 0
+    // if (self->is_calibration_completed == 0 || ((fabs(ekf->x[1]) != 0 && fabs(ekf->x[1]) < ZUPT_SPEED_THRESHOLD /*0.1*/) && fabs(linear_accel) < ZUPT_ACC_THRESHOLD /*0.09*/)) {
+    if (self->is_calibration_completed == 0) {
         HR_LOGD("ZUPT .............ekf->x[0]:%f, x[1]:%f, a:%f..\n", ekf->x[0], ekf->x[1], linear_accel);
 
         linear_accel = 0;
@@ -792,10 +876,70 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         // F[EKF_N + 1] = 0;
         //}
     }
+#endif
+    double slope = 0;
+    moving_window_slope(self->accel_slice, &slope);
+    _slope = slope;
+    /*if (self->accel_mw->capability == self->accel_mw->size) {
+        _slope = slope;
 
+        self->accel_mw->size = 0;
+        self->accel_mw->index = 0;
+        self->accel_mw->sum = 0;
+    }*/
+    HR_LOGD("distance:%f, velocity:%f, linear_accel:%f, slope:%f(%f), mean:%f\n", ekf->x[0], ekf->x[1], linear_accel, slope, slope * self->sampling_frequency, self->accel_slice->mean);
+
+    if (_dump_fp) {
+        // linear,accel,velocity,distance,slope,stddev,mean
+        fprintf(_dump_fp, "%f,%f,%f,%f,%f,%f,%f,%f,%f\n", linear_accel, ekf->x[2], ekf->x[1], ekf->x[0], _slope * self->sampling_frequency, self->accel_slice->stddev, self->accel_slice->mean, _velocity, _distance);
+    }
+#if 0    
+    if (fabs(ekf->x[1]) < 0.001 /*ZUPT_SPEED_THRESHOLD*/) {
+        if (fabs(slope) < 0.001) {
+            HR_LOGD("ZUPT ......slope:%f.......ekf->x[0]:%f, x[1]:%f, a:%f..\n", slope, ekf->x[0], ekf->x[1], linear_accel);
+
+            linear_accel = 0;
+
+            fx[1] = 0;
+            ekf->x[1] = 0;             // 速度置 0
+            ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
+            fx[2] = 0;
+            ekf->x[2] = 0;  // reset delta accel
+            ekf->P[2 * EKF_N + 2] = 1e-10;
+        }
+    }
+#endif
+#if 1
+    moving_window_trim_avg(self->accel_slice, &linear_accel);
+    // linear_accel = self->accel_slice->mean;
+    // linear_accel = self->accel_slice->data[self->accel_slice->index];
     if (fabs(linear_accel) < ZUPT_ACC_THRESHOLD) {
     }
 
+    if (self->accel_slice->stddev < ZUPT_STDDEV_THRESHOLD /*&& fabs(slope) < 0.05*/ && fabs(self->accel_slice->mean) < ZUPT_ACC_THRESHOLD) {
+        // 判断速度与加速度是否相同方向，相同方向是加速，不同是减速
+        HR_LOGD("zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_slice->stddev, _zupt_velocity_detector, ekf->x[1]);
+        // 速度与加速度方向相反代表减速过程
+        // 不需要判断吧，开始运行的时候，方差肯定是增大的趋势，根本都不会进入到这里
+        // if (self->ekf.x[1] * self->accel_mw->mean < 0) {
+        HR_LOGD("decrease zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_slice->stddev, _zupt_velocity_detector, ekf->x[1]);
+        if (fabs(self->ekf.x[1]) < 0.2) {
+            HR_LOGD("do decrease zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_slice->stddev, _zupt_velocity_detector, ekf->x[1]);
+            linear_accel = 0;
+
+            _velocity = 0;
+
+            fx[1] = 0;
+            ekf->x[1] = 0;             // 速度置 0
+            ekf->P[EKF_N + 1] = 1e-6;  // 速度误差极小，避免恢复
+            fx[2] = 0;
+            ekf->x[2] = 0;  // reset delta accel
+            ekf->P[2 * EKF_N + 2] = 1e-10;
+        }            
+        //}
+        linear_accel = 0;
+    }
+#endif
     HR_LOGD("fx: [%f, %f, %f,%f]\n", fx[0], fx[1], fx[2], fx[3]);
     HR_LOGD("x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
     HR_LOGD("input: %f, %f, %f\n", accel[0], accel[1], accel[2]);
@@ -804,7 +948,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     // do not cut off too much, realtime status should display correct
     // 0.35 ?
     if (fabs(linear_accel) < 0.05) {
-        linear_accel = 0;
+     // linear_accel = 0;
     }
 
     const double z[EKF_M] = {linear_accel, accel[0], accel[1], accel[2]};
@@ -820,8 +964,28 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
     ekf_update(ekf, z, hx, H, R);
 
     HR_LOGD("after x: [%f, %f, %f,%f, %f, %f]\n", ekf->x[0], ekf->x[1], ekf->x[2], ekf->x[3], ekf->x[4], ekf->x[5]);
-    //_distance += dt * _velocity + 0.5 * linear_accel * dt *dt;
-    //_velocity += dt * linear_accel;
+    _distance += dt * _velocity + 0.5 * linear_accel * dt * dt;
+    _velocity += dt * linear_accel;
+#if 0
+    if (_zupt_velocity_detector * _velocity < 0) {
+        HR_LOGD("zupt cross zero ...\n");
+        _zupt_velocity_cross_zero = 1;
+    }
+
+    HR_LOGD("zupt cross zero stddev:%f...\n", self->accel_mw->stddev);
+    if (self->accel_mw->stddev < 0.01) {
+        HR_LOGD("zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_mw->stddev, _zupt_velocity_detector, ekf->x[1]);
+        if (fabs(_zupt_velocity_detector) > fabs(ekf->x[1])) {
+            HR_LOGD("do ... zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_mw->stddev, _zupt_velocity_detector, ekf->x[1]);
+            // decrease
+            if (fabs(ekf->x[1]) < 0.5) {
+                _zupt_velocity_cross_zero = 0;
+                _zupt_velocity_detector = 0;
+            }
+        }
+    }
+#endif
+    _zupt_velocity_detector = _velocity;
     // HR_LOGD("manual distance & velocity: [%f, %f]\n", _distance, _velocity);
 }
 
