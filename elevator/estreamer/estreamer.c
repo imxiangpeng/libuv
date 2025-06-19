@@ -58,17 +58,11 @@ static int traverse_media_record_list(struct hrbuffer* lists, uint64_t begin, ui
     struct record media;
     struct dirent* entry = NULL;
     size_t count = 0;
-    // struct hrbuffer record_lists = {.data = NULL, .offset = 0, .size = 0, .preallocated = 0};
 
     DIR* dir = opendir(IPC_MEDIA_RECORD_DIR);
     if (!dir) {
         return 0;
     }
-
-    // if (hrbuffer_alloc(&record_lists, sizeof(struct record) * 50) < 0) {
-    //     // failed
-    //     return 0;
-    // }
 
     while ((entry = readdir(dir)) != NULL) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
@@ -165,13 +159,14 @@ int main(int argc, const char** argv) {
     const char* begin = "2025-06-12 15:03:30";
     // const char* end = "2025-06-12 15:18:20";
     // const char* begin = "2025-06-12 15:03:25";
-    const char* end = "2025-06-12 15:18:25";
+    const char* end = "2025-06-12 15:15:25";
+    // const char* end = "2025-06-12 15:03:40";
 
     // const char* begin = "2025-06-11 17:38:24";
     // const char* end = "2025-06-11 18:04:16";
 
-    //const char* begin = "2025-06-17 06:04:19";
-    //const char* end = "2025-06-17 06:06:19";
+    // const char* begin = "2025-06-17 06:04:19";
+    // const char* end = "2025-06-17 06:06:19";
 
     time_t b = command_date_format_string_to_seconds(begin);
     time_t e = command_date_format_string_to_seconds(end);
@@ -196,21 +191,32 @@ int main(int argc, const char** argv) {
     for (int i = 0; i < count; i++) {
         struct record* r = (struct record*)list.data;
         printf("%d -> %ld : %s, clip:[%d,%d]\n", i, r[i].timestamp, r[i].name, r[i].clip_start, r[i].clip_end);
-
+#if 0
         if (r[i].clip_start != 0 || r[i].clip_end != 0) {
             char output[512] = {0};
 
             snprintf(output, sizeof(output), ".estream_%d_%s", getpid(), r[i].name);
             if (r[i].clip_end == 0) {
-                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -c copy %s/%s", r[i].clip_start, r[i].name, IPC_MEDIA_RECORD_DIR, output);
+                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -c copy -copyts %s/%s", r[i].clip_start, r[i].name, IPC_MEDIA_RECORD_DIR, output);
             } else {
-                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -t %d -c copy %s/%s", r[i].clip_start, r[i].name, r[i].clip_end, IPC_MEDIA_RECORD_DIR, output);
+                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -t %d -c copy -copyts %s/%s", r[i].clip_start, r[i].name, r[i].clip_end, IPC_MEDIA_RECORD_DIR, output);
             }
             printf("cmd:%s\n", cmd);
             system(cmd);
             fprintf(fp, "file '%s'\n", output);
         } else {
             fprintf(fp, "file '%s'\n", r[i].name);
+        }
+#endif
+
+        fprintf(fp, "file '%s'\n", r[i].name);
+
+        if (r[i].clip_start != 0) {
+            fprintf(fp, "inpoint %d\n", r[i].clip_start);
+        }
+
+        if (r[i].clip_end != 0) {
+            fprintf(fp, "outpoint %d\n", r[i].clip_end);
         }
     }
 
