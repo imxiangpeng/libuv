@@ -3,14 +3,17 @@
 // implement occlusion and e-bike entering elevator alarms
 
 #include <assert.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/poll.h>
+
 #include <unistd.h>
-#include <uv.h>
+
 #include "libubox/blob.h"
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
