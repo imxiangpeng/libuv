@@ -127,11 +127,11 @@ static int traverse_media_record_list(struct hrbuffer* lists, uint64_t begin, ui
     return count;
 }
 
-static time_t command_date_format_string_to_seconds(const char* date) {
+static int64_t date_format_string_to_seconds(const char* date) {
     struct tm tm;
     // must reset tm, because strptime not fill all fields
     memset((void*)&tm, 0, sizeof(tm));
-    if (strptime(date, "%Y-%m-%d %H:%M:%S", &tm) == NULL) {
+    if (strptime(date, "%Y%m%d%H%M%S", &tm) == NULL) {
         return 0;
     }
 
@@ -141,25 +141,40 @@ static time_t command_date_format_string_to_seconds(const char* date) {
 
 // stream to
 // 1. ftp
+// curl --ftp-pasv --retry 5 --retry-delay 5 --retry-max-time 60
+// -T output.mp4 ftp://user:password@ftp.example.com/videos/output.mp4
 // 2. rtmp
+// 3. local
 
+// estreamer begin_timestamp end_timestamp url
+// estreamer 20250617060012 20250617060700 ftp://inspur:inspur88%2A@ftp.hqszjs.com:2100/event_files/GD500103000172/20250617_060012.mp4
 int main(int argc, const char** argv) {
     (void)argc;
     (void)argv;
 
+    // int64_t begin_ts;
     char cmd[LINE_MAX] = {0};
     char concat_list[256] = {0};
+    char concat_path[256] = {0};
 
     FILE* fp = NULL;
     struct hrbuffer list;
 
+    if (argc < 4) {
+        return -1;
+    }
+
+    const char* begin = argv[1];
+    const char* end = argv[2];
+    const char* url = argv[3];
+
     // const char* begin = "2025-06-18 11:31:22";
     // const char* end = "2025-06-18 11:45:22";
     // discontinue
-    const char* begin = "2025-06-12 15:03:30";
+    // const char* begin = "20250612150330";
     // const char* end = "2025-06-12 15:18:20";
     // const char* begin = "2025-06-12 15:03:25";
-    const char* end = "2025-06-12 15:15:25";
+    // const char* end = "20250612150345";
     // const char* end = "2025-06-12 15:03:40";
 
     // const char* begin = "2025-06-11 17:38:24";
@@ -168,8 +183,8 @@ int main(int argc, const char** argv) {
     // const char* begin = "2025-06-17 06:04:19";
     // const char* end = "2025-06-17 06:06:19";
 
-    time_t b = command_date_format_string_to_seconds(begin);
-    time_t e = command_date_format_string_to_seconds(end);
+    int64_t b = date_format_string_to_seconds(begin);
+    int64_t e = date_format_string_to_seconds(end);
 
     snprintf(concat_list, sizeof(concat_list), IPC_MEDIA_RECORD_DIR "/.estream_%d_list.txt", getpid());
     fp = fopen(concat_list, "w+");
@@ -177,6 +192,8 @@ int main(int argc, const char** argv) {
         printf("can not open file :%s\n", concat_list);
         return -1;
     }
+
+    snprintf(concat_path, sizeof(concat_path), IPC_MEDIA_RECORD_DIR "/.estream_%d_%s_%s.mp4", getpid(), begin, end);
 
     memset((void*)&list, 0, sizeof(list));
 
@@ -188,26 +205,15 @@ int main(int argc, const char** argv) {
 
     int count = traverse_media_record_list(&list, b, e);
 
+    if (count == 0) {
+        fclose(fp);
+        hrbuffer_free(&list);
+        return -1;
+    }
+
     for (int i = 0; i < count; i++) {
         struct record* r = (struct record*)list.data;
         printf("%d -> %ld : %s, clip:[%d,%d]\n", i, r[i].timestamp, r[i].name, r[i].clip_start, r[i].clip_end);
-#if 0
-        if (r[i].clip_start != 0 || r[i].clip_end != 0) {
-            char output[512] = {0};
-
-            snprintf(output, sizeof(output), ".estream_%d_%s", getpid(), r[i].name);
-            if (r[i].clip_end == 0) {
-                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -c copy -copyts %s/%s", r[i].clip_start, r[i].name, IPC_MEDIA_RECORD_DIR, output);
-            } else {
-                snprintf(cmd, sizeof(cmd), "ffmpeg -y -ss %d -i " IPC_MEDIA_RECORD_DIR "/%s -t %d -c copy -copyts %s/%s", r[i].clip_start, r[i].name, r[i].clip_end, IPC_MEDIA_RECORD_DIR, output);
-            }
-            printf("cmd:%s\n", cmd);
-            system(cmd);
-            fprintf(fp, "file '%s'\n", output);
-        } else {
-            fprintf(fp, "file '%s'\n", r[i].name);
-        }
-#endif
 
         fprintf(fp, "file '%s'\n", r[i].name);
 
@@ -225,11 +231,19 @@ int main(int argc, const char** argv) {
 
     memset((void*)cmd, 0, sizeof(cmd));
 
-    snprintf(cmd, sizeof(cmd), "ffmpeg -y -f concat -safe 0 -i %s -c copy -f mp4 %s", concat_list, "output.mp4");
+    if (0 == strncmp(url, "rtmp://", strlen("rtmp://"))) {
+        snprintf(cmd, sizeof(cmd), "ffmpeg -loglevel quiet -y -re -f concat -safe 0 -i %s -c copy -f flv %s;", concat_list, url);
+    } else if (0 == strncmp(url, "ftp://", strlen("ftp://"))) {
+        snprintf(cmd, sizeof(cmd),
+                 "ffmpeg -loglevel quiet -y -f concat -safe 0 -i %s -c copy -f mp4 %s;"
+                 "curl -s --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s",
+                 concat_list, concat_path, concat_path, url);
+    }
     printf("cmd:%s\n", cmd);
 
-    // system(cmd);
+    system(cmd);
 
-    // unlink(concat_list);
+    unlink(concat_path);
+    unlink(concat_list);
     return 0;
 }
