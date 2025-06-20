@@ -1,4 +1,5 @@
 
+#include <bits/posix2_lim.h>
 #include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
@@ -61,6 +62,7 @@ enum {
     PROPERTY_EGUARD_ALARM_SWITCH,
     PROPERTY_EGUARD_DTOF_SWITCH,
     PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE,
+    PROPERTY_DOOR_ROI,
     __PROPERTY_MAX
 };
 
@@ -105,6 +107,7 @@ struct property {
     [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", P_INT64, {0}, 0},
     [PROPERTY_EGUARD_DTOF_SWITCH] = {"eguard_dtof_switch", P_INT64, {0}, 0},
     [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", P_INT64, {0}, 0},
+    [PROPERTY_DOOR_ROI] = {"door_roi", P_STRING, {.val_str = ""}, 0},
 };
 
 enum {
@@ -362,6 +365,12 @@ static int _on_property_set_message(void* payload, int len) {
         schedule_report();
 
         system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
+    }
+
+    val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_DOOR_ROI].name));
+    if (val_str) {
+        char cmd[LINE_MAX] = {0};
+        snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/aa/door/roi %s", val_str);
     }
 
     cJSON_Delete(root);

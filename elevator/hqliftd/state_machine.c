@@ -103,10 +103,12 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     printf("%s(%d): come in door not opened after stopped...\n", __FUNCTION__, __LINE__);
     HR_LOGD("%s(%d): come in door not opened after stopped..., door:%d, passenger:%d\n", __FUNCTION__, __LINE__, st.door_state, st.passenger_count);
 
-    if (st.passenger_count > 0) {
-        _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
-        HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
-        elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
+        if (st.passenger_count > 0) {
+            _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+            HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+        }
     }
 }
 
@@ -115,12 +117,17 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
     struct elevator_status st;
     if (!handle)
         return;
+
     uelevator_get_status(&st);
-    if (st.passenger_count > 0) {
-        _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
-        HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
-        elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+
+    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
+        if (st.passenger_count > 0) {
+            _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+            HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+        }
     }
+
     printf("%s(%d): come in door closed and we are stopped but some one is still in elevator...:%d\n", __FUNCTION__, __LINE__, st.passenger_count);
     HR_LOGE("%s(%d): come in door closed and we are stopped but some one is still in elevator...:%d\n", __FUNCTION__, __LINE__, st.passenger_count);
 }

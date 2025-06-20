@@ -1,5 +1,7 @@
 
-// mxp, 20250618, stream media record files
+// mxp, 20250618, elevator stream media record files
+// 1. to ftp address
+// 2. to rtmp address
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
@@ -15,14 +17,9 @@
 #include <unistd.h>
 
 #include "hr_buffer.h"
-#include "sconf.h"
+#include "hr_log.h"
 
-// #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
-#define IPC_MEDIA_RECORD_DIR "./media"
-#define IPC_MEDIA_RECORD_REQUEST_PLAYLIST \
-    IPC_MEDIA_RECORD_DIR                  \
-    "/"                                   \
-    ".command_upload_record_playlist"
+#define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
 
 // 2025-05-26_18-22-00_duration.mp4
 #define MEDIA_RECORD_DATE_STRING_FORMAT "%Y-%m-%d_%H-%M-%S"
@@ -52,12 +49,16 @@ static int compare_record_by_timestamp(const void* a, const void* b) {
     return (int)(ra->timestamp - rb->timestamp);
 }
 
-static int traverse_media_record_list(struct hrbuffer* lists, uint64_t begin, uint64_t end) {
+static int traverse_media_record_list(struct hrbuffer* lists, uint64_t begin, uint64_t end, int* completed) {
     char* ptr = NULL;
 
     struct record media;
     struct dirent* entry = NULL;
     size_t count = 0;
+
+    if (!completed) {
+        return -1;
+    }
 
     DIR* dir = opendir(IPC_MEDIA_RECORD_DIR);
     if (!dir) {
@@ -119,6 +120,9 @@ static int traverse_media_record_list(struct hrbuffer* lists, uint64_t begin, ui
 
         if ((uint64_t)r[count - 1].timestamp + r[count - 1].duration < end) {
             printf("maybe not finished, we should wait ...\n");
+            *completed = 0;
+        } else {
+            *completed = 1;
         }
     }
 
@@ -160,8 +164,16 @@ int main(int argc, const char** argv) {
     FILE* fp = NULL;
     struct hrbuffer list;
 
+    int completed = 0;
+    int count = 0;
+    int l = 0;
+
     if (argc < 4) {
         return -1;
+    }
+
+    for (int i = 0; i < argc; i++) {
+        printf("%d: %s\n", i, argv[i]);
     }
 
     const char* begin = argv[1];
@@ -186,28 +198,41 @@ int main(int argc, const char** argv) {
     int64_t b = date_format_string_to_seconds(begin);
     int64_t e = date_format_string_to_seconds(end);
 
-    snprintf(concat_list, sizeof(concat_list), IPC_MEDIA_RECORD_DIR "/.estream_%d_list.txt", getpid());
+    snprintf(concat_list, sizeof(concat_list), IPC_MEDIA_RECORD_DIR "/.estreamer_%d_list.txt", getpid());
     fp = fopen(concat_list, "w+");
     if (!fp) {
         printf("can not open file :%s\n", concat_list);
         return -1;
     }
 
-    snprintf(concat_path, sizeof(concat_path), IPC_MEDIA_RECORD_DIR "/.estream_%d_%s_%s.mp4", getpid(), begin, end);
+    snprintf(concat_path, sizeof(concat_path), IPC_MEDIA_RECORD_DIR "/.estreamer_%d_%s_%s.mp4", getpid(), begin, end);
 
     memset((void*)&list, 0, sizeof(list));
 
-    if (hrbuffer_alloc(&list, sizeof(struct record) * 50) < 0) {
+    if (hrbuffer_alloc(&list, sizeof(struct record) * 10) < 0) {
         fclose(fp);
+        unlink(concat_list);
         // failed
         return 0;
     }
 
-    int count = traverse_media_record_list(&list, b, e);
+    // wait 10min
+    while (l++ < 60) {
+        hrbuffer_reset(&list);
+        count = traverse_media_record_list(&list, b, e, &completed);
+
+        if (completed == 1) {
+            break;
+        }
+
+        printf("%s(%d): traverse count:%d, completed:%d, l:%d\n", __FUNCTION__, __LINE__, count, completed, l);
+        usleep(10 * 1000 * 1000);
+    }
 
     if (count == 0) {
         fclose(fp);
         hrbuffer_free(&list);
+        unlink(concat_list);
         return -1;
     }
 
@@ -234,16 +259,18 @@ int main(int argc, const char** argv) {
     if (0 == strncmp(url, "rtmp://", strlen("rtmp://"))) {
         snprintf(cmd, sizeof(cmd), "ffmpeg -loglevel quiet -y -re -f concat -safe 0 -i %s -c copy -f flv %s;", concat_list, url);
     } else if (0 == strncmp(url, "ftp://", strlen("ftp://"))) {
+        const char* user = getenv("FTP_USERNAME");
+        const char* passwd = getenv("FTP_PASSWORD");
         snprintf(cmd, sizeof(cmd),
                  "ffmpeg -loglevel quiet -y -f concat -safe 0 -i %s -c copy -f mp4 %s;"
-                 "curl -s --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s",
-                 concat_list, concat_path, concat_path, url);
+                 "curl --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s -u '%s:%s'",
+                 concat_list, concat_path, concat_path, url, user, passwd);
     }
     printf("cmd:%s\n", cmd);
 
     system(cmd);
 
-    unlink(concat_path);
-    unlink(concat_list);
+    //unlink(concat_path);
+    //unlink(concat_list);
     return 0;
 }

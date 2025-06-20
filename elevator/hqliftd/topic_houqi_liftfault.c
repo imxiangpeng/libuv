@@ -1,11 +1,14 @@
 // mxp, 20250522, implement houqi topic: /API/V1/Up/LiftFault
 
+#include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <uuid/uuid.h>
 
 #include "cjson/cJSON.h"
@@ -19,6 +22,8 @@
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
 #define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
+#define LIFTFAULT_REPORT_EVENT_VIDEO_DURATION 10
+#define LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS 120
 
 // fault event only in memory do not save
 struct lift_fault_event {
@@ -39,11 +44,18 @@ static HR_LIST_HEAD(_lift_fault_idle_queue);
 static pthread_mutex_t _queue_lock;
 
 enum {
-    OPTION_FAULT_REPORT_SWITCH = 0,
+
+    OPTION_FIELD_FTP_ADDRESS = 0,
+    OPTION_FIELD_FTP_USERNAME,
+    OPTION_FIELD_FTP_PASSWORD,
+    OPTION_FAULT_REPORT_SWITCH,
     OPTION_FAULT_REPORT_LIMIT_PER_DAY,
 
 };
-static struct sconf_proto _fault_options[] = {
+static struct sconf_proto _options[] = {
+    [OPTION_FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = "ftp://ftp.hqszjs.com:2100"}},
+    [OPTION_FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = "inspur"}},
+    [OPTION_FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
     [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
     [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_INT64, {.int64 = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
 };
@@ -63,6 +75,8 @@ static struct fault_report_statistics {
 
 // date to record and reset report statistics
 static struct tm _fault_report_statistics_tm;
+
+static void upload_fault_video(struct lift_fault_event* e);
 
 static int to_houqi_fault(enum elevator_exception fault) {
     switch (fault) {
@@ -131,7 +145,7 @@ static int _on_publish(void** payload, int* len) {
     // cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     // houqi's macAddr is serialno, length must > 12
     cJSON_AddStringToObject(root, "macAddr", elevator_serialno());  // elevator_mac
-    // dahua use 20 chars, such as: "uuid":"f840fe850000ebd46e3c"                                                                    
+    // dahua use 20 chars, such as: "uuid":"f840fe850000ebd46e3c"
     cJSON_AddStringToObject(root, "uuid", uuid_str);
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
@@ -175,7 +189,7 @@ static int _on_publish(void** payload, int* len) {
         free(e);
     }
 
-    if (_fault_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
         cJSON_Delete(root);
         return 0;
     }
@@ -187,6 +201,7 @@ static int _on_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", (char*)*payload);
+    *len = 0;
     return 0;
 }
 
@@ -205,7 +220,7 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
 
     pthread_mutex_init(&_queue_lock, NULL);
 
-    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _fault_options, sizeof(_fault_options) / sizeof(_fault_options[0]));
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
 
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
@@ -257,8 +272,8 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         _fault_report_statistics_tm.tm_mon != tm.tm_mon ||
         _fault_report_statistics_tm.tm_mday != tm.tm_mday) {
         HR_LOGD("%s(%d): reset limit %d-%d-%d last %d-%d-%d...\n", __FUNCTION__, __LINE__,
-                tm.tm_year, tm.tm_mon, tm.tm_mday,
-                _fault_report_statistics_tm.tm_year, _fault_report_statistics_tm.tm_mon, _fault_report_statistics_tm.tm_mday);
+                tm.tm_year + 1900, tm.tm_mon, tm.tm_mday,
+                _fault_report_statistics_tm.tm_year + 1900, _fault_report_statistics_tm.tm_mon, _fault_report_statistics_tm.tm_mday);
 
         memcpy((void*)&_fault_report_statistics_tm, (void*)&tm, sizeof(struct tm));
         // reset limit
@@ -279,10 +294,26 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         return -1;
     }
 
-    if (s->report_count >= _fault_options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.int64) {
+    if (s->report_count >= _options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.int64) {
         HR_LOGD("%s(%d): fault:0x%X, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
         return -1;
     }
+
+    pthread_mutex_lock(&_queue_lock);
+
+    if (!hr_list_empty(&_lift_fault_idle_queue)) {
+        struct lift_fault_event* f = NULL;
+        hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
+            if (f->type == fault) {
+                HR_LOGE("%s(%d): fault:0x%X is occurring, do not report again\n", __FUNCTION__, __LINE__, fault);
+
+                pthread_mutex_unlock(&_queue_lock);
+                return -1;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&_queue_lock);
 
     e = fault_event_alloc();
     if (!e) {
@@ -296,6 +327,11 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     e->fault_begin_time = get_realtime_ms();
 
+    if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+        // e->fault_begin_time = 1749711827000 ;/// 1749740645000;
+        upload_fault_video(e);
+    }
+
     publish_fault_event(e);
     return 0;
 }
@@ -308,7 +344,7 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
     pthread_mutex_lock(&_queue_lock);
 
-    if (hr_list_empty(&_lift_fault_message_queue)) {
+    if (hr_list_empty(&_lift_fault_idle_queue)) {
         pthread_mutex_unlock(&_queue_lock);
         return -1;
     }
@@ -330,6 +366,10 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     e->fault_end_time = get_realtime_ms();
     pthread_mutex_unlock(&_queue_lock);
+
+    if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+        upload_fault_video(e);
+    }
 
     publish_fault_event(e);
     return 0;
@@ -355,4 +395,122 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
     pthread_mutex_unlock(&_queue_lock);
 
     return 0;
+}
+
+// should convert utc timestamp to local timestamp
+static void upload_fault_video(struct lift_fault_event* e) {
+    struct tm tm;
+    struct timespec ts;
+
+    char begin_str[64] = {0};
+    char end_str[64] = {0};
+
+    char url[LINE_MAX] = {0};
+
+    char name[64] = {0};
+
+    if (!e) {
+        return;
+    }
+
+    memset((void*)&tm, 0, sizeof(tm));
+    memset((void*)&ts, 0, sizeof(ts));
+
+    switch (e->type) {
+        case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
+        case ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR:
+        case ELEVATOR_EXCEPTION_RUN_OVER_TOP:
+        case ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM:
+        case ELEVATOR_EXCEPTION_OVERSPEED:
+            // report video 10 seconds around event
+
+            ts.tv_sec = e->fault_begin_time / 1000;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
+
+            memset((void*)&tm, 0, sizeof(tm));
+            memset((void*)&ts, 0, sizeof(ts));
+            ts.tv_sec = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
+
+
+            memset((void*)&tm, 0, sizeof(tm));
+            memset((void*)&ts, 0, sizeof(ts));
+            ts.tv_sec = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
+
+            snprintf(url, sizeof(url), "ftp://ftp.hqszjs.com:2100/event_files/%s/%s", elevator_deviceid(), name);
+            break;
+
+        case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
+            // report when finished
+            if (e->fault_end_time == 0) {
+                return;
+            }
+            ts.tv_sec = e->fault_begin_time / 1000;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
+
+            memset((void*)&tm, 0, sizeof(tm));
+            memset((void*)&ts, 0, sizeof(ts));
+
+            ts.tv_sec = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
+            /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
+
+            memset((void*)&tm, 0, sizeof(tm));
+            memset((void*)&ts, 0, sizeof(ts));
+            ts.tv_sec = e->fault_end_time / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+            (void)localtime_r(&ts.tv_sec, &tm);
+            /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
+
+            snprintf(url, sizeof(url), "ftp://ftp.hqszjs.com:2100/event_files/%s/%s", elevator_deviceid(), name);
+            break;
+
+        default:
+            // ignore
+            return;
+    }
+
+    if (strlen(begin_str) == 0 || strlen(end_str) == 0 || strlen(url) == 0) {
+        return;
+    }
+
+    // do fork ...
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        HR_LOGE("can not start estreamer\n");
+        return;
+    }
+
+    if (pid == 0) {  // child
+        char* argv[] = {
+            "/home/alex/workspace/workspace/libuv/libuv/build/elevator/estreamer/estreamer",
+            begin_str,
+            end_str,
+            url,
+            NULL,
+        };
+
+        setenv("FTP_USERNAME", _options[OPTION_FIELD_FTP_USERNAME].value.string, 1);
+        setenv("FTP_PASSWORD", _options[OPTION_FIELD_FTP_PASSWORD].value.string, 1);
+        for (size_t i = 0; i < sizeof(argv) / sizeof(argv[0]); i++) {
+            printf("%ld --> %s\n", i, argv[i]);
+        }
+
+        if (execvp(argv[0], argv /*, envp*/) < 0) {
+            HR_LOGE("%s(%d): can not start:%s, %s\n", __FUNCTION__, __LINE__, argv[0], strerror(errno));
+            exit(127);
+        }
+
+        HR_LOGD("child %s finished\n", argv[0]);
+        exit(127);
+    }
+
+    HR_LOGD("this is parent process ....child:%d\n", pid);
 }

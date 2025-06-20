@@ -22,12 +22,12 @@
 #include <time.h>
 #include <unistd.h>
 #include <uv.h>
+
 #include "elevator.h"
 #include "file_util.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
 #include "sconf.h"
-
 #include "uviot.h"
 
 // #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
@@ -43,6 +43,8 @@
 #define COMMAND_DATE_STRING_FORMAT "%Y-%m-%d %H:%M:%S"
 // 2025-05-26_18-22-00.mp4
 #define MEDIA_RECORD_DATE_STRING_FORMAT "%Y-%m-%d_%H-%M-%S"
+
+#define COMMAND_RTMP_URL_PREFIX "rtmp://srs.hqszjs.com:1935/live/"
 
 // mxp, 20250609, do not send video without stop
 // houqi's sim is data limited about 85G
@@ -160,7 +162,7 @@ static int _on_command_message(void* payload, int len) {
         // mxp, 20250609, do not restart when timer is not fired
         if (!uv_is_active((uv_handle_t*)&_sendvideo_timer)) {
             char cmd[512] = {0};
-            snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
+            snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location " COMMAND_RTMP_URL_PREFIX "/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
             system(cmd);
         }
 
@@ -172,22 +174,75 @@ static int _on_command_message(void* payload, int len) {
 
     // same rtmp url with Sendvideo
     if (0 == strcasecmp("videoPlayBack", type)) {
+        struct tm tm;
+        struct timespec ts;
+        uint64_t timestamp_begin = 0, timestamp_end = 0;
         char *start_time = NULL, *end_time = NULL;
-        int file_index = -1;
-        double val = cJSON_GetNumberValue(cJSON_GetObjectItem(root, "fileIndex"));
-        if (!isnan(val)) {
-            file_index = (int)val;
-            (void)file_index;
-        }
+
+        char begin_str[64] = {0};
+        char end_str[64] = {0};
+        char url[LINE_MAX] = {0};
 
         // 2024-04-06 15:57:20
         start_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "startTime"));
         end_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "endTime"));
 
         if (!start_time || !end_time) {
+            cJSON_Delete(root);
+            return -1;
         }
+        timestamp_begin = command_date_format_string_to_seconds(start_time);
+        timestamp_end = command_date_format_string_to_seconds(end_time);
+        if (timestamp_begin == 0 || timestamp_end == 0) {
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        memset((void*)&ts, 0, sizeof(ts));
+        ts.tv_sec = timestamp_begin;
+        (void)localtime_r(&ts.tv_sec, &tm);
+        strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
+
+        memset((void*)&ts, 0, sizeof(ts));
+        ts.tv_sec = timestamp_end;
+        (void)localtime_r(&ts.tv_sec, &tm);
+        strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
+
+        snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
+
         // todo
         cJSON_Delete(root);
+
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            HR_LOGE("can not start estreamer\n");
+            return -1;
+        }
+
+        if (pid == 0) {  // child
+
+            char* argv[] = {
+                "/usr/bin/estreamer",
+                begin_str,
+                end_str,
+                url,
+                NULL,
+            };
+
+            for (size_t i = 0; i < sizeof(argv) / sizeof(argv[0]); i++) {
+                HR_LOGD("%ld --> %s\n", i, argv[i]);
+            }
+
+            if (execvp(argv[0], argv) < 0) {
+                HR_LOGE("%s(%d): can not start:%s\n", __FUNCTION__, __LINE__, argv[0]);
+                exit(127);
+            }
+
+            HR_LOGD("child %s finished\n", argv[0]);
+            exit(127);
+        }
+
         return 0;
     }
 

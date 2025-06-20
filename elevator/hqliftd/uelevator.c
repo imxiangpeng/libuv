@@ -166,17 +166,19 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
                 _elevator_exception |= ELEVATOR_EXCEPTION_OVERSPEED;
                 elevator_fault_occurred(ELEVATOR_EXCEPTION_OVERSPEED);
                 HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.number);
+                printf("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.number);
             }
         } else {
             if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
                 _elevator_exception &= ~ELEVATOR_EXCEPTION_OVERSPEED;
                 elevator_fault_resolved(ELEVATOR_EXCEPTION_OVERSPEED);
                 HR_LOGD("%s(%d): !!! speed resume .............\n", __FUNCTION__, __LINE__);
+                printf("%s(%d): !!! speed resume .............\n", __FUNCTION__, __LINE__);
             }
         }
 
-        // HR_LOGD("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
-        //        _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
+        printf("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
+        _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
 
     } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
         struct blob_attr* tb[__M_MAX] = {NULL};
