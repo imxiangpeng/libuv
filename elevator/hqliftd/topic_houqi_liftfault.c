@@ -18,6 +18,7 @@
 #include "uviot.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
+#define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
 
 // fault event only in memory do not save
 struct lift_fault_event {
@@ -37,7 +38,31 @@ static HR_LIST_HEAD(_lift_fault_idle_queue);
 
 static pthread_mutex_t _queue_lock;
 
-static struct sconf_proto fault_report_switch = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}};
+enum {
+    OPTION_FAULT_REPORT_SWITCH = 0,
+    OPTION_FAULT_REPORT_LIMIT_PER_DAY,
+
+};
+static struct sconf_proto _fault_options[] = {
+    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
+    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_INT64, {.int64 = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
+};
+
+// no persist storage
+static struct fault_report_statistics {
+    enum elevator_exception exception;
+    int report_count;
+} _fault_report_statistics[] = {
+    {.exception = ELEVATOR_EXCEPTION_PEOPLE_TRAPPED, 0},
+    {.exception = ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED, 0},
+    {.exception = ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR, 0},
+    {.exception = ELEVATOR_EXCEPTION_RUN_OVER_TOP, 0},
+    {.exception = ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM, 0},
+    {.exception = ELEVATOR_EXCEPTION_OVERSPEED, 0},
+};
+
+// date to record and reset report statistics
+static struct tm _fault_report_statistics_tm;
 
 static int to_houqi_fault(enum elevator_exception fault) {
     switch (fault) {
@@ -101,8 +126,6 @@ static int _on_publish(void** payload, int* len) {
     // }
     // uuid_str[20] = '\0';
 
-    printf("uuid:%s\n", uuid_str);
-
     uelevator_get_status(&st);
     cJSON_AddStringToObject(root, "type", "LiftFault");
     // cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
@@ -120,8 +143,7 @@ static int _on_publish(void** payload, int* len) {
     // temperature & lightVariationAmplitude are in document, but dahua report it
     cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
     cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_brightness());
-    
-    
+
     cJSON* arr = cJSON_AddArrayToObject(root, "ErrorListBean");
     cJSON* fault = cJSON_CreateObject();
     cJSON_AddItemToArray(arr, fault);
@@ -153,7 +175,7 @@ static int _on_publish(void** payload, int* len) {
         free(e);
     }
 
-    if (fault_report_switch.value.int64 == 0) {
+    if (_fault_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
         cJSON_Delete(root);
         return 0;
     }
@@ -183,7 +205,7 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
 
     pthread_mutex_init(&_queue_lock, NULL);
 
-    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &fault_report_switch, 1);
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _fault_options, sizeof(_fault_options) / sizeof(_fault_options[0]));
 
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
@@ -222,22 +244,65 @@ static int publish_fault_event(struct lift_fault_event* e) {
 }
 
 int elevator_fault_occurred(enum elevator_exception fault) {
-    struct lift_fault_event* e = fault_event_alloc();
+    struct lift_fault_event* e = NULL;
+    struct fault_report_statistics* s = NULL;
+
+    struct tm tm;
+    struct timespec ts;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm);
+
+    if (_fault_report_statistics_tm.tm_year != tm.tm_year ||
+        _fault_report_statistics_tm.tm_mon != tm.tm_mon ||
+        _fault_report_statistics_tm.tm_mday != tm.tm_mday) {
+        HR_LOGD("%s(%d): reset limit %d-%d-%d last %d-%d-%d...\n", __FUNCTION__, __LINE__,
+                tm.tm_year, tm.tm_mon, tm.tm_mday,
+                _fault_report_statistics_tm.tm_year, _fault_report_statistics_tm.tm_mon, _fault_report_statistics_tm.tm_mday);
+
+        memcpy((void*)&_fault_report_statistics_tm, (void*)&tm, sizeof(struct tm));
+        // reset limit
+        for (size_t i = 0; i < sizeof(_fault_report_statistics) / sizeof(_fault_report_statistics[0]); i++) {
+            _fault_report_statistics[i].report_count = 0;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(_fault_report_statistics) / sizeof(_fault_report_statistics[0]); i++) {
+        if (fault == _fault_report_statistics[i].exception) {
+            s = &_fault_report_statistics[i];
+            break;
+        }
+    }
+
+    if (!s) {
+        HR_LOGD("%s(%d): not support fault:0x%X\n", __FUNCTION__, __LINE__, fault);
+        return -1;
+    }
+
+    if (s->report_count >= _fault_options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.int64) {
+        HR_LOGD("%s(%d): fault:0x%X, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
+        return -1;
+    }
+
+    e = fault_event_alloc();
     if (!e) {
         return -1;
     }
 
-    HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
+    // no save to persist storage
+    s->report_count++;
+    HR_LOGD("%s(%d): fault:0x%X, count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
     e->type = fault;
 
     e->fault_begin_time = get_realtime_ms();
+
     publish_fault_event(e);
     return 0;
 }
 
 // the same fault can not report more than once, before it end
 int elevator_fault_resolved(enum elevator_exception fault) {
-    struct lift_fault_event* e = NULL, *f = NULL;
+    struct lift_fault_event *e = NULL, *f = NULL;
     // we should lookup in idle list
     // ignore when can not find
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
@@ -270,8 +335,8 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     return 0;
 }
 
-int elevator_fault_review(int *type, uint64_t *occurred_ms) {
-    struct lift_fault_event *e = NULL;
+int elevator_fault_review(int* type, uint64_t* occurred_ms) {
+    struct lift_fault_event* e = NULL;
 
     if (!type || !occurred_ms) {
         return -1;
@@ -288,7 +353,6 @@ int elevator_fault_review(int *type, uint64_t *occurred_ms) {
     *occurred_ms = e->fault_begin_time;
 
     pthread_mutex_unlock(&_queue_lock);
-
 
     return 0;
 }
