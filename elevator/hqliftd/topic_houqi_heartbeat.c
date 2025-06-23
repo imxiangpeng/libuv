@@ -1,8 +1,9 @@
 // mxp, 20250502, implement houqi topic: /API/V1/Up/HeartBeat
 // auto publish every 10s
 
-
+#include <inttypes.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -48,7 +49,7 @@ typedef struct {
 
 static struct uviot* _iot = NULL;
 
-static int _calc_storage_stat(int* total, int* avail, int* percent) {
+static int _calc_storage_stat(int64_t* total, int64_t* avail, int* percent) {
     FILE* f = NULL;
     int match;
     char block_dev[256] = {0};
@@ -187,8 +188,8 @@ static void print_memory_usage() {
 static int _on_publish(void** payload, int* len) {
     printf("heartbeat publish \n");
     char tmp[256] = {0};
-    int total = 0;
-    int avail = 0;
+    int64_t total = 0;
+    int64_t avail = 0;
     int percent = 0;
 
     cJSON* root = cJSON_CreateObject();
@@ -203,7 +204,7 @@ static int _on_publish(void** payload, int* len) {
     total = round(total * 1.0f / 1024 / 1024);
     avail = round(avail * 1.0f / 1024 / 1024);
 
-    printf("total:%d, avail:%d, percent:%d\n", total, avail, percent);
+    printf("total:%ld, avail:%ld, percent:%d\n", total, avail, percent);
 
     cJSON_AddStringToObject(root, "type", "HeartBeat");
     // houqi's macAddr is serialno, length must > 12
@@ -214,9 +215,9 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "cpu", tmp);
     snprintf(tmp, sizeof(tmp), "%d", percent);
     cJSON_AddStringToObject(root, "diskUsage", tmp);
-    snprintf(tmp, sizeof(tmp), "%d", avail);
+    snprintf(tmp, sizeof(tmp), "%"PRId64, avail);
     cJSON_AddStringToObject(root, "diskLeftSpace", tmp);
-    snprintf(tmp, sizeof(tmp), "%d", total);
+    snprintf(tmp, sizeof(tmp), "%"PRId64, total);
     cJSON_AddStringToObject(root, "diskTotalSpace", tmp);
     //
     cJSON_AddNumberToObject(root, "timeStamp", get_realtime_ms());
