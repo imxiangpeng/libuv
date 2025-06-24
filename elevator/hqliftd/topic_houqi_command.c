@@ -175,8 +175,7 @@ static int _on_command_message(void* payload, int len) {
     // same rtmp url with Sendvideo
     if (0 == strcasecmp("videoPlayBack", type)) {
         struct tm tm;
-        struct timespec ts;
-        uint64_t timestamp_begin = 0, timestamp_end = 0;
+        time_t timestamp_begin = 0, timestamp_end = 0;
         char *start_time = NULL, *end_time = NULL;
 
         char begin_str[64] = {0};
@@ -198,14 +197,10 @@ static int _on_command_message(void* payload, int len) {
             return -1;
         }
 
-        memset((void*)&ts, 0, sizeof(ts));
-        ts.tv_sec = timestamp_begin;
-        (void)localtime_r(&ts.tv_sec, &tm);
+        gmtime_r(&timestamp_begin, &tm);// localtime_r
         strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
-        memset((void*)&ts, 0, sizeof(ts));
-        ts.tv_sec = timestamp_end;
-        (void)localtime_r(&ts.tv_sec, &tm);
+        gmtime_r(&timestamp_end, &tm);// localtime_r
         strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
         snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
@@ -426,7 +421,7 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
 
-    // unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
+    unlink(IPC_MEDIA_RECORD_REQUEST_PLAYLIST);
 
     // init timer for sendvideo & sendsate command timeout
     memset((void*)&_sendvideo_timer, 0, sizeof(_sendvideo_timer));
@@ -440,6 +435,12 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     snprintf(topic_command_response.topic, sizeof(topic_command_response.topic), "/API/V1/Down/%s/Command/Response", serialno);
     uviot_topic_register(iot, &topic_command_response);
 
+    return 0;
+}
+
+int topic_houqi_command_deinit(void) {
+    uv_close((uv_handle_t*)&_sendstate_timer, NULL);
+    uv_close((uv_handle_t*)&_sendvideo_timer, NULL);
     return 0;
 }
 

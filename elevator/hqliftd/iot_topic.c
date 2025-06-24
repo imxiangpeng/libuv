@@ -7,7 +7,9 @@ extern int topic_houqi_heartbeat_init(struct uviot* iot, const char* public_key,
 extern int topic_houqi_command_init(struct uviot* iot, const char* public_key, const char* device_name);
 extern int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const char* device_name);
 extern int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const char* device_name);
-int topic_houqi_liftruninfo_init(struct uviot* iot, const char* public_key, const char* device_name);
+extern int topic_houqi_liftruninfo_init(struct uviot* iot, const char* public_key, const char* device_name);
+
+extern int topic_houqi_command_deinit(void);
 
 static int _mid = 1;
 int iot_generate_mid() {
@@ -26,3 +28,10 @@ int iot_topic_init(struct uviot* iot, const char* public_key, const char* device
     return 0;
 }
 
+
+int iot_topic_deinit(void) {
+
+    topic_houqi_command_deinit();
+
+    return 0;
+}

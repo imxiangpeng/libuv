@@ -102,5 +102,6 @@ int iot_init(struct uv_loop_s* loop) {
 int iot_deinit(void) {
     uviot_release(_iot);
     _iot = NULL;
+    iot_topic_deinit();
     return 0;
 }

@@ -105,7 +105,7 @@ static int to_houqi_fault(enum elevator_exception fault) {
 }
 static int _on_publish(void** payload, int* len) {
     struct tm tm;
-    struct timespec ts;
+    time_t t;
 
     struct lift_fault_event* e = NULL;
     struct elevator_status st;
@@ -164,14 +164,14 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(fault, "keyId", uuid_str);
     cJSON_AddNumberToObject(fault, "faultType", to_houqi_fault(e->type));
 
-    ts.tv_sec = e->fault_begin_time / 1000;
-    (void)localtime_r(&ts.tv_sec, &tm);
+    t = e->fault_begin_time / 1000;
+    (void)localtime_r(&t, &tm);
     /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
     cJSON_AddStringToObject(fault, "faultBeginTime", tmp);
     memset((void*)tmp, 0, sizeof(tmp));
     if (e->fault_end_time != 0) {
-        ts.tv_sec = e->fault_end_time / 1000;
-        (void)localtime_r(&ts.tv_sec, &tm);
+        t = e->fault_end_time / 1000;
+        (void)localtime_r(&t, &tm);
         /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
     }
     cJSON_AddStringToObject(fault, "faultEndTime", tmp);
@@ -201,7 +201,6 @@ static int _on_publish(void** payload, int* len) {
 
     *len = strlen(*payload);
     HR_LOGD("publish: %s\n", (char*)*payload);
-    *len = 0;
     return 0;
 }
 
@@ -328,7 +327,6 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     e->fault_begin_time = get_realtime_ms();
 
     if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-        // e->fault_begin_time = 1749711827000 ;/// 1749740645000;
         upload_fault_video(e);
     }
 
@@ -366,7 +364,7 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     e->fault_end_time = get_realtime_ms();
     pthread_mutex_unlock(&_queue_lock);
-
+    // mxp, 20250620, people trapped video is upload when event is finished
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         upload_fault_video(e);
     }
@@ -400,7 +398,7 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
 // should convert utc timestamp to local timestamp
 static void upload_fault_video(struct lift_fault_event* e) {
     struct tm tm;
-    struct timespec ts;
+    time_t t;
 
     char begin_str[64] = {0};
     char end_str[64] = {0};
@@ -414,7 +412,6 @@ static void upload_fault_video(struct lift_fault_event* e) {
     }
 
     memset((void*)&tm, 0, sizeof(tm));
-    memset((void*)&ts, 0, sizeof(ts));
 
     switch (e->type) {
         case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
@@ -424,24 +421,22 @@ static void upload_fault_video(struct lift_fault_event* e) {
         case ELEVATOR_EXCEPTION_OVERSPEED:
             // report video 10 seconds around event
 
-            ts.tv_sec = e->fault_begin_time / 1000;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_begin_time / 1000;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            memset((void*)&ts, 0, sizeof(ts));
-            ts.tv_sec = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
 
             memset((void*)&tm, 0, sizeof(tm));
-            memset((void*)&ts, 0, sizeof(ts));
-            ts.tv_sec = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
-            snprintf(url, sizeof(url), "ftp://ftp.hqszjs.com:2100/event_files/%s/%s", elevator_deviceid(), name);
+            snprintf(url, sizeof(url), "%s/event_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
             break;
 
         case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
@@ -449,25 +444,23 @@ static void upload_fault_video(struct lift_fault_event* e) {
             if (e->fault_end_time == 0) {
                 return;
             }
-            ts.tv_sec = e->fault_begin_time / 1000;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_begin_time / 1000;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            memset((void*)&ts, 0, sizeof(ts));
 
-            ts.tv_sec = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            memset((void*)&ts, 0, sizeof(ts));
-            ts.tv_sec = e->fault_end_time / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
-            (void)localtime_r(&ts.tv_sec, &tm);
+            t = e->fault_end_time / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+            (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
-            snprintf(url, sizeof(url), "ftp://ftp.hqszjs.com:2100/event_files/%s/%s", elevator_deviceid(), name);
+            snprintf(url, sizeof(url), "%s/event_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
             break;
 
         default:
@@ -490,7 +483,7 @@ static void upload_fault_video(struct lift_fault_event* e) {
 
     if (pid == 0) {  // child
         char* argv[] = {
-            "/home/alex/workspace/workspace/libuv/libuv/build/elevator/estreamer/estreamer",
+            "/usr/bin/estreamer",
             begin_str,
             end_str,
             url,
@@ -503,7 +496,7 @@ static void upload_fault_video(struct lift_fault_event* e) {
             printf("%ld --> %s\n", i, argv[i]);
         }
 
-        if (execvp(argv[0], argv /*, envp*/) < 0) {
+        if (execvp(argv[0], argv) < 0) {
             HR_LOGE("%s(%d): can not start:%s, %s\n", __FUNCTION__, __LINE__, argv[0], strerror(errno));
             exit(127);
         }
