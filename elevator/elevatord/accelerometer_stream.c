@@ -232,7 +232,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
     for (size_t i = 0; i < ARRAY_SIZE(self->calibration_mw); i++) {
         double slope = 0;
         moving_window_slope(self->calibration_mw[i], &slope);
-        HR_LOGD("aixes:%d stddev:%f, cover:%f, slope:%f\n", i, self->calibration_mw[i]->stddev, self->calibration_mw[i]->stddev * self->calibration_mw[i]->stddev, slope);
+        HR_LOGD("aixes:%ld stddev:%f, cover:%f, slope:%f\n", i, self->calibration_mw[i]->stddev, self->calibration_mw[i]->stddev * self->calibration_mw[i]->stddev, slope);
         if (self->calibration_mw[i]->stddev >= ACCEL_JITTER_STD_THRESHOLD) {
             self->calibration_retries = 0;
             return;

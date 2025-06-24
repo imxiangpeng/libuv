@@ -263,14 +263,13 @@ int main(int argc, const char** argv) {
         const char* passwd = getenv("FTP_PASSWORD");
         snprintf(cmd, sizeof(cmd),
                  "ffmpeg -loglevel quiet -y -f concat -safe 0 -i %s -c copy -f mp4 %s;"
-                 "curl --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s -u '%s:%s'",
+                 "curl -s --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s -u '%s:%s'",
                  concat_list, concat_path, concat_path, url, user, passwd);
     }
-    printf("cmd:%s\n", cmd);
 
     system(cmd);
 
-    //unlink(concat_path);
-    //unlink(concat_list);
+    unlink(concat_path);
+    unlink(concat_list);
     return 0;
 }

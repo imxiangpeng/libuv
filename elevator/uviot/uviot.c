@@ -75,15 +75,26 @@ static void uviot__close_uv_dynamic_handle(uv_handle_t* handle);
 static int uviot_mosquitto_publish(struct uviot_impl* iot, int* mid, const char* topic, int payloadlen, const void* payload, int qos, bool retain) {
     if (!iot)
         return -1;
-    int rc = mosquitto_publish(iot->mosq, mid, topic, payloadlen, payload, qos, retain);
 
+    // maybe not connected
+    if (mosquitto_socket(iot->mosq) == -1) {
+        return -1;
+    }
+
+    int rc = mosquitto_publish(iot->mosq, mid, topic, payloadlen, payload, qos, retain);
+#if 0
     // 20250611, only care CONN_LOST, other events maybe trigger disconnect callback
     if (rc == MOSQ_ERR_CONN_LOST) {
         HR_LOGE("publish failed, we reconnect again: rc:%d, errno:%d\n", rc, errno);
+         if (!uv_is_closing((uv_handle_t*)&iot->poll)) {
+            uv_poll_stop(&iot->poll);
+            uv_close((uv_handle_t*)&iot->poll, uviot__close_uv_dynamic_handle);
+        }
+
         uv_timer_stop(&iot->timer);
         uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 0, 1000);
     }
-
+#endif
     return rc;
 }
 
@@ -365,6 +376,7 @@ static void uviot_impl_loop_misc_timer_cb(uv_timer_t* handle) {
 }
 
 static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle) {
+    int rc = 0;
     struct uviot_impl* iot = NULL;
     struct mosquitto* mosq = NULL;
 
@@ -378,8 +390,12 @@ static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle) {
     if (!mosq)
         return;
 
-    if (MOSQ_ERR_SUCCESS != mosquitto_reconnect /*_async*/ (mosq)) {
-        HR_LOGD("%s(%d): failed reconnect\n", __FUNCTION__, __LINE__);
+    rc = mosquitto_reconnect /*_async*/ (mosq);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        HR_LOGD("%s(%d): failed reconnect failed:%d\n", __FUNCTION__, __LINE__, rc);
+        if (rc == MOSQ_ERR_EAI) {
+            res_init();
+        }
         return;
     }
 
@@ -465,6 +481,22 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
 
     if (!mosq)
         return;
+
+    // mxp, 20250623, reconnect when socket is broken
+    if (status == UV_EBADF) {
+        HR_LOGE("EBADF poll %d status: %d, events:0x%X\n", iot->sock, status, events);
+        if (!uv_is_closing((uv_handle_t*)handle)) {
+            uv_poll_stop(handle);
+            uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
+        }
+        if (iot->auto_reconnect) {
+            // stop & start reconnect timer callback
+            uv_timer_stop(&iot->timer);
+            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 2000, 1000);
+        }
+
+        return;
+    }
 
     if (events & UV_READABLE) {
         mosquitto_loop_read(mosq, 1);
