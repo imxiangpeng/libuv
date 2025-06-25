@@ -923,7 +923,7 @@ static void _ekf_run_model(struct accelerometer_stream* self, double accel[IMU_A
         // 不需要判断吧，开始运行的时候，方差肯定是增大的趋势，根本都不会进入到这里
         // if (self->ekf.x[1] * self->accel_mw->mean < 0) {
         HR_LOGD("decrease zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_slice->stddev, _zupt_velocity_detector, ekf->x[1]);
-        if (fabs(self->ekf.x[1]) < 0.2) {
+        if (fabs(self->ekf.x[1]) < ZUPT_SPEED_THRESHOLD /*0.2*/) {
             HR_LOGD("do decrease zupt cross zero stddev:%f, velocity:%f-%f...\n", self->accel_slice->stddev, _zupt_velocity_detector, ekf->x[1]);
             linear_accel = 0;
 
