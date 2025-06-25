@@ -1,24 +1,22 @@
 // mxp, 20250421, support ali iot platform
 #define _GNU_SOURCE
 #include "iot.h"
+
 #include <assert.h>
-#include <string.h>
-#include "uviot.h"
-
-#include <stdio.h>
-
 #include <mosquitto.h>
-
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <stdio.h>
+#include <string.h>
 #include <uv.h>
 
 #include "hr_log.h"
 #include "iot_topic.h"
 #include "platform.h"
+#include "uviot.h"
 
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
-#define BROKER_DEFAULT_PORT 1883     // 8883 //1883
+#define BROKER_DEFAULT_PORT 8883     // 1883     // 8883 //1883
 #define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
 #define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
@@ -60,7 +58,7 @@ int iot_init(struct uv_loop_s* loop) {
     // get mac address into name buffer
     platform_get_property(PROPERTY_MACADDR, name, sizeof(name));
     // printf("mac:%s\n", name);
-    size_t i =0, j = 0;
+    size_t i = 0, j = 0;
     for (; name[i] != '\0'; i++) {
         if (name[i] != ':') {
             name[j] = name[i];
@@ -100,6 +98,9 @@ int iot_init(struct uv_loop_s* loop) {
     // free memory
     free(iot_content);
     iot_content = NULL;
+
+    // https://help.aliyun.com/zh/iot/user-guide/establish-mqtt-connections-over-tcp
+    _iot->ca_file = "~/Downloads/ali_iot_ca.crt";
 
     // topic init early, we can observe motion event early before motion started
     iot_topic_init(_iot, product_key, name);

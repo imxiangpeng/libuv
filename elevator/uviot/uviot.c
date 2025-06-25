@@ -649,6 +649,12 @@ struct uviot* uviot_alloc(uv_loop_t* loop) {
 
     iot->self.alive_time = 60;
 
+    // defined in ssl.h
+    // # define SSL_VERIFY_NONE                 0x00
+    // # define SSL_VERIFY_PEER                 0x01
+    iot->self.tls_cert_reqs = 1;
+    iot->self.tls_insecre = 0;
+
     uv_timer_init(loop, &iot->timer);
     iot->timer.data = iot;
 
@@ -773,12 +779,12 @@ int uviot_prepare(struct uviot* self) {
     mosquitto_disconnect_callback_set(mosq, _on_disconnect);
     mosquitto_message_callback_set(mosq, _on_message);
     mosquitto_publish_callback_set(mosq, _on_publish);
-    mosquitto_tls_opts_set(mosq, 0 /*SSL_VERIFY_NONE*/, NULL, NULL);
 
-    // const char *cafile = "/home/alex/workspace/workspace/libuv/libuv/iot/ali_iot_ca.crt";
-    // mosquitto_tls_set(mosq, cafile, NULL, NULL, NULL, NULL);
-    // mosquitto_tls_insecure_set(mosq, false);
-    //  mosquitto_tls_opts_set(mosq, 0, NULL, NULL);
+    if (self->ca_file || self->ca_path || self->certificate || self->certificate_key) {
+        mosquitto_tls_set(mosq, self->ca_file, self->ca_path, self->certificate, self->certificate_key, NULL);
+        mosquitto_tls_insecure_set(mosq, self->tls_insecre);
+        mosquitto_tls_opts_set(mosq, self->tls_cert_reqs, NULL, NULL);
+    }
 
     mosquitto_username_pw_set(iot->mosq, self->username, self->password);
 

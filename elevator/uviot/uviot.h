@@ -24,6 +24,12 @@ struct uviot {
     int alive_time;
     char username[128];
     char password[256];
+    int tls_insecre;
+    int tls_cert_reqs; // SSL_VERIFY_NONE/SSL_VERIFY_PEER
+    const char* ca_file; // ca root certificate, such as /etc/ssl/certs/ca-certificates.crt
+    const char* ca_path; // ca path, which contains all hash named ca certificate
+    const char* certificate; // client certificate
+    const char* certificate_key; // client certificate key
 };
 
 struct uviot_topic {
