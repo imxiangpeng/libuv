@@ -34,6 +34,7 @@ struct motion_status{
     double temperature;
     double barometer_velocity;
     double barometer_distance;
+    double barometer_height;
 };
 
 struct motion_event {

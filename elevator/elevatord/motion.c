@@ -1,3 +1,5 @@
+#include "motion.h"
+
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
@@ -13,7 +15,6 @@
 #include "barometer_stream.h"
 #include "floor.h"
 #include "hr_log.h"
-#include "motion.h"
 #include "moving_window.h"
 #include "sconf.h"
 #include "sensor.h"
@@ -33,6 +34,11 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
 #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 0
+
+// mxp, 20250626, help accelerometer performing zupt when pressure is stationary
+// detect it's stationary and accel is zero, we can force zupt if it's not stopped
+// barometer signal must correct!!!
+#define MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME 5
 
 // 我们会保存过去 5s 的平均值 （不太准确，我们 moving window 也占用了 1秒，所以我们数据延迟 1 秒）
 // 然后计算过去 5s 的方差，如果小于门限，就认为静止
@@ -367,39 +373,22 @@ static void* _accelerometer_thread_routin(void* args) {
             new_state = CONSTANTING;
         }
 
-        // force reset when velocity too high
-        // should we according pressure
-        if (fabs(velocity) > 10 || fabs(distance) > 300) {
-            // mxp, 20250612, 加速度已经出错了！
-            // 但是这里不能直接调用 reset， 否则可能导致速度永远都无法归 0
-            // 我们强制等待气压给出静止信号后再调用 reset
-            HR_LOGE("!!!!!!!! maybe should reset detect stationaray!!!!!\n");
-            if (_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY) {
-                HR_LOGE("!!!!!!!! maybe should reset !!!!!\n");
-                input->reset(input);
-                _accelerometer_motion.state = STOPPED;
-                _accelerometer_motion.height = barometer_pressure_height_relative_base_floor;
-            }
-            goto next_iteration;
-        }
-
+#ifdef MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME
         // mxp, 20250625, force reset accelerometer when pressure is stationary
         if (_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY && new_state != STOPPED) {
-            if (now > _motion_barometer_stationary_event_timestamp + seconds_to_nanoseconds(5)) {
-                HR_LOGE("accelerometer motion enter wrong status ? accel:%f, velocity:%f\n", accel, velocity);
+            if (now > _motion_barometer_stationary_event_timestamp + seconds_to_nanoseconds(MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME)) {
                 // confirm stationary
                 if (fabs(accel) == 0) {
                     // we should reset? open it after capture data
-                    HR_LOGE("accelerometer motion enter wrong status ? it's stationary not constanting velocity:%f, height:%f-%f...\n", result.velocity, _accelerometer_motion.height + result.distance, barometer_pressure_height_relative_base_floor);
-
-                    // input->reset(input);
-                    // _accelerometer_motion.state = STOPPED;
-                    // _accelerometer_motion.height = barometer_pressure_height_relative_base_floor;
-                    // goto next_iteration;
+                    HR_LOGE("!!! accelerometer motion enter wrong status ? it's stationary not constanting velocity:%f, height:%f->%f...\n", result.velocity, _accelerometer_motion.height + result.distance, barometer_pressure_height_relative_base_floor);
+                    input->reset(input);
+                    _accelerometer_motion.state = STOPPED;
+                    _accelerometer_motion.height = barometer_pressure_height_relative_base_floor;
+                    goto next_iteration;
                 }
             }
         }
-
+#endif
         // use high precision value, not round!
         _accelerometer_motion.velocity = result.velocity;  // velocity;
         _accelerometer_motion.distance = result.distance;  // distance;
@@ -424,6 +413,7 @@ static void* _accelerometer_thread_routin(void* args) {
                 if (floor_baseline_pressure != 0) {
                     double h = 0;
                     double relative_baseline_height = calculate_height_difference(floor_baseline_pressure, barometer_pressure, barometer_temperature);
+                    floor_num_confidence = 0;
 
                     if (floor_relative_height(floor_baseline_num, &h) == 0) {
                         HR_LOGD("floor detect %f Pa baseline floor:%d(%f), relative to baseline :%f, calc real base relative height:%f\n",
@@ -439,9 +429,16 @@ static void* _accelerometer_thread_routin(void* args) {
                             if (floor_num == num) {
                                 floor_num_confidence = 100;
                             } else {
-                                floor_num_confidence = 0;
+                                h = relative_baseline_height * 0.5 + (_accelerometer_motion.height + _accelerometer_motion.distance) * 0.5;
+
+                                if (0 == floor_predict(h, &num, (char*)&floor_label, sizeof(floor_label), &delta_p)) {
+                                    if (floor_num == num) {
+                                        floor_num_confidence = 100;
+                                    } else {
+                                        floor_num = num;
+                                    }
+                                }
                             }
-                            floor_num = num;
                         }
                     }
                 }
@@ -723,11 +720,12 @@ static void* _accelerometer_thread_routin(void* args) {
             .height = _accelerometer_motion.height + _accelerometer_motion.distance,
             .jitter_accel = result.jitter_accel,
             .jitter_frequency = result.jitter_frequency,
-            .floor = floor_num,  // atoi(floor_label),
+            .floor = floor_num,
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
             .temperature = barometer_temperature,
-            .barometer_distance = barometer_pressure_height_relative_base_floor /*barometer_distance*/,
+            .barometer_distance = barometer_distance,
+            .barometer_height = barometer_pressure_height_relative_base_floor,
         };
 
         notify_observer(MOTION_OBSERVER_ACTION_ON_STATUS, &stat);
