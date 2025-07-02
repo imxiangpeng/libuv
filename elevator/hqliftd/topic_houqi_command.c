@@ -197,16 +197,19 @@ static int _on_command_message(void* payload, int len) {
             return -1;
         }
 
-        gmtime_r(&timestamp_begin, &tm);// localtime_r
+        gmtime_r(&timestamp_begin, &tm);  // localtime_r
         strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
-        gmtime_r(&timestamp_end, &tm);// localtime_r
+        gmtime_r(&timestamp_end, &tm);  // localtime_r
         strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
         snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
 
         // todo
         cJSON_Delete(root);
+
+        // stop live video
+        system("ipc-property set /ipc/livertmp/enabled false");
 
         pid_t pid = fork();
 
@@ -575,7 +578,7 @@ static int do_upload(const char* local_path, const char* remote_url) {
     if (res != CURLE_OK) {
         HR_LOGE("Upload %s failed: %s\n", local_path, curl_easy_strerror(res));
     } else {
-        HR_LOGD("Upload successful: %s\n", local_path);
+        HR_LOGD("Upload successful: %s -> %s\n", local_path, remote_url);
     }
 
     curl_easy_cleanup(curl);

@@ -326,6 +326,11 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     e->fault_begin_time = get_realtime_ms();
 
+    // mxp, 20250702, do not report & generate fault video when fault is disabled
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+        return 0;
+    }
+
     if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         upload_fault_video(e);
     }
@@ -364,6 +369,12 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     e->fault_end_time = get_realtime_ms();
     pthread_mutex_unlock(&_queue_lock);
+
+    // mxp, 20250702, do not report & generate fault video when fault is disabled
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+        return 0;
+    }
+
     // mxp, 20250620, people trapped video is upload when event is finished
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         upload_fault_video(e);

@@ -176,6 +176,9 @@ int main(int argc, const char** argv) {
         printf("%d: %s\n", i, argv[i]);
     }
 
+    // kill all children process
+    setpgid(0, 0);
+
     const char* begin = argv[1];
     const char* end = argv[2];
     const char* url = argv[3];

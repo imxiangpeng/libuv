@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
     action.sa_flags = SA_SIGINFO | SA_RESTART;
     action.sa_sigaction = _daemon_signal_action;
     sigaction(SIGTERM, &action, NULL);
-    sigaction(SIGINT, &action, NULL);
+    // sigaction(SIGINT, &action, NULL);
     sigaction(SIGCHLD, &action, NULL);
 
     signal(SIGUSR1, SIG_IGN);

@@ -395,16 +395,19 @@ static void* _accelerometer_thread_routin(void* args) {
                     // must notify out models
                     new_state = STOPPED;
                     result.velocity = 0;
-                    result.distance = 0;
                     velocity = 0;
-                    distance = 0;
 
-                    // mxp, should implement ......................................
-                    // _accelerometer_motion.state = STOPPED;
-                    _accelerometer_motion.height = barometer_pressure_height_relative_base_floor;
-                    _accelerometer_motion.ev.state = STOPPED;
-                    notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
-                    goto next_iteration;
+                    distance = 0;
+                    result.distance = 0;
+
+                    // mxp, should go stopping follow not use _accelerometer_motion.state = STOPPED; ............................
+                    distance = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
+                    // distance = barometer_pressure_height_relative_base_floor - _accelerometer_motion.height;
+                    result.distance = distance;
+
+                    // _accelerometer_motion.height = barometer_pressure_height_relative_base_floor;
+                    // do not goto next_iteration directly, do stopping follow
+                    // goto next_iteration;
                 }
             }
         }
@@ -507,6 +510,13 @@ static void* _accelerometer_thread_routin(void* args) {
                     }
                 }
 #endif
+                // previous event pressure, maybe first event
+                double height = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
+                double diff_percent = fabs(fabs(height) - fabs(distance)) / fmax(fabs(height), fabs(distance));
+
+                // update barometer height in accel when finished
+                barometer_distance = height;
+                _barometer_motion.height += height;
 
                 _accelerometer_motion.ev.state = new_state;
                 // according distance
@@ -520,17 +530,6 @@ static void* _accelerometer_thread_routin(void* args) {
                 // update stopped floor num when stopped
                 _motion_stopped_floor_num = floor_num;
 
-#if MOTION_EVENT_CONFIRM_FROM_PRESSURE
-                // _accelerometer_motion.ev.pressure = barometer_pressure;  // finished using current pressure
-                motion_event_delay_confirm_with_pressure_ns = now + seconds_to_nanoseconds(1);
-#else
-                // previous event pressure, maybe first event
-                double height = calculate_height_difference(_accelerometer_motion.ev.pressure, barometer_pressure, barometer_temperature);
-                double diff_percent = fabs(fabs(height) - fabs(distance)) / fmax(fabs(height), fabs(distance));
-
-                // update barometer height in accel when finished
-                barometer_distance = height;
-                _barometer_motion.height += height;
 
                 HR_LOGD("%s(%d): stopped %d --> %d, pressure delta:%f(%f-%f) detect height delta :%f vs acc height delta :%f, diff percent:%f, barometer_motion.height:%f\n",
                         __FUNCTION__, __LINE__, _accelerometer_motion.ev.floor_begin, _accelerometer_motion.ev.floor,
@@ -611,7 +610,6 @@ static void* _accelerometer_thread_routin(void* args) {
                 // if (fabs(distance) > 1) {
                 notify_observer(MOTION_OBSERVER_ACTION_ON_EVENT, &_accelerometer_motion.ev);
                 //}
-#endif
             }
             _accelerometer_motion.state = new_state;
         }
@@ -747,7 +745,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .height = _accelerometer_motion.height + _accelerometer_motion.distance,
             .jitter_accel = result.jitter_accel,
             .jitter_frequency = result.jitter_frequency,
-            .floor = floor_num,
+            .floor = atoi(floor_label), // floor_num
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
             .temperature = barometer_temperature,

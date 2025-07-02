@@ -25,7 +25,7 @@
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
-#define ELEVATOR_SPEED_THRESHOLD 3.1
+#define DEFAULT_SPEED_THRESHOLD 2.8f
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -59,7 +59,7 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 static struct elevator_historical _historical;
 
 static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
-static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = 3.1f}};
+static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = DEFAULT_SPEED_THRESHOLD }};
 extern void topic_houqi_liftruninfo_post(void);
 
 enum {

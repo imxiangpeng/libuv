@@ -12,12 +12,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cjson/cJSON.h"
 #include "file_util.h"
 #include "hr_log.h"
 #include "motion.h"
 #include "time_utils.h"
-
-#include "cjson/cJSON.h"
 
 #define FLOOR_MODEL_VERSION "1.0"
 
@@ -405,9 +404,53 @@ const char* floor_model_data_realtime_path(void) {
     return FLOOR_MODEL_TMPFS_PATH;
 }
 
+static int floor_binary_predict_id(double height) {
+    int left = 0;
+    int right = _building.floor_nums - 1;
+
+    if (height <= _building.model[left].height_relative) {
+        return left;
+    }
+
+    if (height >= _building.model[right].height_relative) {
+        return right;
+    }
+
+    while (left < right) {
+        int mid = (left + right) / 2;
+
+        // HR_LOGD("%s(%d): height:%f, [%d,%d] => [%f,%f]\n", __FUNCTION__, __LINE__,
+        //         height, left, right,
+        //         _building.model[left].height_relative, _building.model[right].height_relative);
+
+        HR_LOGD("%s(%d): height:%f, mid [%d,%d] => [%f,%f]\n", __FUNCTION__, __LINE__,
+                height, mid, mid + 1,
+                _building.model[mid].height_relative, _building.model[mid + 1].height_relative);
+
+        if (height >= _building.model[mid].height_relative &&
+            height <= _building.model[mid + 1].height_relative) {
+            double weight = _building.model[mid].height / (_building.model[mid].height + _building.model[mid + 1].height);
+
+            if (height <= _building.model[mid].height_relative + _building.model[mid].height * weight) {
+                return mid;
+            } else {
+                return mid + 1;
+            }
+        }
+
+        if (height < _building.model[mid].height_relative) {
+            right = mid;
+        } else {
+            left = mid;
+        }
+    }
+
+    return left;
+}
+
 // return predict floor according height
 int floor_predict(double height, int* num, char* label, int length, double* delta) {
-    int i = 0;
+    int id = 0;
 
     if (!num || !label) {
         return -1;
@@ -418,26 +461,27 @@ int floor_predict(double height, int* num, char* label, int length, double* delt
         return -1;
     }
 
-    for (i = 0; i < _building.floor_nums; i++) {
-        struct floor* f = &_building.model[i];
-        // HR_LOGD("%s(%d): height: %f, floor:%d, [%f,%f]\n", __FUNCTION__, __LINE__, height, f->num, f->height_relative - f->height / 2, f->height_relative + f->height / 2);
-        // ignore! there may be gaps, especially when the floor heights are different.
-        // not very good!
-        if (height > f->height_relative - f->height / 2 &&
-            height < f->height_relative + f->height / 2) {
-            *num = f->num;
-            snprintf(label, length, "%s", f->label);
-            if (delta != NULL) {
-                *delta = height - f->height_relative;
-            }
-            return 0;
-        }
+    id = floor_binary_predict_id(height);
+
+    if (id < 0 || id >= _building.floor_nums) {
+        return -1;
     }
 
-    // dundi detect!
+    HR_LOGD("floor num:%d\n", _building.model[id].num);
 
-    // exception
-    return -1;
+    // dundi detect!
+    if (id == 0) {
+    } else if (id == _building.floor_nums - 1) {
+        // chongding detect
+    }
+
+    *num = _building.model[id].num;
+    snprintf(label, length, "%s", _building.model[id].label);
+    if (delta != NULL) {
+        *delta = height - _building.model[id].height_relative;
+    }
+
+    return 0;
 }
 
 // must called when stopped

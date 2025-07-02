@@ -18,10 +18,10 @@
 
 // door should opened within 5 seconds
 // mxp, 20250607, door detector maybe too later
-#define DOOR_OPEN_TIMEOUT_AFTER_STOPPED 8000  // 5s
+#define DOOR_OPEN_TIMEOUT_AFTER_STOPPED 90000  // 5s
 // notice when person in elevator long time
 // notice when a person is detected in the elevator while it is stationary and the doors are closed
-#define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 60000  // 60s
+#define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 90000  // 60s
 
 static int _pipefd[2] = {-1};
 
