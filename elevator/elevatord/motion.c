@@ -453,8 +453,28 @@ static void* _accelerometer_thread_routin(void* args) {
                         if (floor_num == num) {
                             floor_num_confidence = 100;
                         } else {
+                            // 气压在晚上的时候可能更容易出错，在运行后停止的时候，如果上面有偏差的话，这里我们采用融合的比例因子来确认一下
                             // do not use 0.6 * accel + 0.4 * pressure
                             floor_num = num;
+                            // using factor value when stopped & pressure delta too large
+                            if (new_state == STOPPED) {
+                                double delta_ap = 0;
+                                double accel_factor = 0.4;
+                                double pressure_factor = 1.0 - accel_factor;
+
+                                h = (_accelerometer_motion.height + _accelerometer_motion.distance) * accel_factor + relative_baseline_height * pressure_factor;
+
+                                HR_LOGD("!!! accel not match with pressure, calc with accel(%f) * 0.4 + pressure(%f) * 0.6 => %f\n",
+                                        _accelerometer_motion.height + _accelerometer_motion.distance,
+                                        relative_baseline_height, h);
+                                if (0 == floor_predict(h, &num, (char*)&floor_label, sizeof(floor_label), &delta_ap)) {
+                                    HR_LOGD("!!! correct with factor -- predict floor: %d -> %d, height:%f, delta_ap:%f vs delta_a:%f vs delta_p:%f\n", floor_num, num, h, delta_ap, delta_a, delta_p);
+                                    if (fabs(delta_p) > 0.6 || fabs(delta_ap) < 0.6) {
+                                        // mxp, 20250627, force update only when running
+                                        floor_num = num;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -529,7 +549,6 @@ static void* _accelerometer_thread_routin(void* args) {
 
                 // update stopped floor num when stopped
                 _motion_stopped_floor_num = floor_num;
-
 
                 HR_LOGD("%s(%d): stopped %d --> %d, pressure delta:%f(%f-%f) detect height delta :%f vs acc height delta :%f, diff percent:%f, barometer_motion.height:%f\n",
                         __FUNCTION__, __LINE__, _accelerometer_motion.ev.floor_begin, _accelerometer_motion.ev.floor,
@@ -708,15 +727,15 @@ static void* _accelerometer_thread_routin(void* args) {
                 // update only when confidence is 100
                 // mxp, 20250630, as we use stopped floor number when stopping
                 // so we can update directly
-                // if (floor_num_confidence == 100) {
-                floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 1);
+                if (floor_num_confidence == 100) {
+                    floor_update_pressure_when_stationary(floor_num, barometer_pressure, barometer_temperature, 1);
 
-                // must make sure current floor num is correct!
-                HR_LOGD("%s(%d): also update basefloor floor:%d -> %d, pressure:%f -> %f, temp:%f\n", __FUNCTION__, __LINE__, floor_baseline_num, floor_num, floor_baseline_pressure, barometer_pressure, barometer_temperature);
-                // also update baseline floor to current floor
-                floor_baseline_pressure = barometer_pressure;
-                floor_baseline_num = floor_num;
-                //}
+                    // must make sure current floor num is correct!
+                    HR_LOGD("%s(%d): also update basefloor floor:%d -> %d, pressure:%f -> %f, temp:%f\n", __FUNCTION__, __LINE__, floor_baseline_num, floor_num, floor_baseline_pressure, barometer_pressure, barometer_temperature);
+                    // also update baseline floor to current floor
+                    floor_baseline_pressure = barometer_pressure;
+                    floor_baseline_num = floor_num;
+                }
             }
         } else {
             _motion_stationary_update_pressure_threshold_time_ns = 0;
@@ -745,7 +764,7 @@ static void* _accelerometer_thread_routin(void* args) {
             .height = _accelerometer_motion.height + _accelerometer_motion.distance,
             .jitter_accel = result.jitter_accel,
             .jitter_frequency = result.jitter_frequency,
-            .floor = atoi(floor_label), // floor_num
+            .floor = floor_num,
             .running = (new_state != STOPPED),
             .pressure = barometer_pressure,
             .temperature = barometer_temperature,
