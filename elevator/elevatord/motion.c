@@ -38,7 +38,7 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
-#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 0
+#define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
 
 // mxp, 20250626, help accelerometer performing zupt when pressure is stationary
 // detect it's stationary and accel is zero, we can force zupt if it's not stopped
@@ -432,7 +432,7 @@ static void* _accelerometer_thread_routin(void* args) {
             // detect floor num every seconds
             delta_predict_floor_time_ns = now + 500000000;  // seconds_to_nanoseconds(1);
             floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label), &delta_a);
-            HR_LOGD("predict floor:%d, height:%f, delta:%f\n", floor_num, _accelerometer_motion.height + _accelerometer_motion.distance, delta_a);
+            HR_LOGD("predict floor:%d, height:%f, delta:%f, accel:%f, velocity:%f\n", floor_num, _accelerometer_motion.height + _accelerometer_motion.distance, delta_a, accel, velocity);
 
             if (floor_baseline_pressure != 0) {
                 double h = 0;
@@ -456,12 +456,16 @@ static void* _accelerometer_thread_routin(void* args) {
                             // 气压在晚上的时候可能更容易出错，在运行后停止的时候，如果上面有偏差的话，这里我们采用融合的比例因子来确认一下
                             // do not use 0.6 * accel + 0.4 * pressure
                             floor_num = num;
+
+#if 0  // run error when testing, I found imu zero offset has been changed, after recalibrate accel data is good, why changed ?
                             // using factor value when stopped & pressure delta too large
                             if (new_state == STOPPED) {
                                 double delta_ap = 0;
                                 double accel_factor = 0.4;
                                 double pressure_factor = 1.0 - accel_factor;
 
+                                // 非常危险，我们现场的 A4 设备不清楚为什么传感器零偏发生了微小变化导致上行速度降低，下行速度变快，后果就是使用到加速度的地方高度值都是不对的
+                                // 我们在这里的测试的时候就发现了这个问题，鉴于加速度的外部干扰比较大，我们还是倾向于气压, 不过呢，我们采用气压差的形式
                                 h = (_accelerometer_motion.height + _accelerometer_motion.distance) * accel_factor + relative_baseline_height * pressure_factor;
 
                                 HR_LOGD("!!! accel not match with pressure, calc with accel(%f) * 0.4 + pressure(%f) * 0.6 => %f\n",
@@ -470,11 +474,11 @@ static void* _accelerometer_thread_routin(void* args) {
                                 if (0 == floor_predict(h, &num, (char*)&floor_label, sizeof(floor_label), &delta_ap)) {
                                     HR_LOGD("!!! correct with factor -- predict floor: %d -> %d, height:%f, delta_ap:%f vs delta_a:%f vs delta_p:%f\n", floor_num, num, h, delta_ap, delta_a, delta_p);
                                     if (fabs(delta_p) > 0.6 || fabs(delta_ap) < 0.6) {
-                                        // mxp, 20250627, force update only when running
                                         floor_num = num;
                                     }
                                 }
                             }
+#endif
                         }
                     }
                 }
@@ -520,14 +524,16 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.distance = 0;
                 HR_LOGD("stopping-----------at %d, height:%f, pressure:%f------------->\n", floor_num, _accelerometer_motion.height, barometer_pressure);
 #if AUTO_FIXED_HEIGHT_WHEN_STOPPING
-                if (0 == floor_predict(_accelerometer_motion.height, &floor_num, (char*)&floor_label, sizeof(floor_label))) {
+                // 这样当触底以及最高的时候可以强制同步到对应合适的高度
+                if (floor_num_confidence == 100) {
+                    // if (0 == floor_predict(_accelerometer_motion.height, &floor_num, (char*)&floor_label, sizeof(floor_label))) {
                     HR_LOGD("update height accroding stopping floor relative height\n");
-                    HR_LOGD("stopping:-------------------at:%d -> %s----->\n", floor_num, floor_label);
                     double height = _accelerometer_motion.height;
                     if (0 == floor_relative_height(floor_num, &height)) {
                         HR_LOGD("update height accroding stopping floor relative height: %d: %f -> %f\n", floor_num, _accelerometer_motion.height, height);
                         _accelerometer_motion.height = height;
                     }
+                    //}
                 }
 #endif
                 // previous event pressure, maybe first event
@@ -735,6 +741,13 @@ static void* _accelerometer_thread_routin(void* args) {
                     // also update baseline floor to current floor
                     floor_baseline_pressure = barometer_pressure;
                     floor_baseline_num = floor_num;
+                } else {
+                    // mxp, 20250704, following method maybe not correct, but we should try it
+                    double delta = barometer_pressure - _motion_stationary_pressure;
+                    HR_LOGD("%s(%d): warning now stopped at:%d, baseline floor:%d, but pressure changed:%f(%f->%f), we update baseline pressure %f -> %f, temp:%f\n",
+                            __FUNCTION__, __LINE__, floor_num, floor_baseline_num, delta, _motion_stationary_pressure, barometer_pressure,
+                            floor_baseline_pressure, floor_baseline_pressure + delta, barometer_temperature);
+                    floor_baseline_pressure += delta;
                 }
             }
         } else {
