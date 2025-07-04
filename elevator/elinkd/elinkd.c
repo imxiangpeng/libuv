@@ -1,9 +1,13 @@
+// mxp, 20250703, extract the IoT management module from elevatord.
+
+#define _GNU_SOURCE
 #include <assert.h>
-#include "libubox/blob.h"
-#include "libubox/blobmsg.h"
-#include "libubox/blobmsg_json.h"
-#include "libubus.h"
+#include <mosquitto.h>
+#include <mqtt_protocol.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <pthread.h>
+#include <resolv.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +16,12 @@
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include "libubox/blob.h"
+#include "libubox/blobmsg.h"
+#include "libubox/blobmsg_json.h"
+#include "libubox/list.h"
+#include "libubus.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 
@@ -37,6 +47,21 @@
 #define HR_LOGE printf
 #endif
 
+#define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
+#define BROKER_DEFAULT_PORT 1883     // 1883     // 8883 //1883
+#define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
+#define BROKER_DEFAULT_TLS_INSECURE  true
+#define BROKER_DEFAULT_TLS_CERT_REQS  0
+#define BROKER_DEFAULT_CA_FILE NULL
+#define BROKER_DEFAULT_CA_PATH NULL
+#define BROKER_DEFAULT_CERTIFICATE NULL
+#define BROKER_DEFAULT_CERTIFICATE_KEY NULL
+
+// https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
+#define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
+#define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
+#define TIHUIYAN_DEVICE_NAME "LC123456789"
+
 enum elevator_direction {
     ELEVATOR_DIR_STATIONARY = 0,
     ELEVATOR_DIR_UP,   // 1
@@ -60,14 +85,31 @@ struct elevator_status {
     double jitter_accel;
 };
 
-
-
 enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
-    MSG_QUIT
+    MSG_QUIT,
+    MSG_MQTT_CONNECT
 };
 
+// mxp, 20231029, simple timer task using libubox
+struct _inner_task {
+    int (*task)(void*);
+    void* arg;
+};
+
+struct _timer_task {
+    struct uloop_timeout timeout;
+    struct _inner_task data;
+};
+
+struct elinkd_priv {
+    struct mosquitto* mosq;
+};
+
+static struct elinkd_priv _priv = {
+    .mosq = NULL,
+};
 
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -79,6 +121,69 @@ static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
 
 static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
+
+static void _timeout_task_cb(struct uloop_timeout* t) {
+    struct _timer_task* task = (struct _timer_task*)t;
+    if (!task) {
+        return;
+    }
+
+    if (task->data.task) {
+        // ignore result
+        task->data.task(task->data.arg);
+    }
+
+    memset((void*)task, 0, sizeof(*task));
+    free(task);
+}
+
+// we will auto release memory which allocated here when task doned
+int post_task(int msec, int (*task)(void*), void* arg) {
+    // memory will auto be release when fired
+    struct _timer_task* t = NULL;
+
+    if (msec < 0) {
+        return -1;
+    }
+
+    t = (struct _timer_task*)calloc(sizeof(struct _timer_task), 1);
+    if (!t) {
+        return -1;
+    }
+
+    t->timeout.cb = _timeout_task_cb;
+
+    t->data.task = task;
+    t->data.arg = arg;
+
+    uloop_timeout_set(&t->timeout, msec);
+
+    return 0;
+}
+
+static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
+    (void)u;
+    (void)events;
+    int which = -1;
+    read(_pipefd[0], &which, sizeof(which));
+
+    HR_LOGD("receive message:%d \n", which);
+    switch (which) {
+        case MSG_QUIT:
+            HR_LOGD("receive message:%d quit\n", which);
+            uloop_end();
+            break;
+        case MSG_MQTT_CONNECT: {
+            HR_LOGD("MQTT Connect:%d !\n", which);
+            break;
+        }
+    }
+}
+
+static void post_message(int which) {
+    write(_pipefd[1], &which, sizeof(which));
+}
+
 enum {
     RT_ACCEL,
     RT_SPEED,
@@ -114,7 +219,6 @@ enum {
     __HI_MAX
 };
 
-
 static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
     (void)ctx;
     (void)obj;
@@ -146,7 +250,6 @@ static int subscriber_elevatord_event() {
     return -1;
 }
 
-
 enum {
     OE_ID,
     OE_PATH,
@@ -157,7 +260,6 @@ static const struct blobmsg_policy object_event_policy[__OE_MAX] = {
     [OE_ID] = {.name = "id", .type = BLOBMSG_TYPE_INT32},
     [OE_PATH] = {.name = "path", .type = BLOBMSG_TYPE_STRING},
 };
-
 
 static void ubus_event_handler(struct ubus_context* ctx,
                                struct ubus_event_handler* ev,
@@ -268,7 +370,6 @@ static void ubus_event_handler(struct ubus_context* ctx,
     }
 }
 
-
 static struct ubus_event_handler _ubus_event = {
     .cb = ubus_event_handler,
 };
@@ -302,8 +403,6 @@ static void _reconnect_timer(struct uloop_timeout* timeout) {
 
     subscriber_elevatord_event();
 
-
-
     ubus_add_uloop(_ubus_ctx);
 
 #ifdef FD_CLOEXEC
@@ -315,26 +414,6 @@ static void _connection_lost(struct ubus_context* ctx) {
     (void)ctx;
     _reconnect_timer(NULL);
 }
-
-static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int events) {
-    (void)u;
-    (void)events;
-    int which = -1;
-    read(_pipefd[0], &which, sizeof(which));
-
-    HR_LOGD("receive message:%d \n", which);
-    switch (which) {
-        case MSG_QUIT:
-            HR_LOGD("receive message:%d quit\n", which);
-            uloop_end();
-            break;
-    }
-}
-
-static void post_message(int which) {
-    write(_pipefd[1], &which, sizeof(which));
-}
-
 static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     (void)siginfo;
     (void)sigcontext;
@@ -343,24 +422,189 @@ static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     printf("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
     if (SIGTERM == signum) {
+    }
+}
+static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
+    HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
+    struct elinkd_priv* priv = (struct elinkd_priv*)obj;
+    if (!mosq || !priv)
+        return;
 
+    HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
+
+    if (CONNACK_ACCEPTED == reason) {
+        HR_LOGD("%s(%d): connected, ...\n", __FUNCTION__, __LINE__);
+    } else {
+        HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
     }
 }
 
-int econsoled_main(int argc, char** argv) {
+static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
+    (void)mosq;
+    (void)userdata;
+    (void)rc;
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+}
+
+static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitto_message* message) {
+    (void)mosq;
+    struct uviot_impl* iot = (struct uviot_impl*)obj;
+    if (!mosq || !iot)
+        return;
+#if 1
+    HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
+            message->topic, message->payloadlen);
+    if (message->payload) {
+        HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n%s\n", __FUNCTION__,
+                __LINE__, message->topic, message->payloadlen, (const char*)message->payload);
+    }
+#endif
+
+    if (!message->payload)
+        return;
+}
+
+static int elinkd_iot_init() {
+    int rc = -1;
+    struct mosquitto* mosq = NULL;
+    char name[64] = {TIHUIYAN_DEVICE_NAME};
+    char id[256] = {0};
+    char username[256] = {0};
+    char password[256] = {0};
+    
+    char hmac_secret[128] = {TIHUIYAN_DEVICE_SECRET};
+
+    char* iot_content = NULL;
+    unsigned char result[EVP_MAX_MD_SIZE] = {0};
+    unsigned int len = EVP_MAX_MD_SIZE;
+    char* product_key = TIHUIYAN_PRODUCT_KEY;
+
+    // char* client_id = TIHUIYAN_PRODUCT_KEY "." TIHUIYAN_DEVICE_NAME;
+    char client_id[128] = {0};  // TIHUIYAN_PRODUCT_KEY "." TIHUIYAN_DEVICE_NAME;
+
+    long long msec = 0;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+        return -1;
+    }
+    msec = (ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL);
+
+    // get mac address into name buffer
+    // platform_get_property(PROPERTY_MACADDR, name, sizeof(name));
+    // printf("mac:%s\n", name);
+    size_t i = 0, j = 0;
+    for (; name[i] != '\0'; i++) {
+        if (name[i] != ':') {
+            name[j] = name[i];
+            j++;
+        }
+    }
+    name[j] = '\0';
+
+    printf("device name:%s\n", name);
+    // platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
+    // printf("device secret:%s\n", hmac_secret);
+
+    // client can be mac or any other custom string
+    // we use format: TIHUIYAN_PRODUCT_KEY.TIHUIYAN_DEVICE_NAME
+    snprintf(client_id, sizeof(client_id), "%s.%s", TIHUIYAN_PRODUCT_KEY, name);
+    printf("clientid:%s\n", client_id);
+
+    // mqttClientId: clientId+"|securemode=3,signmethod=hmacsha1,timestamp=132323232|"
+    // mqttUsername: deviceName+"&"+productKey
+    // mqttPassword: sign_hmac(deviceSecret,content)
+    snprintf(id, sizeof(id), "%s|securemode=2,signmethod=hmacsha256,timestamp=%lld|", client_id, msec);
+    // {deviceName}&{productKey}
+    snprintf(username, sizeof(username), "%s&%s", name, product_key);
+    // "clientId" + {ClientId}+ "deviceName" + {deviceName }+ "productKey" + {productKey }+ "timestamp" + {timestamp}
+    asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, msec);
+
+    printf("username:%s\n", username);
+    printf("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
+    HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
+
+    assert(sizeof(password) >= EVP_MAX_MD_SIZE * 2 + 1);
+
+    for (unsigned int i = 0; i < len; i++) {
+        sprintf(password + i * 2, "%02x", result[i]);
+    }
+    password[len * 2] = '\0';
+    printf("iot password:%s\n", password);
+
+    // free memory
+    free(iot_content);
+    iot_content = NULL;
+
+    // https://help.aliyun.com/zh/iot/user-guide/establish-mqtt-connections-over-tcp
+    // _iot->ca_file = "~/Downloads/ali_iot_ca.crt";
+
+    mosquitto_lib_init();
+
+    mosq = mosquitto_new(id, true, &_priv);
+    if (!mosq) {
+        mosquitto_lib_cleanup();
+        return -1;
+    }
+
+    _priv.mosq = mosq;
+
+    mosquitto_connect_callback_set(mosq, _on_connect);
+    // mosquitto_connect_with_flags_callback_set(mosq,
+    // _on_connect_with_flags);
+    mosquitto_disconnect_callback_set(mosq, _on_disconnect);
+    mosquitto_message_callback_set(mosq, _on_message);
+
+    mosquitto_tls_set(mosq, BROKER_DEFAULT_CA_FILE, BROKER_DEFAULT_CA_PATH, BROKER_DEFAULT_CERTIFICATE, BROKER_DEFAULT_CERTIFICATE_KEY, NULL); mosquitto_tls_insecure_set(mosq, BROKER_DEFAULT_TLS_INSECURE);
+    mosquitto_tls_opts_set(mosq, BROKER_DEFAULT_TLS_CERT_REQS, NULL, NULL);
+
+    mosquitto_username_pw_set(mosq, username, password);
+
+    // no error async interface
+    mosquitto_connect_async(_priv.mosq, BROKER_DEFAULT_SERVER, BROKER_DEFAULT_PORT, BROKER_DEFAULT_ALIVETIME);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        // async maybe return MOSQ_ERR_CONN_PENDING
+        HR_LOGD("%s(%d): connect result:%d -> %s\n", __FUNCTION__, __LINE__, rc, mosquitto_strerror(rc));
+        if (rc == MOSQ_ERR_EAI) {
+            res_init();
+        }
+    }
+
+    // mxp, 20250703, use inner loop thread, you should call it after connected
+    // but i found it will loop wait connect state
+    mosquitto_loop_start(_priv.mosq);
+
+    return 0;
+}
+
+static int elinkd_iot_deinit() {
+    struct mosquitto* mosq = _priv.mosq;
+
+    if (!mosq) {
+        return -1;
+    }
+
+    mosquitto_loop_stop(mosq, false);
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+
+    return 0;
+}
+int elinkd_main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
     struct sigaction action;
 
-    HR_LOGD("econsoled %s\n", BUILD_TIMESTAMP);
+    HR_LOGD("elinkd %s\n", BUILD_TIMESTAMP);
 
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGTERM, &action, NULL);
 
-
+    if (elinkd_iot_init() != 0) {
+        return -1;
+    }
 
     struct uloop_fd pipe_fd = {
         .fd = _pipefd[0],
@@ -400,6 +644,7 @@ int econsoled_main(int argc, char** argv) {
 
     uloop_fd_add(&pipe_fd, ULOOP_READ);
 
+    // post_message(MSG_MQTT_CONNECT);
     uloop_run();
 
     ubus_unregister_event_handler(_ubus_ctx, &_ubus_event);
@@ -409,6 +654,7 @@ int econsoled_main(int argc, char** argv) {
 
     uloop_done();
 
+    mosquitto_lib_cleanup();
 
     return 0;
 }

@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "econsoled.h"
+#include "elinkd.h"
 
 static int _exit_request = 0;
 
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     (void)argv;
     struct sigaction action;
 
-    printf("econsoled %s\n", BUILD_TIMESTAMP);
+    printf("elinkd %s\n", BUILD_TIMESTAMP);
 
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -62,10 +62,10 @@ int main(int argc, char** argv) {
             sigaction(SIGTERM, &action, NULL);
             sigaction(SIGCHLD, &action, NULL);
 
-            return econsoled_main(argc, argv);
+            return elinkd_main(argc, argv);
         }
 
-        printf("hqliftd main started:%d\n", pid);
+        printf("elinkd main started:%d\n", pid);
 
         waitpid(pid, &status, 0);
 
