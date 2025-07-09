@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/poll.h>
-
 #include <unistd.h>
 
 #include "libubox/blob.h"
@@ -25,7 +24,7 @@
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
-#define DTOF_OCCLUSION_DISTANCE_MM 100        // 5cm // 30cm
+#define DTOF_OCCLUSION_DISTANCE_MM 100     // 5cm // 30cm
 #define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
 #define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
 
@@ -41,6 +40,7 @@ enum alarm {
     ALARM_NONE = 0,
     ALARM_DTOF = 1,
     ALARM_EBIKE = 1 << 1,
+    ALARM_KUNREN = 1 << 2,
 };
 
 static uint32_t _alarm = ALARM_NONE;
@@ -72,13 +72,16 @@ struct alarm_sound {
     {ALARM_DTOF, "./alarm_dtof.wav"},
     // 为了你和他人的安全，请勿将电瓶车驶入电梯，谢谢合作
     {ALARM_EBIKE, "./alarm_ebike.wav"},
+    {ALARM_KUNREN, "./alarm_kunren.wav"},
     {ALARM_NONE, NULL},
 };
-
+// # 播报次数
 enum {
     OPTION_EGUARD_ALARM_SWITCH = 0,
     OPTION_EGUARD_DTOF_SWITCH,
     OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
+    OPTION_EGUARD_KUNREN,
+    OPTION_EGUARD_,
 
 };
 // default not enable
@@ -87,6 +90,7 @@ static struct sconf_proto _eguard_options[] = {
     [OPTION_EGUARD_ALARM_SWITCH] = {"EGUARD_ALARM_SWITCH", PROTO_VALUE_INT64, {.int64 = 0}},
     [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
     [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_INT64, {.int64 = DTOF_OCCLUSION_DISTANCE_MM}},
+    [OPTION_EGUARD_KUNREN] = {"EGUARD_KUNREN", PROTO_VALUE_INT64, {.int64 = 0}},
 };
 
 static void _alarm_event_confirm(struct uloop_timeout* t);
@@ -333,6 +337,49 @@ static void ubus_event_handler(struct ubus_context* ctx,
                     _alarm |= ALARM_EBIKE;
                     _alarm_timer.cb = _alarm_event_confirm;
                     uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
+                }
+            }
+        } else if (0 == strcmp("fault", event)) {
+            uint32_t fault = 0;
+            const char* type = NULL;
+            int status = 0;
+            struct blob_attr* tb[3] = {NULL};
+            static const struct blobmsg_policy policy[] = {
+                {.name = "type", .type = BLOBMSG_TYPE_STRING},
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0] || !tb[1]) {
+                return;
+            }
+
+            type = blobmsg_get_string(tb[0]);
+            status = blobmsg_get_u32(tb[1]);
+
+            if (!type) {
+                return;
+            }
+
+            printf("type:%s, fault:%d, status:%d\n", type, fault, status);
+
+            if (0 == strcmp("kunren", type)) {
+                if (status == 0) {
+                    if (0 != (_alarm & ALARM_KUNREN)) {
+                        printf("kunren resume ...\n");
+                        _alarm &= ~ALARM_KUNREN;
+                        uloop_timeout_cancel(&_alarm_timer);
+                    }
+                } else {
+                    if (0 == (_alarm & ALARM_KUNREN)) {
+                        printf("kunren alarm ...\n");
+                        _alarm |= ALARM_KUNREN;
+                        _alarm_timer.cb = _alarm_event_confirm;
+                        uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
+                    }
                 }
             }
         }
