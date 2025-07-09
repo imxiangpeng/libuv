@@ -50,6 +50,12 @@ enum elevator_exception {
     // 9. 电梯停电
     // 10. 电池电量低
 
+    // 11. 反复开关门
+    ELEVATOR_EXCEPTION_DOOR_REPEATED = 1 << 11,
+    // 12. 关门异常
+    ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR = 1 << 12,
+    // 202. 电瓶车
+    ELEVATOR_EXCEPTION_EBIKE = 1 << 20,
 };
 
 struct elevator_status {

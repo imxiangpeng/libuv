@@ -34,7 +34,8 @@
 enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
-    MSG_QUIT
+    MSG_QUIT,
+    MSG_SEND_FAULT_EVENT
 };
 
 // 定于事件
@@ -59,8 +60,10 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 static struct elevator_historical _historical;
 
 static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
-static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = DEFAULT_SPEED_THRESHOLD }};
+static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = DEFAULT_SPEED_THRESHOLD}};
 extern void topic_houqi_liftruninfo_post(void);
+
+static int _uelevator_send_fault_event(enum elevator_exception e, int status);
 
 enum {
     RT_ACCEL,
@@ -178,7 +181,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         }
 
         printf("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
-        _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
+               _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
 
     } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
         struct blob_attr* tb[__M_MAX] = {NULL};
@@ -271,6 +274,42 @@ static int subscriber_elevatord_event() {
     _elevatord_object_id = 0;
 
     return -1;
+}
+
+static const char* fault_to_string(enum elevator_exception fault) {
+    switch (fault) {
+            // 1. 困人
+        case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
+            return "kunren";
+        // 2. 开门走车
+        case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
+            return "kaimenzouche";
+        // 3. 非门区停车
+        case ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR:
+            return "feimenqutingche";
+        // 4. 冲顶
+        case ELEVATOR_EXCEPTION_RUN_OVER_TOP:
+            return "chongding";
+        // 5. 蹲底
+        case ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM:
+            return "dundi";
+        // 6. 超速
+        case ELEVATOR_EXCEPTION_OVERSPEED:
+            return "chaosu";
+        // 11. 反复开关门
+        case ELEVATOR_EXCEPTION_DOOR_REPEATED:
+            return "fanfukaiguanmen";
+        // 12. 关门异常
+        case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR:
+            return "guanmenyicang";
+        // 202. 电瓶车
+        case ELEVATOR_EXCEPTION_EBIKE:
+            return "ebike";
+        case ELEVATOR_EXCEPTION_NONE:
+        default:
+            return "";
+    }
+    return "";
 }
 
 enum {
@@ -388,8 +427,70 @@ static void ubus_event_handler(struct ubus_context* ctx,
 
             if (blobmsg_get_u32(tb[0]) == 1) {
                 HR_LOGD("receive ebike fire event!\n");
+                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_EBIKE)) {
+                    _elevator_exception |= ELEVATOR_EXCEPTION_EBIKE;
+                    elevator_fault_occurred(ELEVATOR_EXCEPTION_EBIKE);
+                }
             } else {
                 HR_LOGD("receive ebike cancel event!\n");
+                if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_EBIKE)) {
+                    _elevator_exception &= ~ELEVATOR_EXCEPTION_EBIKE;
+                    elevator_fault_resolved(ELEVATOR_EXCEPTION_EBIKE);
+                }
+            }
+        } else if (0 == strcmp("fault", event)) {
+            // receive fault from other module
+            uint32_t fault = ELEVATOR_EXCEPTION_NONE;
+            const char* type = NULL;
+            int status = 0;
+            struct blob_attr* tb[3] = {NULL};
+            static const struct blobmsg_policy policy[] = {
+                {.name = "type", .type = BLOBMSG_TYPE_STRING},
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0] || !tb[1]) {
+                return;
+            }
+
+            type = blobmsg_get_string(tb[0]);
+            status = blobmsg_get_u32(tb[1]);
+
+            if (!type) {
+                return;
+            }
+
+            if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_DOOR_REPEATED), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_DOOR_REPEATED;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR;
+            }/* else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_EBIKE), type) == 0) {
+                // ebike is also processed in event elevator.event.ebike
+                fault = ELEVATOR_EXCEPTION_EBIKE;
+            }*/
+
+            HR_LOGD("type:%s, fault:%d, status:%d\n", type, fault, status);
+
+            if (ELEVATOR_EXCEPTION_NONE == fault) {
+                return;
+            }
+
+            if (status == 1) {
+                HR_LOGD("receive %s fire event!\n", type);
+                if (0 == (_elevator_exception & fault)) {
+                    _elevator_exception |= fault;
+                    elevator_fault_occurred(fault);
+                }
+            } else {
+                HR_LOGD("receive %s cancel event!\n", type);
+                if (0 != (_elevator_exception & fault)) {
+                    _elevator_exception &= ~fault;
+                    elevator_fault_resolved(fault);
+                }
             }
         }
     }
@@ -446,6 +547,7 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
     (void)u;
     (void)events;
     int which = -1;
+
     read(_pipefd[0], &which, sizeof(which));
 
     HR_LOGD("receive message:%d \n", which);
@@ -454,6 +556,17 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             HR_LOGD("receive message:%d quit\n", which);
             uloop_end();
             break;
+        case MSG_SEND_FAULT_EVENT: {
+            enum elevator_exception fault = ELEVATOR_EXCEPTION_NONE;
+            int status = 0;
+
+            read(_pipefd[0], &fault, sizeof(fault));
+            read(_pipefd[0], &status, sizeof(status));
+
+            HR_LOGD("send fault event: fault:%d, status:%d\n", fault, status);
+            _uelevator_send_fault_event(fault, status);
+            break;
+        }
     }
 }
 
@@ -605,5 +718,56 @@ int uelevator_get_historical(struct elevator_historical** h) {
     }
 
     *h = &_historical;
+    return 0;
+}
+
+// 请勿在其他线程调用 ubus 接口，很容易阻塞啊
+static int _uelevator_send_fault_event(enum elevator_exception e, int status) {
+    static struct blob_buf b;
+    const char* type = fault_to_string(e);
+
+    HR_LOGD("%s(%d): in e:%d, type:%s, status:%d\n", __FUNCTION__, __LINE__, e, type, status);
+    if (strlen(type) == 0) {
+        return -1;
+    }
+    // elevator.event.fault '{"type":"kunren", "status":1}'
+    memset((void*)&b, 0, sizeof(b));
+    blob_buf_init(&b, 0);
+    blobmsg_add_string(&b, "type", type);
+    blobmsg_add_u32(&b, "status", status);
+
+    // char* str = blobmsg_format_json(b.head, true);
+    // HR_LOGD("send fault:%s\n", str);
+    // free(str);
+
+    ubus_send_event(_ubus_ctx, ELEVATOR_EVENT_PREFIX "fault", b.head);
+    blob_buf_free(&b);
+    HR_LOGD("%s(%d): out e:%d, type:%s, status:%d\n", __FUNCTION__, __LINE__, e, type, status);
+    return 0;
+}
+
+int uelevator_send_fault_event(enum elevator_exception e, int status) {
+    int which = MSG_SEND_FAULT_EVENT;
+    const char* type = fault_to_string(e);
+
+    HR_LOGD("%s(%d): in e:%d, type:%s, status:%d\n", __FUNCTION__, __LINE__, e, type, status);
+    if (strlen(type) == 0) {
+        return -1;
+    }
+
+    if (e == ELEVATOR_EXCEPTION_DOOR_REPEATED || e == ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR /*|| e == ELEVATOR_EXCEPTION_EBIKE*/) {
+        HR_LOGD("fault %s is broadcast from other modules, do not report again\n", type);
+        return 0;
+    }
+
+    struct {
+        int which;
+        enum elevator_exception fault;
+        int status;
+    } data = {which, e, status};
+
+    write(_pipefd[1], &data, sizeof(data));
+
+    HR_LOGD("%s(%d): out e:%d, type:%s, status:%d\n", __FUNCTION__, __LINE__, e, type, status);
     return 0;
 }

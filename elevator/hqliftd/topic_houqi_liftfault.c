@@ -44,7 +44,6 @@ static HR_LIST_HEAD(_lift_fault_idle_queue);
 static pthread_mutex_t _queue_lock;
 
 enum {
-
     OPTION_FIELD_FTP_ADDRESS = 0,
     OPTION_FIELD_FTP_USERNAME,
     OPTION_FIELD_FTP_PASSWORD,
@@ -71,6 +70,9 @@ static struct fault_report_statistics {
     {.exception = ELEVATOR_EXCEPTION_RUN_OVER_TOP, 0},
     {.exception = ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM, 0},
     {.exception = ELEVATOR_EXCEPTION_OVERSPEED, 0},
+    {.exception = ELEVATOR_EXCEPTION_DOOR_REPEATED, 0},
+    {.exception = ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR, 0},
+    {.exception = ELEVATOR_EXCEPTION_EBIKE, 0},
 };
 
 // date to record and reset report statistics
@@ -98,6 +100,15 @@ static int to_houqi_fault(enum elevator_exception fault) {
         // 6. 超速
         case ELEVATOR_EXCEPTION_OVERSPEED:
             return 6;
+        // 11. 反复开关门
+        case ELEVATOR_EXCEPTION_DOOR_REPEATED:
+            return 11;
+        // 12. 关门异常
+        case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR:
+            return 12;
+        // 202. 电瓶车
+        case ELEVATOR_EXCEPTION_EBIKE:
+            return 202; // not in document
         case ELEVATOR_EXCEPTION_NONE:
         default:
             return 0;
@@ -270,7 +281,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     if (_fault_report_statistics_tm.tm_year != tm.tm_year ||
         _fault_report_statistics_tm.tm_mon != tm.tm_mon ||
         _fault_report_statistics_tm.tm_mday != tm.tm_mday) {
-        HR_LOGD("%s(%d): reset limit %d-%d-%d last %d-%d-%d...\n", __FUNCTION__, __LINE__,
+        HR_LOGD("%s(%d): reset limit %d-%02d-%02d last %d-%02d-%02d...\n", __FUNCTION__, __LINE__,
                 tm.tm_year + 1900, tm.tm_mon, tm.tm_mday,
                 _fault_report_statistics_tm.tm_year + 1900, _fault_report_statistics_tm.tm_mon, _fault_report_statistics_tm.tm_mday);
 
@@ -314,6 +325,11 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     pthread_mutex_unlock(&_queue_lock);
 
+     // mxp, 20250702, do not report & generate fault video when fault is disabled
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+        return 0;
+    }
+
     e = fault_event_alloc();
     if (!e) {
         return -1;
@@ -326,11 +342,11 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     e->fault_begin_time = get_realtime_ms();
 
-    // mxp, 20250702, do not report & generate fault video when fault is disabled
-    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
-        return 0;
-    }
+    // mxp, 20250707, broadcast fault event to system
+    uelevator_send_fault_event(fault, 1);
 
+    // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
+    // filter it in upload_fault_video
     if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         upload_fault_video(e);
     }
@@ -372,8 +388,13 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     // mxp, 20250702, do not report & generate fault video when fault is disabled
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+        HR_INIT_LIST_HEAD(&e->entry);
+        free(e);
         return 0;
     }
+
+    // mxp, 20250707, broadcast fault event to system
+    uelevator_send_fault_event(fault, 0);
 
     // mxp, 20250620, people trapped video is upload when event is finished
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
@@ -406,6 +427,11 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
     return 0;
 }
 
+// 困人录像上传路径\event_files\电梯编号\日期_时间.mp4
+// 3个故障上传路径\fault_files\电梯编号\日期_时间.mp4
+// 电瓶车检测上传路径\record\电梯编号\日期_时间.mp4
+// 故障每天上报次数(自定义)：反复开关门、关门异常、开门行梯
+
 // should convert utc timestamp to local timestamp
 static void upload_fault_video(struct lift_fault_event* e) {
     struct tm tm;
@@ -426,10 +452,13 @@ static void upload_fault_video(struct lift_fault_event* e) {
 
     switch (e->type) {
         case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
-        case ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR:
-        case ELEVATOR_EXCEPTION_RUN_OVER_TOP:
-        case ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM:
-        case ELEVATOR_EXCEPTION_OVERSPEED:
+        // case ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR:
+        // case ELEVATOR_EXCEPTION_RUN_OVER_TOP:
+        // case ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM:
+        // case ELEVATOR_EXCEPTION_OVERSPEED:
+        case ELEVATOR_EXCEPTION_DOOR_REPEATED:
+        case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR:
+        case ELEVATOR_EXCEPTION_EBIKE:
             // report video 10 seconds around event
 
             t = e->fault_begin_time / 1000;
@@ -441,13 +470,16 @@ static void upload_fault_video(struct lift_fault_event* e) {
             (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
-
             memset((void*)&tm, 0, sizeof(tm));
             t = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
             (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
-            snprintf(url, sizeof(url), "%s/event_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+            if (e->type == ELEVATOR_EXCEPTION_EBIKE) {
+                snprintf(url, sizeof(url), "%s/record/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+            } else {
+                snprintf(url, sizeof(url), "%s/fault_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+            }
             break;
 
         case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
@@ -463,7 +495,6 @@ static void upload_fault_video(struct lift_fault_event* e) {
 
             t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
             (void)localtime_r(&t, &tm);
-            /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
