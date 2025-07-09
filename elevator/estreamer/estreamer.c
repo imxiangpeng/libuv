@@ -239,6 +239,25 @@ int main(int argc, const char** argv) {
         return -1;
     }
 
+    if (count == 1) {
+        struct record* r = (struct record*)list.data;
+        if (r->clip_start == 0 && r->clip_end == 0) {
+            if (0 == strncmp(url, "ftp://", strlen("ftp://"))) {
+                const char* user = getenv("FTP_USERNAME");
+                const char* passwd = getenv("FTP_PASSWORD");
+                snprintf(cmd, sizeof(cmd),
+                         "curl -s --retry 5 --retry-delay 5 --retry-max-time 60 --ftp-create-dirs -T %s/%s %s -u '%s:%s'",
+                         IPC_MEDIA_RECORD_DIR, r->name, url, user, passwd);
+
+                system(cmd);
+
+                fclose(fp);
+                hrbuffer_free(&list);
+                return 0;
+            }
+        }
+    }
+
     for (int i = 0; i < count; i++) {
         struct record* r = (struct record*)list.data;
         printf("%d -> %ld : %s, clip:[%d,%d]\n", i, r[i].timestamp, r[i].name, r[i].clip_start, r[i].clip_end);
@@ -265,8 +284,8 @@ int main(int argc, const char** argv) {
         const char* user = getenv("FTP_USERNAME");
         const char* passwd = getenv("FTP_PASSWORD");
         snprintf(cmd, sizeof(cmd),
-                 "ffmpeg -loglevel quiet -y -f concat -safe 0 -i %s -c copy -f mp4 %s;"
-                 "curl -s --retry 5 --retry-delay 5 --retry-max-time 60  -T %s %s -u '%s:%s'",
+                 "ffmpeg -d -loglevel quiet -y -f concat -safe 0 -i %s -c copy -f mp4 %s;"
+                 "curl -s --retry 5 --retry-delay 5 --retry-max-time 60 --ftp-create-dirs -T %s %s -u '%s:%s'",
                  concat_list, concat_path, concat_path, url, user, passwd);
     }
 
