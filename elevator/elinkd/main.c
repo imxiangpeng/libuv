@@ -47,6 +47,7 @@ int main(int argc, char** argv) {
 
     setpgid(0, 0);
 
+            return elinkd_main(argc, argv);
     while (_exit_request == 0) {
         int status;
         pid_t pid = fork();

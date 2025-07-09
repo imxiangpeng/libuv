@@ -15,9 +15,15 @@ string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
+INCLUDE_DIRECTORIES(../iutils)
+
 
 set(SOURCES main
-    elinkd)
+    elinkd
+    iot
+    topic
+    topic_property
+    ../iutils/hr_log)
 
 ADD_EXECUTABLE(elinkd ${SOURCES})
 
