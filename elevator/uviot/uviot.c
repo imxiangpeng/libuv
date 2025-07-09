@@ -498,6 +498,26 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
         return;
     }
 
+#if 1
+    if (events & UV_DISCONNECT) {
+        HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
+        // stop current poll, we should reconnect and using new socket
+        if (!uv_is_closing((uv_handle_t*)handle)) {
+            uv_poll_stop(handle);
+            uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
+        }
+
+        if (iot->auto_reconnect) {
+            // stop & start reconnect timer callback
+            uv_timer_stop(&iot->timer);
+            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
+        }
+
+        return;
+    }
+#endif
+
+
     if (events & UV_READABLE) {
         mosquitto_loop_read(mosq, 1);
     }
@@ -534,25 +554,6 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
 
         return;
     }
-#if 1
-    if (events & UV_DISCONNECT) {
-        HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
-        // stop current poll, we should reconnect and using new socket
-        if (!uv_is_closing((uv_handle_t*)handle)) {
-            uv_poll_stop(handle);
-            uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
-        }
-
-        if (iot->auto_reconnect) {
-            // stop & start reconnect timer callback
-            uv_timer_stop(&iot->timer);
-            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
-        }
-
-        return;
-    }
-#endif
-
     if (pevents != iot->pevents) {
         iot->pevents = pevents;
         uv_poll_start(&iot->poll, pevents, uviot_impl_loop_poll_cb);
@@ -692,8 +693,6 @@ int uviot_release(struct uviot* self) {
 
     mosquitto_disconnect(iot->mosq);
 
-    mosquitto_destroy(iot->mosq);
-
     loop = iot->poll.loop;
     // we must verify, because iot->poll maybe close in running
     if (uv_has_ref((uv_handle_t*)&iot->poll) /*iot->poll.type != UV_UNKNOWN_HANDLE*/) {
@@ -727,6 +726,9 @@ int uviot_release(struct uviot* self) {
     }
     HR_LOGE("%s(%d): iot:%p uviot_impl:%p\n", __FUNCTION__, __LINE__, &iot->self, iot);
     uv_close((uv_handle_t*)&iot->timer, uviot__close_uv_dynamic_handle);
+
+    mosquitto_destroy(iot->mosq);
+
     // do not call free directly
     // it will auto release in uviot__close_uv_dynamic_handle
     // free(iot);
