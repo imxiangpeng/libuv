@@ -289,6 +289,13 @@ static int _on_property_get(void* payload, int len) {
 
     cJSON_ArrayForEach(ele, params) {
         HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+ 
+        struct property* prop = property_get(ele->string);
+        if (!prop) {
+            HR_LOGD("not support property:%s\n", ele->string);
+            continue;
+        }
+        prop->dirty = 1;
     }
 
     cJSON_Delete(root);
