@@ -307,7 +307,7 @@ static struct topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .name = "event/property/post",
         .topic = {0},
         .period = 0,
-        .auto_public = 1,
+        .auto_publish = 1,
         .type = TOPIC_TYPE_PUBLISH,
         .callback.on_publish = _on_property_publish,
     },

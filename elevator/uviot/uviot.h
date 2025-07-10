@@ -36,7 +36,7 @@ struct uviot_topic {
     char name[128];
     char topic[256];
     int period;
-    int auto_public; // auto publish when connected
+    int auto_publish; // auto publish when connected
     enum topic_type {
         TOPIC_TYPE_PUBLISH = 0,
         TOPIC_TYPE_SUBSCRIBE

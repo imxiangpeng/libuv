@@ -28,6 +28,39 @@
 
 如有其他主题需求，可以参考 `topic_property.c/topic_service.c`.
 
+具体是要定义：
+
+```c
+struct topic {
+    char name[128];
+    char topic[256];
+    int period;
+    int auto_publish; // auto publish when connected
+    enum topic_type {
+        TOPIC_TYPE_PUBLISH = 0,
+        TOPIC_TYPE_SUBSCRIBE
+    } type;
+    // on start
+    // on stop
+    union {
+        // called with message on subscribed topic
+        int (*on_message)(void *payload, int len);
+        // called before publish topic
+        int (*on_publish)(void **payload, int *len);
+    } callback;
+};
+```
+
+相关字段含义如下：
+
+- `name`: 主题简短名字
+- `topic`: 主题完整路径
+- `period`: 毫秒，仅用于发布类型主题，非 0 表示该主题将间歇性上报
+- `auto_publish`: 1/0 连接成功后，是否自动发布，仅用于发布类型主题
+- `type`: 主题类型，发布或者订阅
+- `callback`: 不同类型主题回调
+   - `on_publish` 需要给 `payload` 分配内存，系统会自动释放
+
 
 ## ubus 跨进程条用
 
