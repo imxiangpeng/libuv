@@ -764,7 +764,7 @@ int uelevator_send_fault_event(enum elevator_exception e, int status) {
         int which;
         enum elevator_exception fault;
         int status;
-    } data = {which, e, status};
+    } __attribute__((packed)) data = {which, e, status};
 
     write(_pipefd[1], &data, sizeof(data));
 
