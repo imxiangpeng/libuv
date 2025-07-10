@@ -32,7 +32,7 @@ ADD_EXECUTABLE(elinkd ${SOURCES})
 
 TARGET_COMPILE_OPTIONS(elinkd PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 
-TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd" HRLOG_OUTPUT_FILE=0)
 # define config file when compile
 #TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="elinkd.conf")

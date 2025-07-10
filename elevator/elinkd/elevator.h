@@ -1,6 +1,19 @@
 #ifndef ELEVATOR_H
 #define ELEVATOR_H
+#include <stdint.h>
 #include "property.h"
-int elevator_property_elevator_id(struct property*self, struct property_value *val);
 
+#include "libubus.h"
+
+int elevator_property_elevator_id(struct property*self);
+int elevator_property_enter_sensor_calibration(struct property *self, struct property_value* value);
+void elevator_ubus_event_handler(struct ubus_context* ctx,
+                               struct ubus_event_handler* ev,
+                               const char* type,
+                               struct blob_attr* msg);
+
+int elevator_elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg);
+
+void elevator_elevatord_connected(struct ubus_context* ctx, uint32_t id);
+void elevator_elevatord_disconnected(struct ubus_context* ctx);
 #endif

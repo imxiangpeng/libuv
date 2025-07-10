@@ -1,5 +1,6 @@
 
 #include <fcntl.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,44 +112,48 @@ static int _on_property_publish(void** payload, int* len) {
 
     param = cJSON_AddObjectToObject(root, "params");
 
-    for (size_t i = 0; i < properties_tbl_size; i++) {
-        struct property_value value;
+    for (size_t i = 0; i < __PROPERTY_MAX; i++) {
         struct property* prop = &properties_tbl[i];
         HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name ? prop->name : "", prop->type, prop->dirty);
-        if (!prop->name || prop->dirty == 0 || prop->type == E_UNKNOWN || !prop->get) {
+        if (!prop->name || prop->dirty == 0 || prop->type == E_UNKNOWN) {
             continue;
         }
+
         prop->dirty = 0;
-        property_value_reset(&value);
-        if (prop->get(prop, &value) != 0) {
-            continue;
+        // only call get when it's not null
+        // we can directly access value when it's null
+        if (prop->get) {
+            if (prop->get(prop) != 0) {
+                continue;
+            }
         }
-        switch (value.type) {
+
+        switch (prop->value.type) {
             case E_NUMBER:
-                cJSON_AddNumberToObject(param, prop->name, value.val.number);
+                cJSON_AddNumberToObject(param, prop->name, prop->value.val.number);
                 break;
             case E_DECIMAL:
-                cJSON_AddNumberToObject(param, prop->name, value.val.decimal);
+                cJSON_AddNumberToObject(param, prop->name, prop->value.val.decimal);
                 break;
             case E_STRING: {
-                if (value.val.string) {
-                    cJSON_AddStringToObject(param, prop->name, value.val.string);
+                if (prop->value.val.string) {
+                    cJSON_AddStringToObject(param, prop->name, prop->value.val.string);
                     break;
                 }
                 break;
             }
             case E_BOOLEAN:
-                cJSON_AddBoolToObject(param, prop->name, value.val.boolean);
+                cJSON_AddBoolToObject(param, prop->name, prop->value.val.boolean);
                 break;
             default:
                 // invalid value, drop it
                 break;
         }
 
-        property_value_reset(&value);
+        // do not free it
+        // property_value_reset(&prop->value);
     }
 
-    printf("array size:%d\n", cJSON_GetArraySize(param));
     if (cJSON_GetArraySize(param) == 0) {
         cJSON_Delete(root);
         return -1;
@@ -165,7 +170,10 @@ static int _on_property_publish(void** payload, int* len) {
     return 0;
 }
 static int _on_property_set(void* payload, int len) {
-    // printf("set message %d -> %s\n", len, (char*)payload);
+    double number = 0;
+    const char* string = NULL;
+    struct property_value value;
+    printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     // double val = 0;
     // const char* val_str = NULL;
@@ -192,8 +200,58 @@ static int _on_property_set(void* payload, int len) {
         return -1;
     }
 
+    memset((void*)&value, 0, sizeof(value));
     cJSON_ArrayForEach(ele, params) {
         HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+
+        struct property* prop = property_get(ele->string);
+        if (!prop || !prop->set) {
+            HR_LOGD("not support property:%s\n", ele->string);
+            continue;
+        }
+
+        switch (prop->value.type) {
+            case E_NUMBER:
+                number = cJSON_GetNumberValue(ele);
+                if (!isnan(number)) {
+                    property_value_set_number(&value, (int64_t)number);
+                    prop->set(prop, &value);
+                    property_value_reset(&value);
+                }
+                break;
+            case E_DECIMAL:
+                number = cJSON_GetNumberValue(ele);
+                if (!isnan(number)) {
+                    property_value_set_decimal(&value, number);
+                    prop->set(prop, &value);
+                    property_value_reset(&value);
+                }
+
+                break;
+            case E_STRING: {
+                string = cJSON_GetStringValue(ele);
+                if (string) {
+                    // string is const, no need free
+                    property_value_set_string_ext(&value, string, 1);
+                    prop->set(prop, &value);
+                    property_value_reset(&value);
+                    break;
+                }
+                break;
+            }
+            case E_BOOLEAN:
+                number = cJSON_GetNumberValue(ele);
+                if (!isnan(number)) {
+                    property_value_set_boolean(&value, (int)number);
+                    prop->set(prop, &value);
+                    property_value_reset(&value);
+                }
+                break;
+
+            default:
+                // invalid value, drop it
+                break;
+        }
     }
 
     cJSON_Delete(root);

@@ -1,5 +1,6 @@
 // mxp, 20250703, extract the IoT management module from elevatord.
 
+#include "elinkd.h"
 #include "libubox/uloop.h"
 #define _GNU_SOURCE
 #include <assert.h>
@@ -12,6 +13,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "elevator.h"
+#include "hr_log.h"
 #include "iot.h"
 #include "libubox/blob.h"
 #include "libubox/blobmsg.h"
@@ -19,7 +22,6 @@
 #include "libubox/list.h"
 #include "libubus.h"
 #include "topic.h"
-#include "hr_log.h"
 
 #define UBUS_SOCK "/tmp/ubus.sock"
 
@@ -45,49 +47,27 @@
 #define HR_LOGE printf
 #endif
 
-static struct uloop_timeout timer;
-
-
-void timer_cb(struct uloop_timeout *t) {
-    (void)t;
-    HR_LOGD("Timer fired! \n");
-
-    uloop_timeout_set(&timer, 5000);
-}
-enum elevator_direction {
-    ELEVATOR_DIR_STATIONARY = 0,
-    ELEVATOR_DIR_UP,   // 1
-    ELEVATOR_DIR_DOWN  // 2
-};
-
-enum elevator_door_state {
-    ELEVATOR_DOOR_OPEN = 0,
-    ELEVATOR_DOOR_CLOSE
-};
-
-struct elevator_status {
-    enum elevator_direction direction;
-    enum elevator_door_state door_state;
-    double accel;
-    double speed;
-    double distance;
-    int current_floor;
-    int passenger_count;
-    double jitter_freq;
-    double jitter_accel;
-};
-
 enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
     MSG_QUIT,
     MSG_IOT_INIT,
     MSG_ULOOP_TIMEOUT_SET,
+    MSG_POST_ASYNC_TASK,
 };
 
+static struct uloop_timeout timer;
+
+void timer_cb(struct uloop_timeout* t) {
+    (void)t;
+    HR_LOGD("Timer fired! \n");
+
+    uloop_timeout_set(&timer, 5000);
+}
 // mxp, 20231029, simple timer task using libubox
 struct _inner_task {
-    int (*task)(void*);
+    // int (*task)(void*);
+    task_handler task;
     void* arg;
 };
 
@@ -113,8 +93,6 @@ static struct ubus_subscriber _elevatord_subscriber;
 static uint32_t _elevatord_object_id = 0;
 static struct blob_buf _b;
 
-static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
-
 static void _timeout_task_cb(struct uloop_timeout* t) {
     struct _timer_task* task = (struct _timer_task*)t;
     if (!task) {
@@ -131,7 +109,7 @@ static void _timeout_task_cb(struct uloop_timeout* t) {
 }
 
 // we will auto release memory which allocated here when task doned
-int post_task(int msec, int (*task)(void*), void* arg) {
+int post_timer_task(int msec, task_handler task, void* arg) {
     // memory will auto be release when fired
     struct _timer_task* t = NULL;
 
@@ -175,11 +153,11 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 
             break;
         }
-         case MSG_ULOOP_TIMEOUT_SET: {
+        case MSG_ULOOP_TIMEOUT_SET: {
             HR_LOGD("uloop_timeout_set:%d !\n", which);
-            struct uloop_timeout * t = NULL;
+            struct uloop_timeout* t = NULL;
             int msec = 0;
-            
+
             printf("%ld vs %ld\n", sizeof(struct uloop_timeout*), sizeof(t));
             read(_pipefd[0], &t, sizeof(t));
 
@@ -190,7 +168,20 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 
             break;
         }
-                          
+        case MSG_POST_ASYNC_TASK: {
+            HR_LOGD("uloop_timeout_set:%d !\n", which);
+            task_handler task = NULL;
+            void* args = NULL;
+
+            read(_pipefd[0], &task, sizeof(task));
+
+            read(_pipefd[0], &args, sizeof(args));
+
+            HR_LOGD("async task: %p -> %pms!\n", task, args);
+
+            task(args);
+            break;
+        }
     }
 }
 
@@ -198,16 +189,25 @@ static void post_message(int which) {
     write(_pipefd[1], &which, sizeof(which));
 }
 
-void post_timer_delay(struct uloop_timeout *t, int msec) {
+void post_timer(struct uloop_timeout* t, int msec) {
     struct {
         int which;
-        struct uloop_timeout *t;
+        struct uloop_timeout* t;
         int msec;
     } __attribute__((packed)) data = {MSG_ULOOP_TIMEOUT_SET, t, msec};
-    ssize_t s = write(_pipefd[1], &data, sizeof(data));
-    HR_LOGD("s:%ld\n", s);
+    write(_pipefd[1], &data, sizeof(data));
 }
 
+int post_async_task(task_handler task, void* args) {
+    struct {
+        int which;
+        task_handler task;
+        void* priv;
+    } __attribute__((packed)) data = {MSG_POST_ASYNC_TASK, task, args};
+    write(_pipefd[1], &data, sizeof(data));
+
+    return 0;
+}
 
 enum {
     RT_ACCEL,
@@ -243,21 +243,6 @@ enum {
     HI_JITTER_ACCEL_ARRAY,
     __HI_MAX
 };
-
-static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
-    (void)ctx;
-    (void)obj;
-    (void)req;
-    (void)method;
-    (void)msg;
-
-    if (!method) {
-        return -1;
-    }
-
-    return 0;
-}
-
 static int subscriber_elevatord_event() {
     if (_elevatord_object_id != 0) {
         // have subscribed
@@ -265,6 +250,7 @@ static int subscriber_elevatord_event() {
     }
     if (0 == ubus_lookup_id(_ubus_ctx, ELEVATORD_NAME, &_elevatord_object_id)) {
         if (0 == ubus_subscribe(_ubus_ctx, &_elevatord_subscriber, _elevatord_object_id)) {
+            elevator_elevatord_connected(_ubus_ctx, _elevatord_object_id);
             return 0;
         }
     }
@@ -328,71 +314,9 @@ static void ubus_event_handler(struct ubus_context* ctx,
                 ubus_unsubscribe(ctx, &_elevatord_subscriber, id);
             }
         }
-    } else if (strncmp(type, ELEVATOR_EVENT_PREFIX, strlen(ELEVATOR_EVENT_PREFIX)) == 0) {
-        const char* event = type + strlen(ELEVATOR_EVENT_PREFIX);
-        // HR_LOGD("%s(%d): type:%s -> %s\n", __FUNCTION__, __LINE__, type, event);
-        // door
-        // person
-        // ebike
-
-        if (0 == strcmp("door", event)) {
-            static const struct blobmsg_policy policy[] = {
-                {.name = "status", .type = BLOBMSG_TYPE_STRING},
-                {NULL, BLOBMSG_TYPE_UNSPEC},
-            };
-
-            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
-                          blobmsg_data_len(msg));
-
-            if (!tb[0]) {
-                return;
-            }
-
-            const char* status = blobmsg_get_string(tb[0]);
-            if (!status) {
-                return;
-            }
-            if (0 == strcmp("open", status)) {
-                _status.door_state = ELEVATOR_DOOR_OPEN;
-            } else if (0 == strcmp("close", status)) {
-                _status.door_state = ELEVATOR_DOOR_CLOSE;
-            }
-        } else if (0 == strcmp("person", event)) {
-            int num = 0;
-            static const struct blobmsg_policy policy[] = {
-                {.name = "num", .type = BLOBMSG_TYPE_INT32},
-                {NULL, BLOBMSG_TYPE_UNSPEC},
-            };
-
-            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
-                          blobmsg_data_len(msg));
-
-            if (!tb[0]) {
-                return;
-            }
-
-            num = blobmsg_get_u32(tb[0]);
-            _status.passenger_count = num;
-        } else if (0 == strcmp("ebike", event)) {
-            static const struct blobmsg_policy policy[] = {
-                {.name = "status", .type = BLOBMSG_TYPE_INT32},
-                {NULL, BLOBMSG_TYPE_UNSPEC},
-            };
-
-            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
-                          blobmsg_data_len(msg));
-
-            if (!tb[0]) {
-                return;
-            }
-
-            if (blobmsg_get_u32(tb[0]) == 1) {
-                HR_LOGD("receive ebike fire event!\n");
-            } else {
-                HR_LOGD("receive ebike cancel event!\n");
-            }
-        }
     }
+
+    elevator_ubus_event_handler(ctx, ev, type, msg);
 }
 
 static struct ubus_event_handler _ubus_event = {
@@ -468,12 +392,12 @@ int elinkd_main(int argc, char** argv) {
         return -1;
     }
 
-   
     struct uloop_fd pipe_fd = {
         .fd = _pipefd[0],
         .cb = _pipe_uloop_main_thread_handler,
     };
 
+    memset((void*)&_b, 0, sizeof(_b));
     blob_buf_init(&_b, 0);
 
     uloop_init();
@@ -486,7 +410,7 @@ int elinkd_main(int argc, char** argv) {
         HR_LOGD("%s(%d): can not connect ubusd!\n", __FUNCTION__, __LINE__);
         usleep(1000 * 1000);
     }
-    
+
     printf("ubus connect .....\n");
 
     _ubus_ctx->connection_lost = _connection_lost;
@@ -498,36 +422,37 @@ int elinkd_main(int argc, char** argv) {
 #endif
 
     memset(&_elevatord_subscriber, 0, sizeof(_elevatord_subscriber));
-    _elevatord_subscriber.cb = elevatord_subscriber_callback;
+    _elevatord_subscriber.cb = elevator_elevatord_subscriber_callback;
 
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
     ubus_register_event_handler(_ubus_ctx, &_ubus_event, "ubus.object.*");
-    ubus_register_event_handler(_ubus_ctx, &_ubus_event, "elevator.event.*");
+    ubus_register_event_handler(_ubus_ctx, &_ubus_event, ELEVATOR_EVENT_PREFIX "*");
 
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     subscriber_elevatord_event();
 
     uloop_fd_add(&pipe_fd, ULOOP_READ);
 
- timer.cb = timer_cb;
-    // uloop_timeout_set(&timer, 1000);     
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    timer.cb = timer_cb;
+    // uloop_timeout_set(&timer, 1000);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     post_message(MSG_IOT_INIT);
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     uloop_run();
 
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     iot_deinit();
     ubus_unregister_event_handler(_ubus_ctx, &_ubus_event);
     ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
     ubus_free(_ubus_ctx);
     _ubus_ctx = NULL;
 
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     uloop_done();
 
-        HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    blob_buf_free(&_b);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }

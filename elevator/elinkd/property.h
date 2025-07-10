@@ -25,15 +25,21 @@ struct property_value {
 struct property {
     const char* name;
     enum property_type type;
-    int (*get)(struct property*self, struct property_value *val);
-    int (*set)(struct property*self, struct property_value *val);
-    // struct property_value value;
+    // some property no need get
+    // dispatch when property is changed
+    // there update value directly and mark dirty
+    int (*get)(struct property*self);
+    int (*set)(struct property*self, struct property_value *value);
+    struct property_value value;
     int dirty;
 };
 
+struct property* property_get(const char* name);
+
+
 int property_value_reset(struct property_value*);
 int property_value_set_number(struct property_value*, int64_t);
-int property_value_set_double(struct property_value*, double);
+int property_value_set_decimal(struct property_value*, double);
 int property_value_set_boolean(struct property_value*, int);
 int property_value_set_string(struct property_value*, const char*);
 int property_value_set_string_ext(struct property_value*, const char*, int preallocated);
@@ -64,5 +70,4 @@ enum {
 
 extern struct property properties_tbl[__PROPERTY_MAX];
 
-extern size_t properties_tbl_size;
 #endif

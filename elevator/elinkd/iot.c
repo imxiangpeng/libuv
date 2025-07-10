@@ -63,7 +63,7 @@ static struct iot_priv _priv = {
     .topic_head = LIST_HEAD_INIT(_priv.topic_head),
 };
 
-void post_timer_delay(struct uloop_timeout* t, int msec);
+void post_timer(struct uloop_timeout* t, int msec);
 
 static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
     HR_LOGD("%s(%d): ...........\n", __FUNCTION__, __LINE__);
@@ -74,7 +74,7 @@ static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
 
     if (topic->self->period > 0) {
         // it's in uloop, also you can use uloop_timeout_set directly
-        post_timer_delay /*uloop_timeout_set*/ (&topic->timer, topic->self->period);
+        post_timer /*uloop_timeout_set*/ (&topic->timer, topic->self->period);
     }
     if (mosquitto_socket(_priv.mosq) == -1) {
         return;
@@ -142,7 +142,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
     (void)obj;
     HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
     struct iot_priv* priv = (struct iot_priv*)obj;
-    if (!mosq)
+    if (!mosq || !priv)
         return;
 
     HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
@@ -155,7 +155,6 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
 
     struct iot__topic* p = NULL;
     list_for_each_entry(p, &priv->topic_head, entry) {
-        HR_LOGD("%s(%d): topic %s...\n", __FUNCTION__, __LINE__, p->self->topic);
         if (p->self->type == TOPIC_TYPE_SUBSCRIBE) {
             int ret = mosquitto_subscribe(mosq, &p->mid, p->self->topic, 0);
             HR_LOGD("%s(%d): connected, auto subscribe:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
@@ -180,7 +179,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
             if (p->self->period > 0) {
                 HR_LOGD("%s(%d): topic %s...start timer :%d, p->timer.cb:%p vs %p\n", __FUNCTION__, __LINE__, p->self->topic, p->self->period, p->timer.cb, iot__topic_timeout_task_cb);
                 // it's not uloop, do not use uloop_timeout_set directly
-                post_timer_delay(&p->timer, p->self->period);
+                post_timer(&p->timer, p->self->period);
             }
         }
     }
@@ -195,10 +194,11 @@ static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
 
 static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitto_message* message) {
     (void)mosq;
-    struct uviot_impl* iot = (struct uviot_impl*)obj;
-    if (!mosq || !iot)
+    struct iot__topic* p = NULL;
+    struct iot_priv* priv = (struct iot_priv*)obj;
+    if (!mosq || !priv)
         return;
-#if 1
+#if 0
     HR_LOGD("%s(%d): receive topic:%s, payloadlen:%d\n", __FUNCTION__, __LINE__,
             message->topic, message->payloadlen);
     if (message->payload) {
@@ -207,8 +207,27 @@ static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitt
     }
 #endif
 
-    if (!message->payload)
+    if (!message->payload) {
         return;
+    }
+
+    list_for_each_entry(p, &_priv.topic_head, entry) {
+        // ignore publish response message
+        if (p->self->type != TOPIC_TYPE_SUBSCRIBE) {
+            continue;
+        }
+
+        if (0 != strncmp(message->topic, p->self->topic, strlen(p->self->topic))) {
+            continue;
+        }
+
+        if (p->self->callback.on_message) {
+            p->self->callback.on_message(message->payload, message->payloadlen);
+        }
+
+        // allow multi place subscribe same topic?
+        break;
+    }
 }
 
 int iot_init() {
@@ -386,7 +405,7 @@ int iot_topic_publish_async(const struct topic* topic) {
 
         if (p->self == topic) {
             // it's not uloop, do not use uloop_timeout_set directly
-            post_timer_delay(&p->timer, 0);
+            post_timer(&p->timer, 0);
         }
     }
 

@@ -3,11 +3,11 @@
 // 2. publish event
 
 #include <cjson/cJSON.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 
-#include <math.h>
 #include "floor.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
@@ -27,6 +27,9 @@
 #define ELEVATORD_EVENT_REALTIME "RealTime"
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
 #define ELEVATORD_EVENT_MOTION "Motion"
+#define ELEVATORD_EVENT_SENSOR_CALIBRATION "SensorCalibration"
+
+#define ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT "AutoFloorCalibrationEvent"
 
 #define _UBUS_RETRY_TIMEOUT (2)
 
@@ -38,7 +41,8 @@ enum {
     MSG_REALTIME,
     MSG_HISTORICAL,
     MSG_MOTION_EVENT,
-    MSG_QUIT
+    MSG_SENSOR_CALIBRATION_EVENT,
+    MSG_QUIT,
 };
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -56,6 +60,7 @@ static int _historical_b_is_busy = 0;
 static struct blob_buf _realtime_b;
 static int _realtime_b_is_busy = 0;
 static struct blob_buf _motion_b;
+static struct blob_buf _sensor_calibration_b;
 static struct hrbuffer _accel_buffer;
 static struct hrbuffer _velocity_buffer;
 static struct hrbuffer _jitter_accel_buffer;
@@ -72,10 +77,13 @@ static int _begin_floor = 0;
 
 static void _observer_on_status(struct motion_status* st);
 static void _observer_on_event(struct motion_event* data);
+static void _observer_on_sensor_calibration(struct motion_sensor_calibration_event* data);
 
 static struct motion_observer _ubus_observer = {
     .on_status = _observer_on_status,
     .on_event = _observer_on_event,
+
+    .on_sensor_calibration = _observer_on_sensor_calibration,
 };
 
 struct ubus_context* uelevatord_get_ubus_ctx() {
@@ -92,6 +100,10 @@ static int uobject_elevatord_property_handler(struct ubus_context* ctx, struct u
     if (!obj || !method) {
         return -1;
     }
+
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
+    free(str);
 
     HR_LOGD("%s(%d): method:%s\n", __FUNCTION__, __LINE__, method);
     if (0 == strcmp("get", method)) {
@@ -221,11 +233,32 @@ static int _calibrate_at_floor_or_height_manually(struct ubus_context* ctx, stru
     return UBUS_STATUS_INVALID_ARGUMENT;
 }
 
+static int _sensor_calibration_handler(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
+    (void)ctx;
+    (void)req;
+    (void)msg;
+
+    if (!obj || !method) {
+        return -1;
+    }
+
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
+    free(str);
+
+    HR_LOGD("%s(%d): method:%s\n", __FUNCTION__, __LINE__, method);
+
+    motion_enter_sensor_calibration();
+
+    return 0;
+}
+
 static const struct ubus_method _object_methods[] = {
     UBUS_METHOD_NOARG("get", uobject_elevatord_property_handler),
-    UBUS_METHOD("startAutoFloorCalibration", _start_auto_floor_calibration, _floor_calibration_policy),
+    UBUS_METHOD("StartAutoFloorCalibration", _start_auto_floor_calibration, _floor_calibration_policy),
     UBUS_METHOD("CalibrateAtFloorManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
     UBUS_METHOD("CalibrateAtHeightManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
+    UBUS_METHOD_NOARG("enter_sensor_calibration", _sensor_calibration_handler),
 };
 
 static struct ubus_object_type _object_type =
@@ -259,6 +292,10 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
         case MSG_MOTION_EVENT:
             // HR_LOGD("receive motion event message \n");
             ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_MOTION, _motion_b.head, -1 /*no block*/);
+            break;
+        case MSG_SENSOR_CALIBRATION_EVENT:
+            HR_LOGD("receive sensor calibration event message \n");
+            ubus_notify(_ubus_ctx, &_elevatord_object, ELEVATORD_EVENT_SENSOR_CALIBRATION, _sensor_calibration_b.head, -1 /*no block*/);
             break;
         case MSG_QUIT:
             HR_LOGD("receive message:%d quit\n", which);
@@ -376,6 +413,7 @@ int uelevatord_init(void) {
 
     blob_buf_init(&_motion_b, 0);
     blob_buf_init(&_realtime_b, 0);
+    blob_buf_init(&_sensor_calibration_b, 0);
 
     hrbuffer_alloc(&_accel_buffer, 1024 * sizeof(double));         // 1s -> 5 elements
     hrbuffer_alloc(&_velocity_buffer, 1024 * sizeof(double));      // 1s -> 5 elements
@@ -399,6 +437,7 @@ int uelevatord_deinit(void) {
         blob_buf_free(&_historical_b);
         blob_buf_free(&_motion_b);
         blob_buf_free(&_realtime_b);
+        blob_buf_free(&_sensor_calibration_b);
 
         hrbuffer_free(&_accel_buffer);
         hrbuffer_free(&_velocity_buffer);
@@ -557,4 +596,32 @@ static void _observer_on_event(struct motion_event* data) {
     }
 
     _running_state = data->state;
+}
+
+static void _observer_on_sensor_calibration(struct motion_sensor_calibration_event* data) {
+    if (!data)
+        return;
+    HR_LOGD("%s(%d): sensor:%d, is calibration:%d\n", __FUNCTION__, __LINE__, data->type, data->state);
+
+    if (data->type == SENSOR_ACCELEROMETER) {
+        // bias_accel_x
+        // bias_accel_y
+        // bias_accel_z
+        // pitch
+        // roll
+        
+        blob_buf_init(&_sensor_calibration_b, 0);
+
+        blobmsg_add_string(&_sensor_calibration_b, "type", "accelerometer");
+
+        blobmsg_add_u32(&_sensor_calibration_b, "calibration", data->state);
+        
+        blobmsg_add_double(&_sensor_calibration_b, "bias_accel_x", data->value[0]);
+        blobmsg_add_double(&_sensor_calibration_b, "bias_accel_y", data->value[1]);
+        blobmsg_add_double(&_sensor_calibration_b, "bias_accel_z", data->value[2]);
+        blobmsg_add_double(&_sensor_calibration_b, "bias_pitch", data->value[3]);
+        blobmsg_add_double(&_sensor_calibration_b, "bias_roll", data->value[4]);
+
+        uevelatord_post_message(MSG_SENSOR_CALIBRATION_EVENT);
+    }
 }
