@@ -23,6 +23,9 @@ set(SOURCES main
     iot
     topic
     topic_property
+    property
+    system
+    elevator
     ../iutils/hr_log)
 
 ADD_EXECUTABLE(elinkd ${SOURCES})

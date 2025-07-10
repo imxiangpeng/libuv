@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "cjson/cJSON.h"
+#include "property.h"
 #include "topic.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -19,18 +20,14 @@
 #define HR_LOGE printf
 #endif
 
-
-
-static char _elevator_id[128] = {0};
-static char _sw_version[64] = {0};
-
 enum {
     PROPERTY_TOPIC_POST = 0,
     PROPERTY_TOPIC_SET,
+    PROPERTY_TOPIC_GET,
     _PROPERTY_TOPIC_MAX,
 };
 
-
+#if 0
 enum {
     PROPERTY_BUILD_TIMESTAMP = 0,
     PROPERTY_SW_VERSION,
@@ -98,7 +95,7 @@ struct property {
     [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", P_INT64, {0}, 0},
     [PROPERTY_DOOR_ROI] = {"door_roi", P_STRING, {.val_str = ""}, 0},
 };
-
+#endif
 static int _on_property_publish(void** payload, int* len) {
     char tmp[256] = {0};
     cJSON *root = NULL, *param = NULL;
@@ -114,28 +111,47 @@ static int _on_property_publish(void** payload, int* len) {
 
     param = cJSON_AddObjectToObject(root, "params");
 
-    for (size_t i = 0; i < ARRAY_SIZE(_properties_tbl); i++) {
-        struct property* prop = &_properties_tbl[i];
-        HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name, prop->type, prop->dirty);
-        if (prop->dirty == 0) {
+    for (size_t i = 0; i < properties_tbl_size; i++) {
+        struct property_value value;
+        struct property* prop = &properties_tbl[i];
+        HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name ? prop->name : "", prop->type, prop->dirty);
+        if (!prop->name || prop->dirty == 0 || prop->type == E_UNKNOWN || !prop->get) {
             continue;
         }
         prop->dirty = 0;
-        switch (prop->type) {
-            case P_INT64:
-                cJSON_AddNumberToObject(param, prop->name, prop->value.val_int64);
+        property_value_reset(&value);
+        if (prop->get(prop, &value) != 0) {
+            continue;
+        }
+        switch (value.type) {
+            case E_NUMBER:
+                cJSON_AddNumberToObject(param, prop->name, value.val.number);
                 break;
-            case P_DOUBLE:
-                cJSON_AddNumberToObject(param, prop->name, prop->value.val_double);
+            case E_DECIMAL:
+                cJSON_AddNumberToObject(param, prop->name, value.val.decimal);
                 break;
-            case P_STRING: {
-                if (prop->value.val_str) {
-                    cJSON_AddStringToObject(param, prop->name, prop->value.val_str);
+            case E_STRING: {
+                if (value.val.string) {
+                    cJSON_AddStringToObject(param, prop->name, value.val.string);
                     break;
                 }
                 break;
             }
+            case E_BOOLEAN:
+                cJSON_AddBoolToObject(param, prop->name, value.val.boolean);
+                break;
+            default:
+                // invalid value, drop it
+                break;
         }
+
+        property_value_reset(&value);
+    }
+
+    printf("array size:%d\n", cJSON_GetArraySize(param));
+    if (cJSON_GetArraySize(param) == 0) {
+        cJSON_Delete(root);
+        return -1;
     }
 
     *payload = cJSON_PrintUnformatted(root);
@@ -151,8 +167,8 @@ static int _on_property_publish(void** payload, int* len) {
 static int _on_property_set(void* payload, int len) {
     // printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
-    //double val = 0;
-    //const char* val_str = NULL;
+    // double val = 0;
+    // const char* val_str = NULL;
     cJSON *root = NULL, *params = NULL, *ele = NULL;
     if (!payload || len == 0) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
@@ -177,7 +193,44 @@ static int _on_property_set(void* payload, int len) {
     }
 
     cJSON_ArrayForEach(ele, params) {
-        HR_LOGD("ele: %s -> type:%d\n", ele->string, ele->type);
+        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+    }
+
+    cJSON_Delete(root);
+    return 0;
+}
+
+// only mark property as dirty
+static int _on_property_get(void* payload, int len) {
+    // printf("set message %d -> %s\n", len, (char*)payload);
+    char* method = NULL;
+    // double val = 0;
+    // const char* val_str = NULL;
+    cJSON *root = NULL, *params = NULL, *ele = NULL;
+    if (!payload || len == 0) {
+        HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
+        return -1;
+    }
+
+    root = cJSON_ParseWithLength((const char*)payload, len);
+    if (!root) {
+        return -1;
+    }
+
+    method = cJSON_GetStringValue(cJSON_GetObjectItem(root, "method"));
+    if (!method || 0 != strcmp("thing.service.property.get", method)) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    params = cJSON_GetObjectItem(root, "params");
+    if (!params) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON_ArrayForEach(ele, params) {
+        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
     }
 
     cJSON_Delete(root);
@@ -188,7 +241,7 @@ static struct topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
     [PROPERTY_TOPIC_POST] = {
         .name = "event/property/post",
         .topic = {0},
-        .period = 10000,
+        .period = 0,
         .auto_public = 1,
         .type = TOPIC_TYPE_PUBLISH,
         .callback.on_publish = _on_property_publish,
@@ -199,8 +252,13 @@ static struct topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_property_set,
     },
-    };
-
+    [PROPERTY_TOPIC_GET] = {
+        .name = "service/property/get",
+        .topic = {0},
+        .type = TOPIC_TYPE_SUBSCRIBE,
+        .callback.on_message = _on_property_get,
+    },
+};
 
 int topic_property_init(const char* public_key, const char* device_name) {
     (void)public_key;
@@ -212,6 +270,9 @@ int topic_property_init(const char* public_key, const char* device_name) {
         iot_topic_register(t);
     }
 
-
     return 0;
+}
+
+void topic_property_report(void) {
+    iot_topic_publish_async(&_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

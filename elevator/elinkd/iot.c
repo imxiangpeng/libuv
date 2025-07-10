@@ -73,8 +73,8 @@ static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
     HR_LOGD("%s(%d): ...........\n", __FUNCTION__, __LINE__);
 
     if (topic->self->period > 0) {
-        // post_timer_delay/*uloop_timeout_set*/(&topic->timer, topic->self->period);
-        uloop_timeout_set(&topic->timer, topic->self->period);
+        // it's in uloop, also you can use uloop_timeout_set directly
+        post_timer_delay /*uloop_timeout_set*/ (&topic->timer, topic->self->period);
     }
     if (mosquitto_socket(_priv.mosq) == -1) {
         return;
@@ -179,8 +179,8 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
 
             if (p->self->period > 0) {
                 HR_LOGD("%s(%d): topic %s...start timer :%d, p->timer.cb:%p vs %p\n", __FUNCTION__, __LINE__, p->self->topic, p->self->period, p->timer.cb, iot__topic_timeout_task_cb);
-                post_timer_delay /*uloop_timeout_set*/ (&p->timer, p->self->period);
-                // uloop_timeout_set(&p->timer, p->self->period);
+                // it's not uloop, do not use uloop_timeout_set directly
+                post_timer_delay(&p->timer, p->self->period);
             }
         }
     }
@@ -335,7 +335,6 @@ int iot_deinit() {
         return -1;
     }
 
-
     mosquitto_disconnect(mosq);
     HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     mosquitto_loop_stop(mosq, false);
@@ -344,8 +343,7 @@ int iot_deinit() {
     mosquitto_lib_cleanup();
 
     list_for_each_entry_safe(p, n, &_priv.topic_head, entry) {
-
-    HR_LOGD("%s(%d): free :%s.......\n", __FUNCTION__, __LINE__, p->self->name);
+        HR_LOGD("%s(%d): free :%s.......\n", __FUNCTION__, __LINE__, p->self->name);
         iot__topic_free(p);
     }
 
@@ -387,8 +385,8 @@ int iot_topic_publish_async(const struct topic* topic) {
         }
 
         if (p->self == topic) {
-            // post_timer_delay/*uloop_timeout_set*/(&p->timer, 0);
-            uloop_timeout_set(&p->timer, 0);
+            // it's not uloop, do not use uloop_timeout_set directly
+            post_timer_delay(&p->timer, 0);
         }
     }
 

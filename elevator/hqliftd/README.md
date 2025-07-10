@@ -18,3 +18,5 @@
     - `LIFTFAULT_DOOR_DETECT_TIMEOUT=` 电梯停靠后多久不开门认为困人（有人），单位毫秒, 因为目前开关门算法存在相当概率识别非常门或者不准确的情况，所以目前设置的非常大，最开始我们设置的是 5s
     - `LIFTFAULT_PERSON_LONG_INSIDE_TIMEOUT` 电梯关门并且静止情况下，在电梯内有人时，多久认为困人，单位毫秒, 默认设置 60s
     - `LIFTFAULT_REPORT_LIMIT_PER_DAY` 限制每类故障每天上报次数
+    - `RUNINFO_REPORT_SWITCH` 运行数据上报开关
+    - `LIFTFAULT_VIDEO_UPLOAD_SWITCH` 故障视频上报开关，备用
