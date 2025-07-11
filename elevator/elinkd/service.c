@@ -1,3 +1,6 @@
+
+// mxp, 20250710, implement elevator related iot service
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,10 +59,8 @@ static int _StartAutoFloorCalibration(cJSON* params) {
 }
 static int _CalibrateAtFloorManually(cJSON* params) {
     double val = 0;
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "Floor"));
     if (isnan(val)) {
-        HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -69,10 +70,8 @@ static int _CalibrateAtFloorManually(cJSON* params) {
 }
 static int _CalibrateAtHeightManually(cJSON* params) {
     double val = 0;
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, "Height"));
     if (isnan(val)) {
-        HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -98,11 +97,16 @@ static int _GetFloorModelData(cJSON* params) {
 
 static int _SetFloorModelData(cJSON* params) {
     (void)params;
-    const char* val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
-    if (!val_str) {
+    if (!params) {
         return -1;
     }
-    // floor_update_floor_model_data(val_str);
+#if 0    
+    const char* str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+    if (!str) {
+        return -1;
+    }
+#endif    
+    elevator_floor_update_floor_model_data(cJSON_GetStringValue(params));
     return 0;
 }
 
@@ -126,8 +130,8 @@ struct svc_action svc_action_tbl[] = {
     {"GetHQLiftdConfig", _GetHQLiftdConfig},
     {"GetFloorModelData", _GetFloorModelData},
     {"SetFloorModelData", _SetFloorModelData},
-    {"StartSSHTunnel", _StartSSHTunnel},
-    {"StopSSHTunnel", _StopSSHTunnel},
+    // {"StartSSHTunnel", _StartSSHTunnel},
+    // {"StopSSHTunnel", _StopSSHTunnel},
     {"Reboot", _Reboot},
     // {"DoCommand", _DoCommand},
     {NULL, NULL},  // keep it

@@ -4,6 +4,7 @@ project(elinkd LANGUAGES C)
 
 
 FIND_LIBRARY(cjson_library NAMES cjson)
+FIND_LIBRARY(jsonc_library NAMES json-c)
 FIND_LIBRARY(libmosquitto_library NAMES mosquitto)
 FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
@@ -29,7 +30,8 @@ set(SOURCES main
     service
     system
     elevator
-    ../iutils/hr_log)
+    ../iutils/hr_log
+    ../iutils/file_util)
 
 ADD_EXECUTABLE(elinkd ${SOURCES})
 
@@ -40,6 +42,9 @@ TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd" HRLOG_OUTPUT_FILE=0)
 #TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="elinkd.conf")
 
+#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
+
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 
 
@@ -47,6 +52,7 @@ TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 target_include_directories(elinkd PUBLIC /opt/3rdparty/include)
 
 TARGET_LINK_LIBRARIES(elinkd ${cjson_library})
+TARGET_LINK_LIBRARIES(elinkd ${jsonc_library})
 TARGET_LINK_LIBRARIES(elinkd ${libmosquitto_library})
 
 TARGET_LINK_LIBRARIES(elinkd m)

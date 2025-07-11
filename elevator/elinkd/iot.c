@@ -1,4 +1,7 @@
 
+// mxp, 20250709, implement iot model, running in moquitto inner thread
+// do not call ubus function in this thread
+
 #define _GNU_SOURCE
 #include "iot.h"
 
@@ -35,14 +38,6 @@
 #define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
 #define TIHUIYAN_DEVICE_NAME "LC123456789"
 
-#ifndef HR_LOGD
-#define HR_LOGD printf
-#endif
-
-#ifndef HR_LOGE
-#define HR_LOGE printf
-#endif
-
 struct iot__topic {
     int mid;
     const struct topic* self;
@@ -66,11 +61,8 @@ static struct iot_priv _priv = {
 void post_timer(struct uloop_timeout* t, int msec);
 
 static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
-    HR_LOGD("%s(%d): ...........\n", __FUNCTION__, __LINE__);
     if (!t) return;
     struct iot__topic* topic = container_of(t, struct iot__topic, timer);
-
-    HR_LOGD("%s(%d): ...........\n", __FUNCTION__, __LINE__);
 
     if (topic->self->period > 0) {
         // it's in uloop, also you can use uloop_timeout_set directly
@@ -144,8 +136,6 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
     struct iot_priv* priv = (struct iot_priv*)obj;
     if (!mosq || !priv)
         return;
-
-    HR_LOGD("%s(%d): reason :%d\n", __FUNCTION__, __LINE__, reason);
 
     if (CONNACK_ACCEPTED != reason) {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));

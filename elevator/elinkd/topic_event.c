@@ -1,3 +1,6 @@
+
+// mxp, 20250711, implement elevator AutoFloorCalibrationEvent event
+
 #include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdio.h>

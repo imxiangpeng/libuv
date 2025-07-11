@@ -1,8 +1,13 @@
+
+// mxp, 20250711, implement elevator function in elinkd
+
 #include "elevator.h"
 
+#include <json-c/json_tokener.h>
 #include <stdint.h>
 
 #include "elinkd.h"
+#include "file_util.h"
 #include "hr_log.h"
 #include "libubox/blob.h"
 #include "libubox/blobmsg.h"
@@ -99,6 +104,32 @@ int elevator_property_enter_sensor_calibration(struct property* self, struct pro
     return post_async_task(_elevatord_enter_sensor_calibration, self);
 }
 
+int elevator_property_get_hqliftd_config(struct property* self) {
+    char* data = NULL;
+    futil_read(HQLIFTD_CONFIG_PATH, &data);
+    if (!data) {
+        return -1;
+    }
+    property_value_set_string(&self->value, data);
+    free(data);
+    return 0;
+}
+int elevator_property_set_hqliftd_config(struct property* self, struct property_value* value) {
+    if (!self || !value) {
+        return -1;
+    }
+
+    if (value->type != E_STRING || !value->val.string) {
+        return -1;
+    }
+
+    futil_write(HQLIFTD_CONFIG_PATH, (void*)value->val.string, strlen(value->val.string));
+    properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
+    system("/etc/init.d/S68hqliftd restart 2>&1 > /dev/null");
+    topic_property_report();
+
+    return 0;
+}
 static void _on_floor_calibration_event(int id, int floor, const char* label, double height, double pressure, int completed) {
     struct floor_calibration_event* e = NULL;
     if (!label) {
@@ -135,7 +166,11 @@ static int _elevatord_floor_enter_calibration(void* args) {
     (void)args;
     int* p = (int*)args;
     struct blob_buf b;
+    if (!p) {
+        return -1;
+    }
     if (!_ctx || _elevatord_object_id == 0) {
+        free(p);
         return -1;
     }
 
@@ -154,10 +189,12 @@ static int _elevatord_floor_enter_calibration(void* args) {
 }
 
 int elevator_floor_enter_calibration(int floor_base, int floors_below_base, int floors_above_base) {
-    int* p = (int*)calloc(1, sizeof(int) * 3);
+    int* p = NULL;
     if (!_ctx || _elevatord_object_id == 0) {
         return -1;
     }
+    p = (int*)calloc(1, sizeof(int) * 3);
+    if (!p) return -1;
 
     p[0] = floor_base;
     p[1] = floors_below_base;
@@ -165,6 +202,47 @@ int elevator_floor_enter_calibration(int floor_base, int floors_below_base, int 
     return post_async_task(_elevatord_floor_enter_calibration, p);
 }
 
+static int _elevatord_floor_update_floor_model_data(void* args) {
+    struct blob_buf b;
+    const char* data = (const char*)args;
+    if (!data) {
+        return -1;
+    }
+    if (!_ctx || _elevatord_object_id == 0) {
+        free((void*)data);
+        return -1;
+    }
+
+    HR_LOGD("model:%s\n", data);
+    memset((void*)&b, 0, sizeof(b));
+    blob_buf_init(&b, 0);
+
+    json_tokener* tok = json_tokener_new();
+    struct json_object* root = json_tokener_parse_ex(tok, data, strlen(data));
+    blobmsg_add_object(&b, root);
+    json_tokener_free(tok);
+    free((void*)data);
+    data = NULL;
+    ubus_invoke(_ctx, _elevatord_object_id, "update_floor_model_data", b.head, NULL, NULL, 0);
+    blob_buf_free(&b);
+
+
+    return 0;
+}
+int elevator_floor_update_floor_model_data(const char* data) {
+    const char* model = NULL;
+    if (!data) {
+        return -1;
+    }
+
+    model = strdup(data);
+
+    if (!model) {
+        return -1;
+    }
+
+    return post_async_task(_elevatord_floor_update_floor_model_data, (void*)model);
+}
 void elevator_ubus_event_handler(struct ubus_context* ctx,
                                  struct ubus_event_handler* ev,
                                  const char* type,

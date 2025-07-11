@@ -28,7 +28,6 @@
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
 #define ELEVATORD_EVENT_MOTION "Motion"
 #define ELEVATORD_EVENT_SENSOR_CALIBRATION "SensorCalibration"
-
 #define ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT "AutoFloorCalibrationEvent"
 
 #define _UBUS_RETRY_TIMEOUT (2)
@@ -243,14 +242,23 @@ static int _sensor_calibration_handler(struct ubus_context* ctx, struct ubus_obj
         return -1;
     }
 
-    char* str = blobmsg_format_json(msg, true);
-    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
-    free(str);
-
-    HR_LOGD("%s(%d): method:%s\n", __FUNCTION__, __LINE__, method);
-
     motion_enter_sensor_calibration();
 
+    return 0;
+}
+static int _update_floor_model_data(struct ubus_context* ctx, struct ubus_object* obj, struct ubus_request_data* req, const char* method, struct blob_attr* msg) {
+    (void)ctx;
+    (void)req;
+    (void)msg;
+
+    if (!obj || !method) {
+        return -1;
+    }
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
+
+    floor_update_floor_model_data(str);
+    free(str);
     return 0;
 }
 
@@ -260,6 +268,7 @@ static const struct ubus_method _object_methods[] = {
     UBUS_METHOD("CalibrateAtFloorManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
     UBUS_METHOD("CalibrateAtHeightManually", _calibrate_at_floor_or_height_manually, _calibrate_at_floor_or_height_policy),
     UBUS_METHOD_NOARG("enter_sensor_calibration", _sensor_calibration_handler),
+    UBUS_METHOD_NOARG("update_floor_model_data", _update_floor_model_data),
 };
 
 static struct ubus_object_type _object_type =
@@ -610,13 +619,13 @@ static void _observer_on_sensor_calibration(struct motion_sensor_calibration_eve
         // bias_accel_z
         // pitch
         // roll
-        
+
         blob_buf_init(&_sensor_calibration_b, 0);
 
         blobmsg_add_string(&_sensor_calibration_b, "type", "accelerometer");
 
         blobmsg_add_u32(&_sensor_calibration_b, "calibration", data->state);
-        
+
         blobmsg_add_double(&_sensor_calibration_b, "bias_accel_x", data->value[0]);
         blobmsg_add_double(&_sensor_calibration_b, "bias_accel_y", data->value[1]);
         blobmsg_add_double(&_sensor_calibration_b, "bias_accel_z", data->value[2]);

@@ -1,3 +1,4 @@
+
 // mxp, 20250703, extract the IoT management module from elevatord.
 
 #include "elinkd.h"
@@ -56,17 +57,9 @@ enum {
     MSG_POST_ASYNC_TASK,
 };
 
-static struct uloop_timeout timer;
 
-void timer_cb(struct uloop_timeout* t) {
-    (void)t;
-    HR_LOGD("Timer fired! \n");
-
-    uloop_timeout_set(&timer, 5000);
-}
 // mxp, 20231029, simple timer task using libubox
 struct _inner_task {
-    // int (*task)(void*);
     task_handler task;
     void* arg;
 };
@@ -75,14 +68,6 @@ struct _timer_task {
     struct uloop_timeout timeout;
     struct _inner_task data;
 };
-
-/*struct elinkd_priv {
-    struct mosquitto* mosq;
-};
-
-static struct elinkd_priv _priv = {
-    .mosq = NULL,
-};*/
 
 static struct ubus_context* _ubus_ctx = NULL;
 
@@ -127,7 +112,7 @@ int post_timer_task(int msec, task_handler task, void* arg) {
     t->data.task = task;
     t->data.arg = arg;
 
-    // uloop_timeout_set(&t->timeout, msec);
+    uloop_timeout_set(&t->timeout, msec);
 
     return 0;
 }
@@ -154,30 +139,22 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
             break;
         }
         case MSG_ULOOP_TIMEOUT_SET: {
-            HR_LOGD("uloop_timeout_set:%d !\n", which);
             struct uloop_timeout* t = NULL;
             int msec = 0;
 
-            printf("%ld vs %ld\n", sizeof(struct uloop_timeout*), sizeof(t));
             read(_pipefd[0], &t, sizeof(t));
-
             read(_pipefd[0], &msec, sizeof(msec));
 
-            HR_LOGD("uloop_timeout_set: %p -> %dms!\n", t, msec);
             uloop_timeout_set(t, msec);
 
             break;
         }
         case MSG_POST_ASYNC_TASK: {
-            HR_LOGD("uloop_timeout_set:%d !\n", which);
             task_handler task = NULL;
             void* args = NULL;
 
             read(_pipefd[0], &task, sizeof(task));
-
             read(_pipefd[0], &args, sizeof(args));
-
-            HR_LOGD("async task: %p -> %pms!\n", task, args);
 
             task(args);
             break;
@@ -424,35 +401,26 @@ int elinkd_main(int argc, char** argv) {
     memset(&_elevatord_subscriber, 0, sizeof(_elevatord_subscriber));
     _elevatord_subscriber.cb = elevator_elevatord_subscriber_callback;
 
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     ubus_register_subscriber(_ubus_ctx, &_elevatord_subscriber);
 
     ubus_register_event_handler(_ubus_ctx, &_ubus_event, "ubus.object.*");
     ubus_register_event_handler(_ubus_ctx, &_ubus_event, ELEVATOR_EVENT_PREFIX "*");
 
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     subscriber_elevatord_event();
 
     uloop_fd_add(&pipe_fd, ULOOP_READ);
 
-    timer.cb = timer_cb;
-    // uloop_timeout_set(&timer, 1000);
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     post_message(MSG_IOT_INIT);
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     uloop_run();
 
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     iot_deinit();
     ubus_unregister_event_handler(_ubus_ctx, &_ubus_event);
     ubus_unregister_subscriber(_ubus_ctx, &_elevatord_subscriber);
     ubus_free(_ubus_ctx);
     _ubus_ctx = NULL;
 
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     uloop_done();
 
     blob_buf_free(&_b);
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
     return 0;
 }

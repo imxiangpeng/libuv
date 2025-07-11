@@ -1,4 +1,6 @@
 
+// mxp, 20250710, implement iot property topic
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
@@ -114,7 +116,6 @@ static int _on_property_publish(void** payload, int* len) {
 
     for (size_t i = 0; i < __PROPERTY_MAX; i++) {
         struct property* prop = &properties_tbl[i];
-        HR_LOGD("%s(%d): property:%s, type:%d, dirty:%d\n", __FUNCTION__, __LINE__, prop->name ? prop->name : "", prop->type, prop->dirty);
         if (!prop->name || prop->dirty == 0 || prop->type == E_UNKNOWN) {
             continue;
         }
@@ -289,6 +290,9 @@ static int _on_property_get(void* payload, int len) {
 
     cJSON_ArrayForEach(ele, params) {
         HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+        if (!ele->string) {
+            continue;
+        }
  
         struct property* prop = property_get(ele->string);
         if (!prop) {

@@ -1,3 +1,4 @@
+// mxp, 20250710, implement elevator related iot property
 #include "property.h"
 
 #include <stdlib.h>
@@ -89,12 +90,14 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     [PROPERTY_ELEVATOR_ID] = {"elevator_id", E_STRING, elevator_property_elevator_id, NULL, {}, 1 /* report when startup*/},
 
     // calibration
-    [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", E_DECIMAL, NULL, NULL, {E_DECIMAL}, 0},
-    [PROPERTY_BIAS_ACCEL_Y] = {"bias_accel_y", E_DECIMAL, NULL, NULL, {E_DECIMAL}, 0},
-    [PROPERTY_BIAS_ACCEL_Z] = {"bias_accel_z", E_DECIMAL, NULL, NULL, {E_DECIMAL}, 0},
-    [PROPERTY_BIAS_PITCH] = {"bias_pitch", E_DECIMAL, NULL, NULL, {E_DECIMAL}, 0},
-    [PROPERTY_BIAS_ROLL] = {"bias_roll", E_DECIMAL, NULL, NULL, {E_DECIMAL}, 0},
-    [PROPERTY_IMU_CALIBRATION] = {"imu_calibration", E_DECIMAL, NULL, elevator_property_enter_sensor_calibration, {E_DECIMAL}, 0},
+    [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", E_DECIMAL, NULL, NULL, {}, 0},
+    [PROPERTY_BIAS_ACCEL_Y] = {"bias_accel_y", E_DECIMAL, NULL, NULL, {}, 0},
+    [PROPERTY_BIAS_ACCEL_Z] = {"bias_accel_z", E_DECIMAL, NULL, NULL, {}, 0},
+    [PROPERTY_BIAS_PITCH] = {"bias_pitch", E_DECIMAL, NULL, NULL, {}, 0},
+    [PROPERTY_BIAS_ROLL] = {"bias_roll", E_DECIMAL, NULL, NULL, {}, 0},
+    [PROPERTY_IMU_CALIBRATION] = {"imu_calibration", E_DECIMAL, NULL, elevator_property_enter_sensor_calibration, {}, 0},
+    // hqliftd
+    [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", E_STRING, elevator_property_get_hqliftd_config, elevator_property_set_hqliftd_config, {}, 0 },
     // camera property_value
 };
 

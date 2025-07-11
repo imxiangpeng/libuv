@@ -1,3 +1,5 @@
+// mxp, 20250710, system implement
+
 #include "system.h"
 
 #include <stdio.h>
@@ -30,7 +32,6 @@ int system_property_build_timestamp(struct property* self) {
     (void)self;
     if (!self) return -1;
 
-    printf("%s(%d): ............:%s.........\n", __FUNCTION__, __LINE__, BUILD_TIMESTAMP);
     // do not free
     property_value_set_string_ext(&self->value, BUILD_TIMESTAMP, 1);
     return 0;
@@ -44,7 +45,6 @@ int system_property_sw_version(struct property* self) {
     }
     property_value_set_string_ext(&self->value, _sw_version, 1);
 
-    // topic_property_report();
     return 0;
 }
 
