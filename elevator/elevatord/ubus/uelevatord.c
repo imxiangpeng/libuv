@@ -139,8 +139,9 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     blobmsg_add_string(&b, "Label", label);
     blobmsg_add_double(&b, "Height", height);
     blobmsg_add_double(&b, "Pressure", pressure);
+    blobmsg_add_u32(&b, "Completed", completed);
 
-    ubus_notify(ctx, &_elevatord_object, "AutoFloorCalibrationEvent", b.head, -1 /*no block*/);
+    ubus_notify(ctx, &_elevatord_object, ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT, b.head, -1 /*no block*/);
 }
 enum {
     FC_FLOOR_BASE,

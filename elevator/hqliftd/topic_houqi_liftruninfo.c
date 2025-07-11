@@ -58,6 +58,14 @@ static int _on_publish(void** payload, int* len) {
 
     cJSON_AddNumberToObject(root, "runningDirection", his->direction);
 
+    cJSON_AddNumberToObject(root, "runBeginTimeStamp", his->timestamp_begin);
+    cJSON_AddNumberToObject(root, "runEndTimeStamp", his->timestamp_end);
+    cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
+    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_brightness());
+
+    cJSON_AddNumberToObject(root, "runBeginFloor", his->floor_begin);
+    cJSON_AddNumberToObject(root, "runEndFloor", his->floor_end);
+
     cJSON* arr = cJSON_AddArrayToObject(root, "runSpeed");
     for (size_t i = 0; i < his->speed_array.offset;) {
         double v = *(double*)(his->speed_array.data + i);
@@ -86,17 +94,6 @@ static int _on_publish(void** payload, int* len) {
         cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
         i += sizeof(double);
     }
-
-    cJSON_AddNumberToObject(root, "runBeginTimeStamp", his->timestamp_begin);
-    cJSON_AddNumberToObject(root, "runEndTimeStamp", his->timestamp_end);
-    cJSON_AddNumberToObject(root, "temperature", elevator_temperature());
-    cJSON_AddNumberToObject(root, "lightVariationAmplitude", elevator_light_brightness());
-
-    // clock_gettime(CLOCK_REALTIME, &ts);
-    //(void)localtime_r(&ts.tv_sec, &tm);
-
-    cJSON_AddNumberToObject(root, "runBeginFloor", his->floor_begin);
-    cJSON_AddNumberToObject(root, "runEndFloor", his->floor_end);
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

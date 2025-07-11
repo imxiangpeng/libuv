@@ -23,7 +23,10 @@ set(SOURCES main
     iot
     topic
     topic_property
+    topic_service
+    topic_event
     property
+    service
     system
     elevator
     ../iutils/hr_log)

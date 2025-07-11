@@ -239,7 +239,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                 // public topics
                 void* payload = NULL;
                 int len = 0;
-                if (p->self->auto_public != 0) {
+                if (p->self->auto_publish != 0) {
                     p->self->callback.on_publish(&payload, &len);
                     if (payload != NULL && len > 0) {
                         int rc = uviot_mosquitto_publish(iot, &p->mid, p->self->topic,

@@ -102,6 +102,9 @@ struct property* property_get(const char* name) {
     if (!name) return NULL;
 
     for (int i = 0; i < __PROPERTY_MAX; i++) {
+        if (!properties_tbl[i].name) {
+            continue;
+        }
         if (0 == strcmp(properties_tbl[i].name, name)) {
             return &properties_tbl[i];
         }

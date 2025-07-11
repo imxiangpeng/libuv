@@ -1,6 +1,7 @@
 #include "system.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "property.h"
@@ -44,5 +45,19 @@ int system_property_sw_version(struct property* self) {
     property_value_set_string_ext(&self->value, _sw_version, 1);
 
     // topic_property_report();
+    return 0;
+}
+
+int system_service_reboot() {
+    system("sync;reboot");
+    return 0;
+}
+int system_service_start_ssh_tunnel() {
+    system("/etc/init.d/ssh_tunnel restart");
+    return 0;
+}
+
+int system_service_stop_ssh_tunnel() {
+    system("/etc/init.d/ssh_tunnel stop");
     return 0;
 }

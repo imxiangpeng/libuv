@@ -17,6 +17,7 @@
 #define ELEVATORD_EVENT_HISTORICAL "Historical"
 #define ELEVATORD_EVENT_MOTION "Motion"
 
+#define ELEVATORD_EVENT_SENSOR_CALIBRATION "SensorCalibration"
 #define ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT "AutoFloorCalibrationEvent"
 
 #define ELEVATOR_EVENT_PREFIX "elevator.event."
@@ -75,9 +76,9 @@ int elevator_property_elevator_id(struct property* self) {
 
 static int _elevatord_enter_sensor_calibration(void* args) {
     (void)args;
-    struct property *prop = (struct property*)args;
+    struct property* prop = (struct property*)args;
     struct blob_buf b;
-    if (!_ctx || _elevatord_object_id == 0) {
+    if (!_ctx || _elevatord_object_id == 0 || !prop) {
         return -1;
     }
 
@@ -90,11 +91,78 @@ static int _elevatord_enter_sensor_calibration(void* args) {
 
     return 0;
 }
+
 int elevator_property_enter_sensor_calibration(struct property* self, struct property_value* value) {
     if (!self || !value || !_ctx || _elevatord_object_id == 0) {
         return -1;
     }
     return post_async_task(_elevatord_enter_sensor_calibration, self);
+}
+
+static void _on_floor_calibration_event(int id, int floor, const char* label, double height, double pressure, int completed) {
+    struct floor_calibration_event* e = NULL;
+    if (!label) {
+        return;
+    }
+    HR_LOGD("%s(%d): auto calibration event:%d %d %s %f\n", __FUNCTION__, __LINE__, id, floor, label, height);
+
+    e = floor_calibration_event_alloc();
+    if (!e) {
+        return;
+    }
+    e->id = id;
+    e->floor = floor;
+    e->height = height;
+    e->pressure = pressure;
+
+    if (label) {
+        snprintf(e->label, sizeof(e->label), "%s", label);
+    } else {
+        snprintf(e->label, sizeof(e->label), "%d", floor);
+    }
+
+    send_floor_calibration_event(e);
+
+    if (completed != 0) {
+        // report floor model data
+
+        properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
+        topic_property_report();
+    }
+}
+
+static int _elevatord_floor_enter_calibration(void* args) {
+    (void)args;
+    int* p = (int*)args;
+    struct blob_buf b;
+    if (!_ctx || _elevatord_object_id == 0) {
+        return -1;
+    }
+
+    memset((void*)&b, 0, sizeof(b));
+    blob_buf_init(&b, 0);
+    blobmsg_add_u32(&b, "BaseFloor", p[0]);
+    blobmsg_add_u32(&b, "FloorsBelow", p[1]);
+    blobmsg_add_u32(&b, "FloorsAbove", p[2]);
+    int ret = ubus_invoke(_ctx, _elevatord_object_id, "StartAutoFloorCalibration", b.head, NULL, NULL, 0);
+    HR_LOGD("%s(%d):   ret :%d\n", __FUNCTION__, __LINE__, ret);
+    blob_buf_free(&b);
+
+    free(p);
+
+    return 0;
+}
+
+int elevator_floor_enter_calibration(int floor_base, int floors_below_base, int floors_above_base) {
+    int* p = (int*)calloc(1, sizeof(int) * 3);
+    if (!_ctx || _elevatord_object_id == 0) {
+        return -1;
+    }
+
+    p[0] = floor_base;
+    p[1] = floors_below_base;
+    p[2] = floors_above_base;
+    return post_async_task(_elevatord_floor_enter_calibration, p);
 }
 
 void elevator_ubus_event_handler(struct ubus_context* ctx,
@@ -203,51 +271,80 @@ int elevator_elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus
     HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
     free(str);
 
-    struct blob_attr* tb[7] = {NULL};
-    static const struct blobmsg_policy policy[] = {
-        {.name = "calibration", .type = BLOBMSG_TYPE_INT32},
-        {.name = "bias_accel_x", .type = BLOBMSG_TYPE_DOUBLE},
-        {.name = "bias_accel_y", .type = BLOBMSG_TYPE_DOUBLE},
-        {.name = "bias_accel_z", .type = BLOBMSG_TYPE_DOUBLE},
-        {.name = "bias_pitch", .type = BLOBMSG_TYPE_DOUBLE},
-        {.name = "bias_roll", .type = BLOBMSG_TYPE_DOUBLE},
-        {NULL, BLOBMSG_TYPE_UNSPEC},
-    };
+    if (0 == strcmp(ELEVATORD_EVENT_SENSOR_CALIBRATION, method)) {
+        struct blob_attr* tb[7] = {NULL};
+        static const struct blobmsg_policy policy[] = {
+            {.name = "calibration", .type = BLOBMSG_TYPE_INT32},
+            {.name = "bias_accel_x", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "bias_accel_y", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "bias_accel_z", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "bias_pitch", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "bias_roll", .type = BLOBMSG_TYPE_DOUBLE},
+            {NULL, BLOBMSG_TYPE_UNSPEC},
+        };
 
-    blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
-                  blobmsg_data_len(msg));
+        blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
 
-    if (!tb[0]) {
-        return -1;
+        if (!tb[0] || !tb[1] || !tb[2] || !tb[3] || !tb[4] || !tb[5]) {
+            return -1;
+        }
+
+        calibration = blobmsg_get_u32(tb[0]);
+
+        bias_accel_x = blobmsg_get_double(tb[1]);
+        bias_accel_y = blobmsg_get_double(tb[2]);
+        bias_accel_z = blobmsg_get_double(tb[3]);
+        bias_pitch = blobmsg_get_double(tb[4]);
+        bias_roll = blobmsg_get_double(tb[5]);
+
+        property_value_set_number(&properties_tbl[PROPERTY_IMU_CALIBRATION].value, calibration);
+        properties_tbl[PROPERTY_IMU_CALIBRATION].dirty = 1;
+
+        property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_X].value, bias_accel_x);
+        properties_tbl[PROPERTY_BIAS_ACCEL_X].dirty = 1;
+
+        property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_Y].value, bias_accel_y);
+        properties_tbl[PROPERTY_BIAS_ACCEL_Y].dirty = 1;
+
+        property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_Z].value, bias_accel_z);
+        properties_tbl[PROPERTY_BIAS_ACCEL_Z].dirty = 1;
+
+        property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_PITCH].value, bias_pitch);
+        properties_tbl[PROPERTY_BIAS_PITCH].dirty = 1;
+
+        property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ROLL].value, bias_roll);
+        properties_tbl[PROPERTY_BIAS_ROLL].dirty = 1;
+
+        // schedule report
+        topic_property_report();
+
+    } else if (0 == strcmp(ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT, method)) {
+        // {"Id":0,"Floor":-1,"Label":"-1","Height":4.646000,"Pressure":96970.700000}
+
+        struct blob_attr* tb[7] = {NULL};
+        static const struct blobmsg_policy policy[] = {
+            {.name = "Id", .type = BLOBMSG_TYPE_INT32},
+            {.name = "Floor", .type = BLOBMSG_TYPE_INT32},
+            {.name = "Label", .type = BLOBMSG_TYPE_STRING},
+            {.name = "Height", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "Pressure", .type = BLOBMSG_TYPE_DOUBLE},
+            {.name = "Completed", .type = BLOBMSG_TYPE_INT32},
+            {NULL, BLOBMSG_TYPE_UNSPEC},
+        };
+
+        blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+        if (!tb[0] || !tb[1] || !tb[2] || !tb[3] || !tb[4]) {
+            return -1;
+        }
+        _on_floor_calibration_event(blobmsg_get_u32(tb[0]),
+                                    blobmsg_get_u32(tb[1]),
+                                    blobmsg_get_string(tb[2]),
+                                    blobmsg_get_double(tb[3]),
+                                    blobmsg_get_double(tb[4]),
+                                    blobmsg_get_u32(tb[5]));
     }
 
-    calibration = blobmsg_get_u32(tb[0]);
-
-    bias_accel_x = blobmsg_get_double(tb[1]);
-    bias_accel_y = blobmsg_get_double(tb[2]);
-    bias_accel_z = blobmsg_get_double(tb[3]);
-    bias_pitch = blobmsg_get_double(tb[4]);
-    bias_roll = blobmsg_get_double(tb[5]);
-
-    property_value_set_number(&properties_tbl[PROPERTY_IMU_CALIBRATION].value, calibration);
-    properties_tbl[PROPERTY_IMU_CALIBRATION].dirty = 1;
-
-    property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_X].value, bias_accel_x);
-    properties_tbl[PROPERTY_BIAS_ACCEL_X].dirty = 1;
-
-    property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_Y].value, bias_accel_y);
-    properties_tbl[PROPERTY_BIAS_ACCEL_Y].dirty = 1;
-
-    property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ACCEL_Z].value, bias_accel_z);
-    properties_tbl[PROPERTY_BIAS_ACCEL_Z].dirty = 1;
-
-    property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_PITCH].value, bias_pitch);
-    properties_tbl[PROPERTY_BIAS_PITCH].dirty = 1;
-
-    property_value_set_decimal(&properties_tbl[PROPERTY_BIAS_ROLL].value, bias_roll);
-    properties_tbl[PROPERTY_BIAS_ROLL].dirty = 1;
-
-    // schedule report
-    topic_property_report();
     return 0;
 }

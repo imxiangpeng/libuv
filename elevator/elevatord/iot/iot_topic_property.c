@@ -14,13 +14,10 @@
 #include "floor.h"
 #include "hr_log.h"
 #include "iot_topic.h"
-
 #include "motion.h"
 #include "platform.h"
-
 #include "sconf.h"
 #include "sensor.h"
-
 #include "uviot.h"
 
 #define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
@@ -418,7 +415,7 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .name = "event/property/post",
         .topic = {0},
         .period = 0,
-        .auto_public = 0,
+        .auto_publish = 0,
         .type = TOPIC_TYPE_PUBLISH,
         .callback.on_publish = _on_publish,
     },
@@ -439,11 +436,12 @@ static struct uviot_topic _iot_property_topics[_PROPERTY_TOPIC_MAX] = {
         .topic = {0},
         .type = TOPIC_TYPE_SUBSCRIBE,
         .callback.on_message = _on_property_set_message,
-    }};
+    },
+};
 
 static void read_sw_version(void) {
     char* eol = NULL;
-    FILE *fp = NULL;
+    FILE* fp = NULL;
 
     fp = fopen("/etc/sw-versions", "r");
     if (!fp) {

@@ -28,8 +28,8 @@ struct property {
     // some property no need get
     // dispatch when property is changed
     // there update value directly and mark dirty
-    int (*get)(struct property*self);
-    int (*set)(struct property*self, struct property_value *value);
+    int (*getter)(struct property*self);
+    int (*setter)(struct property*self, struct property_value *value);
     struct property_value value;
     int dirty;
 };

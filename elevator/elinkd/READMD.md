@@ -10,11 +10,11 @@
    
 -  `mosquitto` 子线程,  `MQTT` 消息等回调运行在该线程。
 
-
 由于 `ubus` 是不支持多线程的，所以在调用的时候务必谨慎，尤其是当你接收到 `MQTT` 的消息的时候，是不能直接在回调函数中直接调用 `ubus` 接口的。
 
 为了解决这个问题，我们添加了两个函数 `post_timer_task/post_async_task` 分别用于将任务发送给主线程来执行。
 
+> 这个方案与我们之前的 `uviot` 不同， `mosquitto` 是运行在独立的线程中，采用的是 `mosquitto` 自身的 `loop` 事件机制。而 `uviot` 我们没有使用 `mosquitto` 自身事件机制，采用的是 `libuv main loop` 所以，各种调用与 `mosquitto` 调用是在同一线程中的
 ## 主题订阅与发布
 
 本模块主要是通过 `MQTT` 与物联网平台进行通信完成电梯摄像头相关功能的管控。
@@ -61,6 +61,64 @@ struct topic {
 - `callback`: 不同类型主题回调
    - `on_publish` 需要给 `payload` 分配内存，系统会自动释放
 
+之后，通过 `iot_topic_register` 来注册该主题，在收到消息的时候会自动触发相关 `on_message` 回调函数。对于 `PUBLISH` 主题，如果设置了周期发送，那么会周期性自动调用 `on_publish` 函数，如果需要主动触发数据发送，可以通过 `iot_topic_publish_async` 来触发。
+
+## 属性
+
+属性相关主题是在 `topic_property.c` 中处理的，在收到相关消息的时候，会遍历 `property.c` 中 `properties_tbl` 数组访问属性值。
+
+默认只有`property.dirty == 1` 的属性才会在下次 `on_publish` 回调中上传。
+
+那么如何新增属性字段呢?
+
+首先，我们要了解下属性相关结构体 `struct property`:
+
+```c
+enum property_type {
+    E_UNKNOWN = 0,
+    E_NUMBER, // use int64
+    E_DECIMAL,
+    E_STRING,
+    E_BOOLEAN,
+};
+
+struct property_value {
+    enum property_type type;
+    union {
+        int64_t number;
+        double decimal;
+        const char* string;
+        bool boolean;
+    } val;
+    int preallocated;  // union value is preallocated, you no need free it...
+};
+
+struct property {
+    const char* name;
+    enum property_type type;
+    // some property no need get
+    // dispatch when property is changed
+    // there update value directly and mark dirty
+    int (*getter)(struct property*self);
+    int (*setter)(struct property*self, struct property_value *value);
+    struct property_value value;
+    int dirty;
+};
+```
+
+然后按下面方法来新增一条属性：
+
+1.  在 `properties_tbl` 中新加一条 `struct property` 成员。
+2.  明确字段名称
+3.  明确字段值类型：E_STRING/E_NUMBER/E_DECIMAL/...
+4.  是否常量值字段？常量值字段可以省略 `getter/setter` 处理函数，直接在 `struct property.value` 中赋值即可
+5.  根据需要定义 `getter/setter` 函数
+    - 在 `getter` 的调用中，我们没有额外传递 `struct property_value`, 请更新 `property.value` 字段即可
+    - 在 `setter` 的调用中，我们额外传递 `struct property_value`, 实现时根据自身逻辑来更新 `property.value` 的值
+
+## 方法
+
+
 
 ## ubus 跨进程条用
 
@@ -69,3 +127,8 @@ struct topic {
 为了安全，我们将这部分功能从 `elevatord` 中独立出来，目前与电梯相关的参数是通过 `ubus` 远程调用 `elevatord`。
 
 在使用 `ubus` 接口的时候，请务必知晓 `ubus` 不允许在非主线程中调用，例如不能直接在 `topic` 回调中调用。
+
+## 注意事项
+
+1.  `ubus` 接口不支持多线程调用，非主线程不允许调用；
+2.  主线程不允许执行耗时任务；

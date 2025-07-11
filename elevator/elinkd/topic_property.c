@@ -122,8 +122,8 @@ static int _on_property_publish(void** payload, int* len) {
         prop->dirty = 0;
         // only call get when it's not null
         // we can directly access value when it's null
-        if (prop->get) {
-            if (prop->get(prop) != 0) {
+        if (prop->getter) {
+            if (prop->getter(prop) != 0) {
                 continue;
             }
         }
@@ -205,7 +205,7 @@ static int _on_property_set(void* payload, int len) {
         HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
 
         struct property* prop = property_get(ele->string);
-        if (!prop || !prop->set) {
+        if (!prop || !prop->setter) {
             HR_LOGD("not support property:%s\n", ele->string);
             continue;
         }
@@ -215,7 +215,7 @@ static int _on_property_set(void* payload, int len) {
                 number = cJSON_GetNumberValue(ele);
                 if (!isnan(number)) {
                     property_value_set_number(&value, (int64_t)number);
-                    prop->set(prop, &value);
+                    prop->setter(prop, &value);
                     property_value_reset(&value);
                 }
                 break;
@@ -223,7 +223,7 @@ static int _on_property_set(void* payload, int len) {
                 number = cJSON_GetNumberValue(ele);
                 if (!isnan(number)) {
                     property_value_set_decimal(&value, number);
-                    prop->set(prop, &value);
+                    prop->setter(prop, &value);
                     property_value_reset(&value);
                 }
 
@@ -233,7 +233,7 @@ static int _on_property_set(void* payload, int len) {
                 if (string) {
                     // string is const, no need free
                     property_value_set_string_ext(&value, string, 1);
-                    prop->set(prop, &value);
+                    prop->setter(prop, &value);
                     property_value_reset(&value);
                     break;
                 }
@@ -243,7 +243,7 @@ static int _on_property_set(void* payload, int len) {
                 number = cJSON_GetNumberValue(ele);
                 if (!isnan(number)) {
                     property_value_set_boolean(&value, (int)number);
-                    prop->set(prop, &value);
+                    prop->setter(prop, &value);
                     property_value_reset(&value);
                 }
                 break;
