@@ -44,7 +44,6 @@ int property_value_set_decimal(struct property_value* prop, double number) {
     return 0;
 }
 
-
 int property_value_set_boolean(struct property_value* prop, int value) {
     if (!prop) return -1;
 
@@ -84,11 +83,11 @@ int property_value_set_string_ext(struct property_value* prop, const char* str, 
 
 struct property properties_tbl[__PROPERTY_MAX] = {
     // system property_value
+    [PROPERTY_SERIALNO] = {"serialno", E_STRING, system_property_serial, NULL, {}, 1 /* report when startup*/},
+    [PROPERTY_ELEVATOR_ID] = {"elevator_id", E_STRING, elevator_property_get_elevator_id, elevator_property_set_elevator_id, {}, 1 /* report when startup*/},
     [PROPERTY_BUILD_TIMESTAMP] = {"build_timestamp", E_STRING, NULL, NULL, {.type = E_STRING, .val.string = BUILD_TIMESTAMP, .preallocated = 1}, 1 /* report when startup*/},
     [PROPERTY_SW_VERSION] = {"sw_version", E_STRING, system_property_sw_version, NULL, {}, 1 /* report when startup*/},
     // elevator property_value
-    [PROPERTY_ELEVATOR_ID] = {"elevator_id", E_STRING, elevator_property_elevator_id, NULL, {}, 1 /* report when startup*/},
-
     // calibration
     [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", E_DECIMAL, NULL, NULL, {}, 0},
     [PROPERTY_BIAS_ACCEL_Y] = {"bias_accel_y", E_DECIMAL, NULL, NULL, {}, 0},
@@ -96,8 +95,19 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     [PROPERTY_BIAS_PITCH] = {"bias_pitch", E_DECIMAL, NULL, NULL, {}, 0},
     [PROPERTY_BIAS_ROLL] = {"bias_roll", E_DECIMAL, NULL, NULL, {}, 0},
     [PROPERTY_IMU_CALIBRATION] = {"imu_calibration", E_DECIMAL, NULL, elevator_property_enter_sensor_calibration, {}, 0},
+    // elevator
+    // floor/height/pressure/temperature only report when low level report
+    [PROPERTY_FLOOR] = {"floor", E_NUMBER, NULL, NULL, {E_NUMBER, .val.number = 0, .preallocated = 0}, 0},
+    [PROPERTY_HEIGHT] = {"height", E_DECIMAL, NULL, NULL, {E_DECIMAL, .val.decimal = 0, 0}, 0},
+    [PROPERTY_PRESSURE] = {"pressure", E_DECIMAL, NULL, NULL, {E_DECIMAL, .val.decimal = 0, 0}, 0},
+    [PROPERTY_TEMPERATURE] = {"temperature", E_DECIMAL, NULL, NULL, {E_DECIMAL, .val.decimal = 0, 0}, 0},
+    [PROPERTY_FLOOR_MODEL] = {"floor_model", E_STRING, elevator_property_get_floor_model, NULL, {}, 0},
     // hqliftd
-    [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", E_STRING, elevator_property_get_hqliftd_config, elevator_property_set_hqliftd_config, {}, 0 },
+    [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", E_STRING, elevator_property_get_hqliftd_config, elevator_property_set_hqliftd_config, {}, 0},
+    // eguard
+    [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", E_NUMBER, elevator_property_get_eguard_alarm_switch, elevator_property_set_eguard_alarm_switch, {}, 0},
+    [PROPERTY_EGUARD_DTOF_SWITCH] = {"eguard_dtof_switch", E_NUMBER, elevator_property_get_eguard_dtof_switch, elevator_property_set_eguard_dtof_switch, {}, 0},
+    [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", E_NUMBER, elevator_property_get_eguard_dtof_occlusion_distance, elevator_property_set_eguard_dtof_occlusion_distance, {}, 0},
     // camera property_value
 };
 
@@ -112,6 +122,6 @@ struct property* property_get(const char* name) {
             return &properties_tbl[i];
         }
     }
-    
+
     return NULL;
 }

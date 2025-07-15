@@ -73,7 +73,6 @@ static int _aml_unifykey_read(const char* name, char* data, size_t len) {
 static int _aml_unifykey_write(const char* name, char* data) {
     int fd = -1;
     struct key_item_info_t item;
-    char buf[256] = {0};
 
     if (!name || !data) {
         return -1;

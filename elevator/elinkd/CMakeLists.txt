@@ -17,6 +17,7 @@ ADD_DEFINITIONS(-g )
 INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 INCLUDE_DIRECTORIES(../iutils)
+INCLUDE_DIRECTORIES(../platform)
 
 
 set(SOURCES main
@@ -31,7 +32,9 @@ set(SOURCES main
     system
     elevator
     ../iutils/hr_log
-    ../iutils/file_util)
+    ../iutils/file_util
+    ../iutils/sconf
+    ../platform/platform_amlogic)
 
 ADD_EXECUTABLE(elinkd ${SOURCES})
 
@@ -39,11 +42,16 @@ TARGET_COMPILE_OPTIONS(elinkd PRIVATE -Wall -Wextra -Werror -Wno-unused-function
 
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd" HRLOG_OUTPUT_FILE=0)
 # define config file when compile
-#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
+#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="/etc/elinkd/elinkd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="elinkd.conf")
+#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELEVATORD_CONFIG_PATH="/etc/elevatord/elevatord.conf")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELEVATORD_CONFIG_PATH="elevatord.conf")
+#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELEVATORD_FLOOR_MODEL_PATH="/etc/elevatord/floor_model.json")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELEVATORD_FLOOR_MODEL_PATH="floor_model.json")
 
 #TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
+
 
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 

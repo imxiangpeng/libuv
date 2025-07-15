@@ -129,6 +129,7 @@ static int _on_property_publish(void** payload, int* len) {
             }
         }
 
+        // verify value's type
         switch (prop->value.type) {
             case E_NUMBER:
                 cJSON_AddNumberToObject(param, prop->name, prop->value.val.number);
@@ -211,7 +212,8 @@ static int _on_property_set(void* payload, int len) {
             continue;
         }
 
-        switch (prop->value.type) {
+        // verify property's type, value type maybe not set
+        switch (prop->type) {
             case E_NUMBER:
                 number = cJSON_GetNumberValue(ele);
                 if (!isnan(number)) {
@@ -289,11 +291,12 @@ static int _on_property_get(void* payload, int len) {
     }
 
     cJSON_ArrayForEach(ele, params) {
-        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
         if (!ele->string) {
             continue;
         }
- 
+
+        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+
         struct property* prop = property_get(ele->string);
         if (!prop) {
             HR_LOGD("not support property:%s\n", ele->string);

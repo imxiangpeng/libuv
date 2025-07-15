@@ -92,7 +92,6 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
 
     char buffer[1024] = {0};
 
-    ssize_t len = 0;
     if (!path || !fields || !result) {
         return -1;
     }
@@ -113,7 +112,7 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
 
     fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
 
-    for (int i = 0; i < max; i++) {
+    for (size_t i = 0; i < max; i++) {
         int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", fields[i], result[i]);
         ssize_t r = futil_write_fd(fd, buffer, len);
         if (r != len) {
@@ -306,7 +305,7 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
         free(buf);
     }
 
-    for (int i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
         switch (proto[i].type) {
             case PROTO_VALUE_INT64: {
                 int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", proto[i].name, proto[i].value.int64);

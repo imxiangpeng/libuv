@@ -23,8 +23,23 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+#if 1 // aliyun
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883     // 1883     // 8883 //1883
+
+// https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
+#define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
+#define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
+#define TIHUIYAN_DEVICE_NAME "LC123456789"
+#else
+// inspur iot
+#define BROKER_DEFAULT_SERVER "8.140.58.68"
+#define BROKER_DEFAULT_PORT 51883
+#define TIHUIYAN_PRODUCT_KEY "G9k7UzhGu8AZtlOf"
+#define TIHUIYAN_DEVICE_SECRET "bab303e54f94bc8b722177365f8522f6"
+#define TIHUIYAN_DEVICE_NAME "5CB4E213B8CB"
+#endif
+
 #define BROKER_DEFAULT_ALIVETIME 60  // 300 //60                       // 60s
 #define BROKER_DEFAULT_TLS_INSECURE true
 #define BROKER_DEFAULT_TLS_CERT_REQS 0
@@ -32,11 +47,6 @@
 #define BROKER_DEFAULT_CA_PATH NULL
 #define BROKER_DEFAULT_CERTIFICATE NULL
 #define BROKER_DEFAULT_CERTIFICATE_KEY NULL
-
-// https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
-#define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
-#define TIHUIYAN_DEVICE_SECRET "130cdc9746be2eeaad3ca8caaf989137"
-#define TIHUIYAN_DEVICE_NAME "LC123456789"
 
 struct iot__topic {
     int mid;
@@ -259,6 +269,7 @@ int iot_init() {
     name[j] = '\0';
 
     printf("device name:%s\n", name);
+
     // platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
     // printf("device secret:%s\n", hmac_secret);
 
@@ -345,19 +356,15 @@ int iot_deinit() {
     }
 
     mosquitto_disconnect(mosq);
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     mosquitto_loop_stop(mosq, false);
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     mosquitto_destroy(mosq);
     mosquitto_lib_cleanup();
 
     list_for_each_entry_safe(p, n, &_priv.topic_head, entry) {
-        HR_LOGD("%s(%d): free :%s.......\n", __FUNCTION__, __LINE__, p->self->name);
         iot__topic_free(p);
     }
 
     INIT_LIST_HEAD(&_priv.topic_head);
-    HR_LOGD("%s(%d): .......\n", __FUNCTION__, __LINE__);
     return 0;
 }
 
@@ -378,15 +385,14 @@ int iot_topic_register(const struct topic* topic) {
 
 int iot_topic_publish_async(const struct topic* topic) {
     (void)topic;
-    if (!topic) return -1;
+    struct iot__topic* p = NULL;
 
-    HR_LOGD("%s(%d): ..........name:%s\n", __FUNCTION__, __LINE__, topic->name);
+    if (!topic) return -1;
 
     if (topic->type != TOPIC_TYPE_PUBLISH) {
         HR_LOGE("%s(%d): topic is not publish: %s\n", __FUNCTION__, __LINE__, topic->name);
         return -1;
     }
-    struct iot__topic* p = NULL;
     list_for_each_entry(p, &_priv.topic_head, entry) {
         // ignore publish response message
         if (p->self->type != TOPIC_TYPE_PUBLISH) {

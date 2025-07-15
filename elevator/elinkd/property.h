@@ -45,9 +45,10 @@ int property_value_set_string(struct property_value*, const char*);
 int property_value_set_string_ext(struct property_value*, const char*, int preallocated);
 
 enum {
-    PROPERTY_BUILD_TIMESTAMP = 0,
-    PROPERTY_SW_VERSION,
+    PROPERTY_SERIALNO = 0,
     PROPERTY_ELEVATOR_ID,
+    PROPERTY_BUILD_TIMESTAMP,
+    PROPERTY_SW_VERSION,
     PROPERTY_BIAS_ACCEL_X,
     PROPERTY_BIAS_ACCEL_Y,
     PROPERTY_BIAS_ACCEL_Z,

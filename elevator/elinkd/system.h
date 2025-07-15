@@ -3,6 +3,7 @@
 #include "property.h"
 
 
+int system_property_serial(struct property*self);
 int system_property_build_timestamp(struct property*self);
 int system_property_sw_version(struct property*self);
 

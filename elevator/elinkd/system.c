@@ -2,9 +2,12 @@
 
 #include "system.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "platform.h"
 
 #include "property.h"
 // #include "topic_property.h"
@@ -26,6 +29,17 @@ static void read_sw_version(void) {
     if (eol) *eol = '\0';
 
     fclose(fp);
+}
+
+// do not use platform.h, both defined PROPERTY_SERIAL
+int system_property_serial(struct property* self) {
+    static char _serial[256] = {0};
+    if (!self) return -1;
+
+    platform_get_property(PROPERTY_SERIAL, _serial, sizeof(_serial));
+
+    property_value_set_string_ext(&self->value, _serial, 1);
+    return 0;
 }
 
 int system_property_build_timestamp(struct property* self) {

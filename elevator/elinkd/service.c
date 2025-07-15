@@ -1,20 +1,19 @@
 
 // mxp, 20250710, implement elevator related iot service
 
+#include "service.h"
+
+#include <cjson/cJSON.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <cjson/cJSON.h>
-
 #include "elevator.h"
-#include "property.h"
-#include "topic_property.h"
-#include "service.h"
-#include "system.h"
-
 #include "hr_log.h"
+#include "property.h"
+#include "system.h"
+#include "topic_property.h"
 
 static int _Reboot(cJSON* params) {
     (void)params;
@@ -64,7 +63,7 @@ static int _CalibrateAtFloorManually(cJSON* params) {
         return -1;
     }
 
-    // motion_calibrate_at_floor((int)val);
+    elevator_floor_calibrate_at_floor((int)val);
 
     return 0;
 }
@@ -75,8 +74,7 @@ static int _CalibrateAtHeightManually(cJSON* params) {
         return -1;
     }
 
-    // motion_calibrate_at_height(val);
-
+    elevator_floor_calibrate_at_height(val);
     return 0;
 }
 
@@ -97,16 +95,18 @@ static int _GetFloorModelData(cJSON* params) {
 
 static int _SetFloorModelData(cJSON* params) {
     (void)params;
+    const char* str = NULL;
     if (!params) {
         return -1;
     }
-#if 0    
-    const char* str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+
+    str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "data"));
+
     if (!str) {
         return -1;
     }
-#endif    
-    elevator_floor_update_floor_model_data(cJSON_GetStringValue(params));
+
+    elevator_floor_update_floor_model_data(str);
     return 0;
 }
 
@@ -122,7 +122,6 @@ static int _StopSSHTunnel(cJSON* params) {
     return 0;
 }
 
-
 struct svc_action svc_action_tbl[] = {
     {"StartAutoFloorCalibration", _StartAutoFloorCalibration},
     {"CalibrateAtFloorManually", _CalibrateAtFloorManually},
@@ -137,4 +136,4 @@ struct svc_action svc_action_tbl[] = {
     {NULL, NULL},  // keep it
 };
 
-size_t svc_action_tbl_size = sizeof(svc_action_tbl)/sizeof(svc_action_tbl[0]);
+size_t svc_action_tbl_size = sizeof(svc_action_tbl) / sizeof(svc_action_tbl[0]);

@@ -13,7 +13,9 @@
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
 #include "libubus.h"
+#include "platform.h"
 #include "property.h"
+#include "sconf.h"
 #include "topic_property.h"
 
 #define ELEVATORD_NAME "elevatord"
@@ -26,6 +28,11 @@
 #define ELEVATORD_EVENT_AUTOFLOORCALIBRATIONEVENT "AutoFloorCalibrationEvent"
 
 #define ELEVATOR_EVENT_PREFIX "elevator.event."
+
+#define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH "EGUARD_ALARM_SWITCH"
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_SWITCH "EGUARD_DTOF_SWITCH"
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_OCCLUSION_DISTANCE "EGUARD_DTOF_OCCLUSION_DISTANCE"
 
 enum elevator_direction {
     ELEVATOR_DIR_STATIONARY = 0,
@@ -57,6 +64,19 @@ static char _elevator_id[128] = {0};
 
 static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 
+enum {
+    OPTION_IOT_REPORT_SWITCH = 0,
+    OPTION_EGUARD_ALARM_SWITCH,
+    OPTION_EGUARD_DTOF_SWITCH,
+    OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
+};
+static struct sconf_proto _elevatord_options[] = {
+    [OPTION_IOT_REPORT_SWITCH] = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}},
+    [OPTION_EGUARD_ALARM_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_INT64, {.int64 = -1}},
+    [OPTION_EGUARD_DTOF_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_SWITCH, PROTO_VALUE_INT64, {.int64 = -1}},
+    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_OCCLUSION_DISTANCE, PROTO_VALUE_INT64, {.int64 = 100}},  // 100mm
+};
+
 void elevator_elevatord_connected(struct ubus_context* ctx, uint32_t id) {
     _ctx = ctx;
     _elevatord_object_id = id;
@@ -68,14 +88,30 @@ void elevator_elevatord_disconnected(struct ubus_context* ctx) {
     _elevatord_object_id = 0;
 }
 
-int elevator_property_elevator_id(struct property* self) {
+int elevator_property_get_elevator_id(struct property* self) {
     (void)self;
     if (!self) return -1;
 
+    platform_get_property(PROPERTY_DEVICEID, _elevator_id, sizeof(_elevator_id));
+
     property_value_set_string_ext(&self->value, _elevator_id, 1);
 
-    // self->dirty = 1;
+    return 0;
+}
 
+int elevator_property_set_elevator_id(struct property* self, struct property_value* value) {
+    if (!self || !value) {
+        return -1;
+    }
+
+    if (value->type != E_STRING || !value->val.string) {
+        return -1;
+    }
+
+    snprintf(_elevator_id, sizeof(_elevator_id), "%s", value->val.string);
+    platform_set_property(PROPERTY_DEVICEID, _elevator_id);
+    properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
+    topic_property_report();
     return 0;
 }
 
@@ -87,11 +123,9 @@ static int _elevatord_enter_sensor_calibration(void* args) {
         return -1;
     }
 
-    HR_LOGD("sensor prop:%s\n", prop->name);
     memset((void*)&b, 0, sizeof(b));
     blob_buf_init(&b, 0);
-    int ret = ubus_invoke(_ctx, _elevatord_object_id, "enter_sensor_calibration", b.head, NULL, NULL, 0);
-    HR_LOGD("%s(%d):   ret :%d\n", __FUNCTION__, __LINE__, ret);
+    ubus_invoke(_ctx, _elevatord_object_id, "enter_sensor_calibration", b.head, NULL, NULL, 0);
     blob_buf_free(&b);
 
     return 0;
@@ -104,6 +138,22 @@ int elevator_property_enter_sensor_calibration(struct property* self, struct pro
     return post_async_task(_elevatord_enter_sensor_calibration, self);
 }
 
+int elevator_property_get_floor_model(struct property* self) {
+    if (!self) {
+        return -1;
+    }
+    char* data = NULL;
+    futil_read(ELEVATORD_FLOOR_MODEL_PATH, &data);
+    if (!data) {
+        return -1;
+    }
+
+    property_value_set_string(&self->value, data);
+    free(data);
+
+    return 0;
+}
+
 int elevator_property_get_hqliftd_config(struct property* self) {
     char* data = NULL;
     futil_read(HQLIFTD_CONFIG_PATH, &data);
@@ -114,6 +164,7 @@ int elevator_property_get_hqliftd_config(struct property* self) {
     free(data);
     return 0;
 }
+
 int elevator_property_set_hqliftd_config(struct property* self, struct property_value* value) {
     if (!self || !value) {
         return -1;
@@ -130,6 +181,98 @@ int elevator_property_set_hqliftd_config(struct property* self, struct property_
 
     return 0;
 }
+
+static int read_elevator_options() {
+    return sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));
+}
+
+int elevator_property_get_eguard_alarm_switch(struct property* self) {
+    if (!self) {
+        return -1;
+    }
+
+    read_elevator_options();
+
+    property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.int64);
+    properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
+    return 0;
+}
+
+int elevator_property_set_eguard_alarm_switch(struct property* self, struct property_value* value) {
+    if (!self || !value || value->type != E_NUMBER) {
+        return -1;
+    }
+
+    _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.int64 = (int)value->val.number;
+    sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_SWITCH], 1);
+
+    properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
+    properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val.number = (int)value->val.number;
+
+    topic_property_report();
+
+    system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
+    return 0;
+}
+
+int elevator_property_get_eguard_dtof_switch(struct property* self) {
+    if (!self) {
+        return -1;
+    }
+
+    read_elevator_options();
+
+    property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.int64);
+    properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].dirty = 1;
+    return 0;
+}
+
+int elevator_property_set_eguard_dtof_switch(struct property* self, struct property_value* value) {
+    if (!self || !value || value->type != E_NUMBER) {
+        return -1;
+    }
+
+    _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.int64 = (int)value->val.number;
+    sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_SWITCH], 1);
+
+    properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].dirty = 1;
+    properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].value.val.number = (int)value->val.number;
+
+    topic_property_report();
+
+    system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
+    return 0;
+}
+
+int elevator_property_get_eguard_dtof_occlusion_distance(struct property* self) {
+    if (!self) {
+        return -1;
+    }
+
+    read_elevator_options();
+
+    property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64);
+    properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].dirty = 1;
+    return 0;
+}
+
+int elevator_property_set_eguard_dtof_occlusion_distance(struct property* self, struct property_value* value) {
+    if (!self || !value || value->type != E_NUMBER) {
+        return -1;
+    }
+
+    _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64 = (int)value->val.number;
+    sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE], 1);
+
+    properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].dirty = 1;
+    properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].value.val.number = (int)value->val.number;
+
+    topic_property_report();
+
+    system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
+    return 0;
+}
+
 static void _on_floor_calibration_event(int id, int floor, const char* label, double height, double pressure, int completed) {
     struct floor_calibration_event* e = NULL;
     if (!label) {
@@ -179,8 +322,7 @@ static int _elevatord_floor_enter_calibration(void* args) {
     blobmsg_add_u32(&b, "BaseFloor", p[0]);
     blobmsg_add_u32(&b, "FloorsBelow", p[1]);
     blobmsg_add_u32(&b, "FloorsAbove", p[2]);
-    int ret = ubus_invoke(_ctx, _elevatord_object_id, "StartAutoFloorCalibration", b.head, NULL, NULL, 0);
-    HR_LOGD("%s(%d):   ret :%d\n", __FUNCTION__, __LINE__, ret);
+    ubus_invoke(_ctx, _elevatord_object_id, "StartAutoFloorCalibration", b.head, NULL, NULL, 0);
     blob_buf_free(&b);
 
     free(p);
@@ -202,6 +344,55 @@ int elevator_floor_enter_calibration(int floor_base, int floors_below_base, int 
     return post_async_task(_elevatord_floor_enter_calibration, p);
 }
 
+static int _elevatord_floor_calibrate_at_floor(void* args) {
+    (void)args;
+    int floor = (int)(intptr_t)args;
+    struct blob_buf b;
+
+    if (!_ctx || _elevatord_object_id == 0) {
+        return -1;
+    }
+
+    memset((void*)&b, 0, sizeof(b));
+    blob_buf_init(&b, 0);
+    blobmsg_add_u32(&b, "Floor", floor);
+    ubus_invoke(_ctx, _elevatord_object_id, "CalibrateAtFloorManually", b.head, NULL, NULL, 0);
+    blob_buf_free(&b);
+
+    return 0;
+}
+
+int elevator_floor_calibrate_at_floor(int floor) {
+    // cast int to pointer is safe
+    return post_async_task(_elevatord_floor_calibrate_at_floor, (void*)(intptr_t)floor);
+}
+
+static int _elevatord_floor_calibrate_at_height(void* args) {
+    (void)args;
+    double* height = (double*)args;
+    struct blob_buf b;
+    if (!height) {
+        return -1;
+    }
+    if (!_ctx || _elevatord_object_id == 0) {
+        return -1;
+    }
+
+    memset((void*)&b, 0, sizeof(b));
+    blob_buf_init(&b, 0);
+    blobmsg_add_double(&b, "Height", *height);
+    ubus_invoke(_ctx, _elevatord_object_id, "CalibrateAtHeightManually", b.head, NULL, NULL, 0);
+    blob_buf_free(&b);
+
+    return 0;
+}
+
+int elevator_floor_calibrate_at_height(double height) {
+    // use static memory, do not support multi call
+    static int _height = 0;
+    _height = height;
+    return post_async_task(_elevatord_floor_calibrate_at_height, (void*)&_height);
+}
 static int _elevatord_floor_update_floor_model_data(void* args) {
     struct blob_buf b;
     const char* data = (const char*)args;
@@ -220,12 +411,16 @@ static int _elevatord_floor_update_floor_model_data(void* args) {
     json_tokener* tok = json_tokener_new();
     struct json_object* root = json_tokener_parse_ex(tok, data, strlen(data));
     blobmsg_add_object(&b, root);
-    json_tokener_free(tok);
-    free((void*)data);
-    data = NULL;
+
     ubus_invoke(_ctx, _elevatord_object_id, "update_floor_model_data", b.head, NULL, NULL, 0);
     blob_buf_free(&b);
 
+    json_object_put(root);
+    json_tokener_free(tok);
+
+    // free memory
+    free((void*)data);
+    data = NULL;
 
     return 0;
 }
@@ -235,6 +430,7 @@ int elevator_floor_update_floor_model_data(const char* data) {
         return -1;
     }
 
+    // freed in task
     model = strdup(data);
 
     if (!model) {
@@ -344,9 +540,8 @@ int elevator_elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus
         return -1;
     }
 
-    HR_LOGD("%s(%d): %s.............\n", __FUNCTION__, __LINE__, method);
     char* str = blobmsg_format_json(msg, true);
-    HR_LOGE("%s(%d): str:%s\n", __FUNCTION__, __LINE__, str);
+    HR_LOGE("elevatord event => %s:%s\n", method, str ? str : "");
     free(str);
 
     if (0 == strcmp(ELEVATORD_EVENT_SENSOR_CALIBRATION, method)) {
