@@ -22,6 +22,8 @@
     - `EGUARD_ALARM_SWITCH`: 0/1 配置 eguard 是否播放音频通知
     - `EGUARD_DTOF_SWITCH`: 0/1 配置是否开启遮挡检测
     - `EGUARD_DTOF_OCCLUSION_DISTANCE`: 配置 DTOF 遮挡检测距离，单位毫米
+    - `EGUARD_DOOR_ZONE_STOPPED_THRESHOLD`: 非门区停车检测距离，注意，因为加速度和气压都可能有误差，我们仅在两者同时判定超过这个阈值的时候才上报
+    - `EGUARD_DOOR_CONTROL_ENABLED`: 是否通过继电器控制电梯门，例如检测到电瓶车后，是否禁止关门
 
 2.  SENSOR_CALIBRATION_CONF： /etc/elevatord/sensor_calibration.conf
 

@@ -30,17 +30,20 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+
 #include "file_util.h"
 
-#define LOG_BUF_SIZE LINE_MAX // 1024 * 2
+#define LOG_BUF_SIZE LINE_MAX  // 1024 * 2
 
 // #define RSYSLOG_SERVER "1.20222202.xyz"
 #define RSYSLOG_SERVER "192.168.58.100"
 #define RSYSLOG_PORT "514"
 
+#ifndef HRLOG_OUTPUT_FILE
 #define HRLOG_OUTPUT_FILE 1
+#endif
 
-static hr_log_type _type = HR_LOG_TYPE_SYSLOG;
+// static hr_log_type _type = HR_LOG_TYPE_SYSLOG;
 static char _hostname[256] = {0};
 
 static pthread_once_t persist_once_control = PTHREAD_ONCE_INIT;
@@ -164,16 +167,17 @@ static int rsyslog(const char* message) {
                      (const struct sockaddr*)_rsyslog.res->ai_addr, _rsyslog.res->ai_addrlen);
 
     if (ret == -1) {
-        switch (errno) {
-            printf("sock maybe broken : %d!!!!!!!", errno);
-            case ECONNRESET:
-            case ENOTCONN:
-            case EPIPE:
-                close(_rsyslog.sock);
-                _rsyslog.sock = -1;
-                freeaddrinfo(_rsyslog.res);
-                _rsyslog.res = NULL;
-        }
+        printf("sock maybe broken : %d!!!!!!!", errno);
+        syslog(LOG_SYSLOG, "sock maybe broken : %d!!!!!!!", errno);
+        // switch (errno) {
+        //     case ECONNRESET:
+        //     case ENOTCONN:
+        //     case EPIPE:
+                 close(_rsyslog.sock);
+                 _rsyslog.sock = -1;
+                 freeaddrinfo(_rsyslog.res);
+                 _rsyslog.res = NULL;
+        // }
     }
 
     return 0;
@@ -242,8 +246,8 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
         syslog(LOG_SYSLOG, "%s", buf);
     }
 #else
-    rsyslog(buf);
-    // printf("%s", buf);
+    // rsyslog(buf);
+    printf("%s", buf);
     // syslog(LOG_SYSLOG, "%s", buf);
 #endif
 

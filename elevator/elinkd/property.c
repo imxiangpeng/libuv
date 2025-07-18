@@ -105,9 +105,14 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     // hqliftd
     [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", E_STRING, elevator_property_get_hqliftd_config, elevator_property_set_hqliftd_config, {}, 0},
     // eguard
-    [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", E_NUMBER, elevator_property_get_eguard_alarm_switch, elevator_property_set_eguard_alarm_switch, {}, 0},
+    [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", E_NUMBER, elevator_property_get_eguard_alarm_switch, elevator_property_set_eguard_alarm_switch, {}, 1},
     [PROPERTY_EGUARD_DTOF_SWITCH] = {"eguard_dtof_switch", E_NUMBER, elevator_property_get_eguard_dtof_switch, elevator_property_set_eguard_dtof_switch, {}, 0},
     [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", E_NUMBER, elevator_property_get_eguard_dtof_occlusion_distance, elevator_property_set_eguard_dtof_occlusion_distance, {}, 0},
+    [PROPERTY_EGUARD_KUNREN_DETECT_ENABLED] = {"eguard_kunren_detect_enabled", E_NUMBER, elevator_property_get_eguard_kunren_detect_enabled, elevator_property_set_eguard_kunren_detect_enabled, {}, 1},
+    [PROPERTY_EGUARD_KUNREN_DETECT_TIMEOUT] = {"eguard_kunren_detect_timeout", E_NUMBER, elevator_property_get_eguard_kunren_detect_timeout, elevator_property_set_eguard_kunren_detect_timeout, {}, 1},
+    [PROPERTY_EGUARD_KUNREN_ALARM_REPEAT_COUNT] = {"eguard_kunren_alarm_repeat_count", E_NUMBER, elevator_property_get_eguard_kunren_alarm_repeat_count, elevator_property_set_eguard_kunren_alarm_repeat_count, {}, 0},
+    [PROPERTY_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD] = {"eguard_door_zone_stopped_threshold", E_DECIMAL, elevator_property_get_eguard_door_zone_stopped_threshold, elevator_property_set_eguard_door_zone_stopped_threshold, {}, 1},
+    [PROPERTY_EGUARD_DOOR_CONTROL_ENABLED] = {"eguard_door_control_enabled", E_NUMBER, elevator_property_get_eguard_door_control_enabled, elevator_property_set_eguard_door_control_enabled, {}, 1},
     // camera property_value
 };
 

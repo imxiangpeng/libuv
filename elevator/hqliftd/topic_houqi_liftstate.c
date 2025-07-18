@@ -132,10 +132,10 @@ int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const 
     (void)device_name;
     _iot = iot;
 
-    struct sconf_proto realtime_report_period_ms = {"REALTIME_REPORT_PERIOD_MS", PROTO_VALUE_INT64, {.int64 = 1000}};
+    struct sconf_proto realtime_report_period_ms = {"REALTIME_REPORT_PERIOD_MS", PROTO_VALUE_NUMBER, {.number = 1000}};
     sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &realtime_report_period_ms, 1);
 
-    _topic_liftstate.period = realtime_report_period_ms.value.int64;
+    _topic_liftstate.period = realtime_report_period_ms.value.number;
 
     uviot_topic_register(iot, &_topic_liftstate);
 

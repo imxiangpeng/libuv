@@ -1,6 +1,8 @@
 
 // mxp, 20250710, implement iot property topic
 
+#include "topic_property.h"
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
@@ -30,75 +32,6 @@ enum {
     _PROPERTY_TOPIC_MAX,
 };
 
-#if 0
-enum {
-    PROPERTY_BUILD_TIMESTAMP = 0,
-    PROPERTY_SW_VERSION,
-    PROPERTY_ELEVATOR_ID,
-    PROPERTY_BIAS_ACCEL_X,
-    PROPERTY_BIAS_ACCEL_Y,
-    PROPERTY_BIAS_ACCEL_Z,
-    PROPERTY_BIAS_PITCH,
-    PROPERTY_BIAS_ROLL,
-    PROPERTY_IMU_CALIBRATION,
-    PROPERTY_FLOOR,
-    PROPERTY_HEIGHT,
-    PROPERTY_PRESSURE,
-    PROPERTY_TEMPERATURE,
-    PROPERTY_FLOOR_MODEL,
-    PROPERTY_REPORT_SWITCH,
-    PROPERTY_HQLIFTD_CONFIG,
-    PROPERTY_EGUARD_ALARM_SWITCH,
-    PROPERTY_EGUARD_DTOF_SWITCH,
-    PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE,
-    PROPERTY_DOOR_ROI,
-    __PROPERTY_MAX
-};
-
-struct property {
-    const char* name;
-    enum property_data_type {
-        P_INT64,
-        P_DOUBLE,
-        P_STRING
-    } type;
-
-    union {
-        int64_t val_int64;
-        double val_double;
-        // !NULL: use preallocated memory, data should be ready now
-        // NULL: the value need to be handled dynamically
-        const char* val_str;  // use external memory
-    } value;
-    int dirty;
-} _properties_tbl[__PROPERTY_MAX] = {
-    [PROPERTY_BUILD_TIMESTAMP] = {"build_timestamp", P_STRING, {.val_str = BUILD_TIMESTAMP}, 1 /* report when startup*/},
-    [PROPERTY_SW_VERSION] = {"sw_version", P_STRING, {.val_str = _sw_version}, 1 /* report when startup*/},
-    [PROPERTY_ELEVATOR_ID] = {"elevator_id", P_STRING, {.val_str = _elevator_id}, 1 /* report when startup*/},
-    // calibration
-    [PROPERTY_BIAS_ACCEL_X] = {"bias_accel_x", P_DOUBLE, {0}, 0},
-    [PROPERTY_BIAS_ACCEL_Y] = {"bias_accel_y", P_DOUBLE, {0}, 0},
-    [PROPERTY_BIAS_ACCEL_Z] = {"bias_accel_z", P_DOUBLE, {0}, 0},
-    [PROPERTY_BIAS_PITCH] = {"bias_pitch", P_DOUBLE, {0}, 0},
-    [PROPERTY_BIAS_ROLL] = {"bias_roll", P_DOUBLE, {0}, 0},
-    [PROPERTY_IMU_CALIBRATION] = {"imu_calibration", P_INT64, {0}, 0},
-    // floor
-    [PROPERTY_FLOOR] = {"floor", P_INT64, {0}, 0},
-    [PROPERTY_HEIGHT] = {"height", P_DOUBLE, {0}, 0},
-    // do not add speed it's realtime parameter, ali display not good
-    // also pressure and temperature only reported after run finished
-    [PROPERTY_PRESSURE] = {"pressure", P_DOUBLE, {0}, 0},
-    [PROPERTY_TEMPERATURE] = {"temperature", P_DOUBLE, {0}, 0},
-    // this is special parameter, we should read data dynamic
-    [PROPERTY_FLOOR_MODEL] = {"floor_model", P_STRING, {0}, 0},
-    [PROPERTY_REPORT_SWITCH] = {"report_switch", P_INT64, {0}, 0},
-    [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", P_STRING, {0}, 0},
-    [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", P_INT64, {0}, 0},
-    [PROPERTY_EGUARD_DTOF_SWITCH] = {"eguard_dtof_switch", P_INT64, {0}, 0},
-    [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", P_INT64, {0}, 0},
-    [PROPERTY_DOOR_ROI] = {"door_roi", P_STRING, {.val_str = ""}, 0},
-};
-#endif
 static int _on_property_publish(void** payload, int* len) {
     char tmp[256] = {0};
     cJSON *root = NULL, *param = NULL;
@@ -243,9 +176,9 @@ static int _on_property_set(void* payload, int len) {
                 break;
             }
             case E_BOOLEAN:
-                number = cJSON_GetNumberValue(ele);
-                if (!isnan(number)) {
-                    property_value_set_boolean(&value, (int)number);
+                if (cJSON_IsBool(ele)) {
+                    int boolean = cJSON_IsTrue(ele) ? 1 : 0;
+                    property_value_set_boolean(&value, boolean);
                     prop->setter(prop, &value);
                     property_value_reset(&value);
                 }
@@ -263,7 +196,6 @@ static int _on_property_set(void* payload, int len) {
 
 // only mark property as dirty
 static int _on_property_get(void* payload, int len) {
-    // printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     // double val = 0;
     // const char* val_str = NULL;
@@ -291,19 +223,31 @@ static int _on_property_get(void* payload, int len) {
     }
 
     cJSON_ArrayForEach(ele, params) {
-        if (!ele->string) {
+        const char* name = NULL;
+
+        // support two methods:
+        // 1.  ["eguard_door_close_timeout","eguard_door_repeat_timeout","sw_version"]
+        // 2.  {"eguard_door_close_timeout":{},"eguard_door_repeat_timeout":{},"sw_version":{}}
+        if (cJSON_IsString(ele)) {
+            name = cJSON_GetStringValue(ele);
+        } else if (cJSON_IsObject(ele)) {
+            name = ele->string;
+        }
+
+        if (!name) {
             continue;
         }
 
-        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
-
-        struct property* prop = property_get(ele->string);
+        struct property* prop = property_get(name);
         if (!prop) {
-            HR_LOGD("not support property:%s\n", ele->string);
+            HR_LOGD("not support property:%s\n", name);
             continue;
         }
         prop->dirty = 1;
     }
+
+    // schedule report
+    topic_property_report();
 
     cJSON_Delete(root);
     return 0;

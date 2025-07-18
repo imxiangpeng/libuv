@@ -39,6 +39,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 // please define it when release version
 #define AUTO_FIXED_HEIGHT_WHEN_STOPPING 1
+#define PREFER_PRESSURE_DELTA_HEIGHT_ALG 1
 
 // mxp, 20250626, help accelerometer performing zupt when pressure is stationary
 // detect it's stationary and accel is zero, we can force zupt if it's not stopped
@@ -95,8 +96,8 @@ static int dump_data_init(void);
 #define ACCEL_JITTER_STD_THRESHOLD 0.03
 
 static double barometer_distance = 0;
-// static double barometer_begin = 0;
-// static double barometer_end = 0;
+static double barometer_begin = 0;
+static double barometer_end = 0;
 static double barometer_pressure = 0;
 static double barometer_temperature = 0;
 
@@ -221,6 +222,10 @@ static void* _accelerometer_thread_routin(void* args) {
     // mxp, 20250609, add confidence for floor num
     // we only update floor model when floor num is confidenced
     int floor_num_confidence = 0;
+
+    // offset to predict floor
+    double floor_offset_accel = 0;
+    double floor_offset_pressure = 0;
 
     for (;;) {
         struct timespec spec;
@@ -428,11 +433,10 @@ static void* _accelerometer_thread_routin(void* args) {
         // but it does not modify floor_num & floor_label
         // you can use previous value
         if (now > delta_predict_floor_time_ns || new_state != _accelerometer_motion.state) {
-            double delta_a = 0;
             // detect floor num every seconds
             delta_predict_floor_time_ns = now + 500000000;  // seconds_to_nanoseconds(1);
-            floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label), &delta_a);
-            HR_LOGD("predict floor:%d, height:%f, delta:%f, accel:%f, velocity:%f\n", floor_num, _accelerometer_motion.height + _accelerometer_motion.distance, delta_a, accel, velocity);
+            floor_predict(_accelerometer_motion.height + _accelerometer_motion.distance, &floor_num, (char*)&floor_label, sizeof(floor_label), &floor_offset_accel);
+            HR_LOGD("predict floor:%d, height:%f, delta:%f, accel:%f, velocity:%f\n", floor_num, _accelerometer_motion.height + _accelerometer_motion.distance, floor_offset_accel, accel, velocity);
 
             if (floor_baseline_pressure != 0) {
                 double h = 0;
@@ -446,10 +450,9 @@ static void* _accelerometer_thread_routin(void* args) {
                     barometer_pressure_height_relative_base_floor = relative_baseline_height;
 
                     int num = floor_num;
-                    double delta_p = 0;
 
-                    if (0 == floor_predict(relative_baseline_height, &num, (char*)&floor_label, sizeof(floor_label), &delta_p)) {
-                        HR_LOGD("!!! correct -- predict floor: %d -> %d, height:%f, delta_p:%f vs delta_a:%f\n", floor_num, num, relative_baseline_height, delta_p, delta_a);
+                    if (0 == floor_predict(relative_baseline_height, &num, (char*)&floor_label, sizeof(floor_label), &floor_offset_pressure)) {
+                        HR_LOGD("!!! correct -- predict floor: %d -> %d, height:%f, delta_p:%f vs delta_a:%f\n", floor_num, num, relative_baseline_height, floor_offset_pressure, floor_offset_accel);
                         if (floor_num == num) {
                             floor_num_confidence = 100;
                         } else {
@@ -458,7 +461,7 @@ static void* _accelerometer_thread_routin(void* args) {
                             floor_num = num;
 
 #if 0  // run error when testing, I found imu zero offset has been changed, after recalibrate accel data is good, why changed ?
-                            // using factor value when stopped & pressure delta too large
+       // using factor value when stopped & pressure delta too large
                             if (new_state == STOPPED) {
                                 double delta_ap = 0;
                                 double accel_factor = 0.4;
@@ -483,6 +486,29 @@ static void* _accelerometer_thread_routin(void* args) {
                     }
                 }
             }
+
+#if PREFER_PRESSURE_DELTA_HEIGHT_ALG
+            if (barometer_begin != 0) {
+                int num = 0;
+                double delta_p = 0;
+                // previous event pressure, maybe first event
+                double height = 0;
+
+                floor_num_confidence = 0;
+
+                if (new_state != STOPPED) {
+                    height = calculate_height_difference(barometer_begin, barometer_pressure, barometer_temperature);
+                    // update barometer height in accel when finished
+                    barometer_distance = height;
+                }
+                if (0 == floor_predict(_barometer_motion.height + barometer_distance, &num, (char*)&floor_label, sizeof(floor_label), &delta_p)) {
+                    if (floor_num == num) {
+                        floor_num_confidence = 100;
+                    }
+                    floor_num = num;
+                }
+            }
+#endif
         }
         // HR_LOGD("%s(%d):accel:%f, velocity:%f, distance:%f, height:%f\n",
         //         __FUNCTION__, __LINE__, accel, velocity, distance, _accelerometer_motion.height + _accelerometer_motion.distance);
@@ -503,6 +529,12 @@ static void* _accelerometer_thread_routin(void* args) {
                 // when starting, pressure is assigned , so we can compare it later
                 _accelerometer_motion.ev.pressure = round(_barometer_motion.mw->mean * 100) / 100;  // 使用过去一个窗口的均值作为当前开始运行时间点气压值
 
+                _accelerometer_motion.ev.offset0 = 0;
+                _accelerometer_motion.ev.offset1 = 0;
+                _accelerometer_motion.ev.confidence = 0;
+                                                                                                    
+                barometer_begin = round(_barometer_motion.mw->mean * 100) / 100;                    //
+
 #if MOTION_EVENT_CONFIRM_FROM_PRESSURE
                 motion_event_delay_confirm_with_pressure_ns = now + seconds_to_nanoseconds(1);
 #else
@@ -522,6 +554,9 @@ static void* _accelerometer_thread_routin(void* args) {
 
                 _accelerometer_motion.height += _accelerometer_motion.distance;
                 _accelerometer_motion.distance = 0;
+
+                barometer_end = barometer_pressure;
+
                 HR_LOGD("stopping-----------at %d, height:%f, pressure:%f------------->\n", floor_num, _accelerometer_motion.height, barometer_pressure);
 #if AUTO_FIXED_HEIGHT_WHEN_STOPPING
                 // 这样当触底以及最高的时候可以强制同步到对应合适的高度
@@ -552,6 +587,10 @@ static void* _accelerometer_thread_routin(void* args) {
                 _accelerometer_motion.ev.floor_begin = _accelerometer_motion.ev.floor;
                 _accelerometer_motion.ev.floor = floor_num;
                 _accelerometer_motion.ev.timestamp_end = get_realtime_ms();
+
+                _accelerometer_motion.ev.confidence = floor_num_confidence;
+                _accelerometer_motion.ev.offset0 = floor_offset_accel;
+                _accelerometer_motion.ev.offset1 = floor_offset_pressure;
 
                 // update stopped floor num when stopped
                 _motion_stopped_floor_num = floor_num;
@@ -985,39 +1024,39 @@ int motion_initalize(int argc, char** argv) {
     };
 
     struct sconf_proto elevatord_config[] = {
-        [ACC_SAMPLING_RATE] = {"ACCELEROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_NUMBER, {.number = ACCELEROMETER_SAMPLING_RATE_HZ}},
-        [BARO_SAMPLING_RATE] = {"BAROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_NUMBER, {.number = BAROMETER_SAMPLING_RATE_HZ}},
-        [PRESSURE_STATIONARY_SLOPE] = {"BAROMETER_PREDICT_STATIONARY_SLOPE", PROTO_VALUE_NUMBER, {.number = BAROMETER_PREDICT_STATIONARY_SLOPE}},
-        [PRESSURE_STATIONARY_STDDEV] = {"BAROMETER_PREDICT_STATIONARY_STDDEV", PROTO_VALUE_NUMBER, {.number = BAROMETER_PREDICT_STATIONARY_STDDEV}},
-        [PERIOD_UPDATE_PRESSURE] = {"MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY", PROTO_VALUE_INT64, {.int64 = MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY}},
+        [ACC_SAMPLING_RATE] = {"ACCELEROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_DECIMAL, {.decimal = ACCELEROMETER_SAMPLING_RATE_HZ}},
+        [BARO_SAMPLING_RATE] = {"BAROMETER_SAMPLING_RATE_HZ", PROTO_VALUE_DECIMAL, {.decimal = BAROMETER_SAMPLING_RATE_HZ}},
+        [PRESSURE_STATIONARY_SLOPE] = {"BAROMETER_PREDICT_STATIONARY_SLOPE", PROTO_VALUE_DECIMAL, {.decimal = BAROMETER_PREDICT_STATIONARY_SLOPE}},
+        [PRESSURE_STATIONARY_STDDEV] = {"BAROMETER_PREDICT_STATIONARY_STDDEV", PROTO_VALUE_DECIMAL, {.decimal = BAROMETER_PREDICT_STATIONARY_STDDEV}},
+        [PERIOD_UPDATE_PRESSURE] = {"MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY", PROTO_VALUE_NUMBER, {.number = MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY}},
     };
 
     sconf_load_with_proto(ELEVATORD_CONFIG_PATH, elevatord_config, ARRAY_SIZE(elevatord_config));
 
     // accel only accept 100/200
-    switch ((int)elevatord_config[ACC_SAMPLING_RATE].value.number) {
+    switch ((int)elevatord_config[ACC_SAMPLING_RATE].value.decimal) {
         case 100:
         case 200:
-            ACCELEROMETER_SAMPLING_RATE_HZ = elevatord_config[ACC_SAMPLING_RATE].value.number;
+            ACCELEROMETER_SAMPLING_RATE_HZ = elevatord_config[ACC_SAMPLING_RATE].value.decimal;
             break;
         default:
             // ignore use origin
             break;
     }
     // accel only accept 50/12.5
-    if (50.0 == elevatord_config[BARO_SAMPLING_RATE].value.number ||
-        12.5 == elevatord_config[BARO_SAMPLING_RATE].value.number) {
-        BAROMETER_SAMPLING_RATE_HZ = elevatord_config[BARO_SAMPLING_RATE].value.number;
+    if (50.0 == elevatord_config[BARO_SAMPLING_RATE].value.decimal ||
+        12.5 == elevatord_config[BARO_SAMPLING_RATE].value.decimal) {
+        BAROMETER_SAMPLING_RATE_HZ = elevatord_config[BARO_SAMPLING_RATE].value.decimal;
     }
 
     HR_LOGD("accelerometer sampling rate:%fHz, barometer sampling rate:%fHz\n", ACCELEROMETER_SAMPLING_RATE_HZ, BAROMETER_SAMPLING_RATE_HZ);
 
-    BAROMETER_PREDICT_STATIONARY_SLOPE = elevatord_config[PRESSURE_STATIONARY_SLOPE].value.number;
-    BAROMETER_PREDICT_STATIONARY_STDDEV = elevatord_config[PRESSURE_STATIONARY_STDDEV].value.number;
+    BAROMETER_PREDICT_STATIONARY_SLOPE = elevatord_config[PRESSURE_STATIONARY_SLOPE].value.decimal;
+    BAROMETER_PREDICT_STATIONARY_STDDEV = elevatord_config[PRESSURE_STATIONARY_STDDEV].value.decimal;
 
     HR_LOGD("pressure stationary slope threshold:%f, pressure stationary stddev threshold:%f\n", BAROMETER_PREDICT_STATIONARY_SLOPE, BAROMETER_PREDICT_STATIONARY_STDDEV);
 
-    MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = elevatord_config[PERIOD_UPDATE_PRESSURE].value.int64;
+    MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY = elevatord_config[PERIOD_UPDATE_PRESSURE].value.number;
     HR_LOGD("motion update floor pressure period :%d seconds when stationary\n", MOTION_PERIOD_UPDATE_PRESSURE_WHEN_STATIONARY);
 
 #if DUMP_DATA_TO_FILE

@@ -19,6 +19,10 @@
 #include "state_machine.h"
 #include "time_utils.h"
 
+// do not enable it, no verify, it's only logic
+// please verify it, before you enable it
+#define OVER_TOP_BOTTOM_DETECT_ENABLED 0
+
 #define ELEVATORD_NAME "elevatord"
 #define ELEVATOR_EVENT_PREFIX "elevator.event."
 #define UBUS_SOCK "/tmp/ubus.sock"
@@ -60,7 +64,8 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 static struct elevator_historical _historical;
 
 static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
-static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_NUMBER, {.number = DEFAULT_SPEED_THRESHOLD}};
+static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_DECIMAL, {.decimal = DEFAULT_SPEED_THRESHOLD}};
+static struct sconf_proto _door_zone_stopped_threshold = {"EGUARD_DOOR_ZONE_STOPPED_THRESHOLD", PROTO_VALUE_DECIMAL, {.decimal = 0}};
 extern void topic_houqi_liftruninfo_post(void);
 
 static int _uelevator_send_fault_event(enum elevator_exception e, int status);
@@ -93,6 +98,9 @@ enum {
     HI_TIMESTAMP_END,
     HI_FLOOR_BEGIN,
     HI_FLOOR_END,
+    HI_FLOOR_OFFSET0,
+    HI_FLOOR_OFFSET1,
+    HI_FLOOR_CONFIDENCE,
     HI_ACCEL_ARRAY,
     HI_SPEED_ARRAY,
     HI_JITTER_FREQ_ARRAY,
@@ -107,6 +115,9 @@ static const struct blobmsg_policy historical_policy[__HI_MAX] = {
     [HI_TIMESTAMP_END] = {.name = "timestamp_end", .type = BLOBMSG_TYPE_INT64},
     [HI_FLOOR_BEGIN] = {.name = "floor_begin", .type = BLOBMSG_TYPE_INT32},
     [HI_FLOOR_END] = {.name = "floor_end", .type = BLOBMSG_TYPE_INT32},
+    [HI_FLOOR_OFFSET0] = {.name = "offset0", .type = BLOBMSG_TYPE_DOUBLE},
+    [HI_FLOOR_OFFSET1] = {.name = "offset1", .type = BLOBMSG_TYPE_DOUBLE},
+    [HI_FLOOR_CONFIDENCE] = {.name = "confidence", .type = BLOBMSG_TYPE_INT32},
     [HI_ACCEL_ARRAY] = {.name = "accels", .type = BLOBMSG_TYPE_ARRAY},
     [HI_SPEED_ARRAY] = {.name = "speeds", .type = BLOBMSG_TYPE_ARRAY},
     [HI_JITTER_FREQ_ARRAY] = {.name = "jitter_freqs", .type = BLOBMSG_TYPE_ARRAY},
@@ -145,7 +156,6 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         struct blob_attr* tb[__RT_MAX] = {NULL};
         blobmsg_parse(realtime_policy, __RT_MAX, tb, blobmsg_data(msg),
                       blobmsg_data_len(msg));
-
         if (tb[RT_ACCEL])
             _status.accel = blobmsg_get_double(tb[RT_ACCEL]);
         if (tb[RT_SPEED])
@@ -163,13 +173,13 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.jitter_freq = blobmsg_get_double(tb[RT_JITTER_FREQ]);
         if (tb[RT_JITTER_ACCEL])
             _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
-
-        if (_status.speed > _speed_limit_threhold.value.number) {
+        printf("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
+        HR_LOGD("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
+        if (_status.speed > _speed_limit_threhold.value.decimal) {
             if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
                 _elevator_exception |= ELEVATOR_EXCEPTION_OVERSPEED;
                 elevator_fault_occurred(ELEVATOR_EXCEPTION_OVERSPEED);
-                HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.number);
-                printf("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.number);
+                HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
             }
         } else {
             if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
@@ -182,6 +192,29 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
         printf("%s(%d): realtime: accel:%f, speed:%f, distance:%f, direction:%d, floor:%d\n", __FUNCTION__, __LINE__,
                _status.accel, _status.speed, _status.distance, _status.direction, _status.current_floor);
+
+#if OVER_TOP_BOTTOM_DETECT_ENABLED
+        // report over top and over bottom when accel is very large
+        // accel threshold use 5
+        // fault is resumed when next run
+        if (fabs(_status.accel) > 5) {
+            if (_status.accel < 0) {
+                // chongding
+                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
+                    _elevator_exception |= ELEVATOR_EXCEPTION_RUN_OVER_TOP;
+                    HR_LOGD("%s(%d): fault over top .....\n", __FUNCTION__, __LINE__);
+                    elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_OVER_TOP);
+                }
+            } else {
+                // dundi
+                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
+                    _elevator_exception |= ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM;
+                    HR_LOGD("%s(%d): fault over bottom .....\n", __FUNCTION__, __LINE__);
+                    elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM);
+                }
+            }
+        }
+#endif
 
     } else if (0 == strcmp(ELEVATORD_EVENT_MOTION, method)) {
         struct blob_attr* tb[__M_MAX] = {NULL};
@@ -197,9 +230,26 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             statemachine_post(SM_EVENT_STOPPED);
         } else {
             statemachine_post(SM_EVENT_RUNNING);
+#if OVER_TOP_BOTTOM_DETECT_ENABLED
+            // run again, resume chongding & dundi
+            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
+                _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_OVER_TOP;
+                HR_LOGD("%s(%d): !!! fault chongding resume.............\n", __FUNCTION__, __LINE__);
+                elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_OVER_TOP);
+            }
+
+            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
+                _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM;
+                HR_LOGD("%s(%d): !!! fault dundi resume.............\n", __FUNCTION__, __LINE__);
+                elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM);
+            }
+#endif
         }
 
     } else if (0 == strcmp(ELEVATORD_EVENT_HISTORICAL, method)) {
+        int confidence = 0;
+        double offset0 = 0;
+        double offset1 = 0;
         // directly pass for LiftRunInfo
         struct blob_attr* cur = NULL;
         size_t rem;
@@ -210,6 +260,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         if (!tb[HI_DISTANCE] || !tb[HI_DIRECTION] ||
             !tb[HI_TIMESTAMP_BEGIN] || !tb[HI_TIMESTAMP_END] ||
             !tb[HI_FLOOR_BEGIN] || !tb[HI_FLOOR_END] ||
+            !tb[HI_FLOOR_OFFSET0] || !tb[HI_FLOOR_OFFSET1] || !tb[HI_FLOOR_CONFIDENCE] ||
             !tb[HI_ACCEL_ARRAY] || !tb[HI_SPEED_ARRAY] ||
             !tb[HI_JITTER_FREQ_ARRAY] || !tb[HI_JITTER_ACCEL_ARRAY]) {
             return 0;
@@ -222,9 +273,18 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         _historical.floor_begin = (int)blobmsg_get_u32(tb[HI_FLOOR_BEGIN]);
         _historical.floor_end = (int)blobmsg_get_u32(tb[HI_FLOOR_END]);
 
+        offset0 = fabs(blobmsg_get_double(tb[HI_FLOOR_OFFSET0]));
+        offset1 = fabs(blobmsg_get_double(tb[HI_FLOOR_OFFSET1]));
+        confidence = blobmsg_get_u32(tb[HI_FLOOR_CONFIDENCE]);
+
         HR_LOGD("historical: distance:%f, direction:%d, timestamp:%lu -> %lu(%lu), floor: %d -> %d\n", _historical.distance, _historical.direction,
                 _historical.timestamp_begin, _historical.timestamp_end, _historical.timestamp_end - _historical.timestamp_begin,
                 _historical.floor_begin, _historical.floor_end);
+
+        HR_LOGD("floor:%d->%d, confidence:%d, offset0:%f, offset1:%f, door zone threshold:%f, _historical.distance:%f\n",
+                _historical.floor_begin, _historical.floor_end,
+                confidence, offset0, offset1,
+                _door_zone_stopped_threshold.value.decimal, _historical.distance);
 
         hrbuffer_reset(&_historical.accel_array);
         hrbuffer_reset(&_historical.speed_array);
@@ -254,6 +314,27 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         }
 
         topic_houqi_liftruninfo_post();
+
+        if (_door_zone_stopped_threshold.value.decimal > 0) {
+            if (offset0 > _door_zone_stopped_threshold.value.decimal && offset1 > _door_zone_stopped_threshold.value.decimal) {
+                if (confidence == 100) {
+                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
+                        // mxp, 20250715, periodic realtime reporting:
+                        // the final state may not have been updated yet, so we force an update here
+                        _status.speed = 0;
+                        _elevator_exception |= ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR;
+                        elevator_fault_occurred(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR);
+                        HR_LOGD("%s(%d): !!! fault not stopped at floor occurred.............\n", __FUNCTION__, __LINE__);
+                    }
+                }
+            } else {
+                if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
+                    _elevator_exception &= ~ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR;
+                    elevator_fault_resolved(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR);
+                    HR_LOGD("%s(%d): !!! fault not stopped at floor resume.............\n", __FUNCTION__, __LINE__);
+                }
+            }
+        }
     }
 
     return 0;
@@ -278,7 +359,7 @@ static int subscriber_elevatord_event() {
 
 static const char* fault_to_string(enum elevator_exception fault) {
     switch (fault) {
-            // 1. 困人
+        // 1. 困人
         case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
             return "kunren";
         // 2. 开门走车
@@ -298,10 +379,12 @@ static const char* fault_to_string(enum elevator_exception fault) {
             return "chaosu";
         // 11. 反复开关门
         case ELEVATOR_EXCEPTION_DOOR_REPEATED:
-            return "fanfukaiguanmen";
+            // ai model define type as door_moving
+            return "door_moving";  // "fanfukaiguanmen";
         // 12. 关门异常
         case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR:
-            return "guanmenyicang";
+            // ai model define type as door_open
+            return "door_open";  // "guanmenyichang";
         // 202. 电瓶车
         case ELEVATOR_EXCEPTION_EBIKE:
             return "ebike";
@@ -468,10 +551,10 @@ static void ubus_event_handler(struct ubus_context* ctx,
                 fault = ELEVATOR_EXCEPTION_DOOR_REPEATED;
             } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR), type) == 0) {
                 fault = ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR;
-            }/* else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_EBIKE), type) == 0) {
-                // ebike is also processed in event elevator.event.ebike
-                fault = ELEVATOR_EXCEPTION_EBIKE;
-            }*/
+            } /* else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_EBIKE), type) == 0) {
+                 // ebike is also processed in event elevator.event.ebike
+                 fault = ELEVATOR_EXCEPTION_EBIKE;
+             }*/
 
             HR_LOGD("type:%s, fault:%d, status:%d\n", type, fault, status);
 
@@ -487,6 +570,70 @@ static void ubus_event_handler(struct ubus_context* ctx,
                 }
             } else {
                 HR_LOGD("receive %s cancel event!\n", type);
+                if (0 != (_elevator_exception & fault)) {
+                    _elevator_exception &= ~fault;
+                    elevator_fault_resolved(fault);
+                }
+            }
+        } else if (0 == strcmp("x.fault", event)) {
+            uint32_t fault = ELEVATOR_EXCEPTION_NONE;
+            const char* type = NULL;
+            int status = 0;
+            struct blob_attr* tb[3] = {NULL};
+            static const struct blobmsg_policy policy[] = {
+                {.name = "type", .type = BLOBMSG_TYPE_STRING},
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0] || !tb[1]) {
+                return;
+            }
+
+            type = blobmsg_get_string(tb[0]);
+            status = blobmsg_get_u32(tb[1]);
+
+            if (!type) {
+                return;
+            }
+
+            if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_RUN_OVER_TOP), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_RUN_OVER_TOP;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_OVERSPEED), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_OVERSPEED;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_DOOR_REPEATED), type) == 0 || strcmp("fanfukaiguanmen", type) == 0) {
+                fault = ELEVATOR_EXCEPTION_DOOR_REPEATED;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR), type) == 0 || strcmp("guanmenyichang", type) == 0) {
+                fault = ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR;
+            } else if (strcmp(fault_to_string(ELEVATOR_EXCEPTION_EBIKE), type) == 0) {
+                fault = ELEVATOR_EXCEPTION_EBIKE;
+            }
+
+            HR_LOGD("simulate fault type:%s, fault:%d, status:%d\n", type, fault, status);
+
+            if (ELEVATOR_EXCEPTION_NONE == fault) {
+                return;
+            }
+
+            if (status == 1) {
+                HR_LOGD("simulate %s fire event!\n", type);
+                if (0 == (_elevator_exception & fault)) {
+                    _elevator_exception |= fault;
+                    elevator_fault_occurred(fault);
+                }
+            } else {
+                HR_LOGD("simulate %s cancel event!\n", type);
                 if (0 != (_elevator_exception & fault)) {
                     _elevator_exception &= ~fault;
                     elevator_fault_resolved(fault);
@@ -653,6 +800,7 @@ int uelevator_init(void) {
     }
 
     sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &_speed_limit_threhold, 1);
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, &_door_zone_stopped_threshold, 1);
 
     pthread_attr_init(&attr);
 

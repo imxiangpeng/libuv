@@ -134,13 +134,13 @@ union calibration_data {
 };
 #endif
 struct sconf_proto calibration_config[] = {
-    [E_CALIBRATED] = {"CALIBRATED", PROTO_VALUE_INT64, {.int64 = 0}},
-    [E_G_1000] = {"G_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    [E_BIAS_ACCEL_X_1000] = {"BIAS_ACCEL_X_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    [E_BIAS_ACCEL_Y_1000] = {"BIAS_ACCEL_Y_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    [E_BIAS_ACCEL_Z_1000] = {"BIAS_ACCEL_Z_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    [E_PITCH_1000] = {"PITCH_1000", PROTO_VALUE_NUMBER, {.number = 0}},
-    [E_ROLL_1000] = {"ROLL_1000", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_CALIBRATED] = {"CALIBRATED", PROTO_VALUE_NUMBER, {.number = 0}},
+    [E_G_1000] = {"G_1000", PROTO_VALUE_DECIMAL, {.decimal = 0}},
+    [E_BIAS_ACCEL_X_1000] = {"BIAS_ACCEL_X_1000", PROTO_VALUE_DECIMAL, {.decimal = 0}},
+    [E_BIAS_ACCEL_Y_1000] = {"BIAS_ACCEL_Y_1000", PROTO_VALUE_DECIMAL, {.decimal= 0}},
+    [E_BIAS_ACCEL_Z_1000] = {"BIAS_ACCEL_Z_1000", PROTO_VALUE_DECIMAL, {.decimal = 0}},
+    [E_PITCH_1000] = {"PITCH_1000", PROTO_VALUE_DECIMAL, {.decimal = 0}},
+    [E_ROLL_1000] = {"ROLL_1000", PROTO_VALUE_DECIMAL, {.decimal = 0}},
 };
 
 // clang-format off
@@ -306,13 +306,13 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         printf("roll:%ld\n", cdata.field.roll_1000);
         sconf_save_int64(SENSOR_CALIBRATION_CONF, (const char**)calibration_field_names, (int64_t*)cdata.arr, E_FIELD_MAX);
 #else
-        calibration_config[E_CALIBRATED].value.int64 = self->is_calibration_completed;
-        calibration_config[E_G_1000].value.number = self->G * 1000;
-        calibration_config[E_BIAS_ACCEL_X_1000].value.number = self->zero_bias_accels[0] * 1000;
-        calibration_config[E_BIAS_ACCEL_Y_1000].value.number = self->zero_bias_accels[1] * 1000;
-        calibration_config[E_BIAS_ACCEL_Z_1000].value.number = self->zero_bias_accels[2] * 1000;
-        calibration_config[E_PITCH_1000].value.number = self->zero_bias_pitch * 1000;
-        calibration_config[E_ROLL_1000].value.number = self->zero_bias_roll * 1000;
+        calibration_config[E_CALIBRATED].value.number = self->is_calibration_completed;
+        calibration_config[E_G_1000].value.decimal = self->G * 1000;
+        calibration_config[E_BIAS_ACCEL_X_1000].value.decimal = self->zero_bias_accels[0] * 1000;
+        calibration_config[E_BIAS_ACCEL_Y_1000].value.decimal = self->zero_bias_accels[1] * 1000;
+        calibration_config[E_BIAS_ACCEL_Z_1000].value.decimal = self->zero_bias_accels[2] * 1000;
+        calibration_config[E_PITCH_1000].value.decimal = self->zero_bias_pitch * 1000;
+        calibration_config[E_ROLL_1000].value.decimal = self->zero_bias_roll * 1000;
 
         sconf_save_with_proto(SENSOR_CALIBRATION_CONF, calibration_config, ARRAY_SIZE(calibration_config));
 #endif
@@ -701,13 +701,13 @@ struct motion_stream* accelerometer_stream_init(int sampling_frequency) {
 #else
 
     if (0 == sconf_load_with_proto(SENSOR_CALIBRATION_CONF, calibration_config, ARRAY_SIZE(calibration_config))) {
-        s->is_calibration_completed = calibration_config[E_CALIBRATED].value.int64;
-        s->G = calibration_config[E_CALIBRATED].value.number / 1000;
-        s->zero_bias_accels[0] = calibration_config[E_BIAS_ACCEL_X_1000].value.number / 1000.0;
-        s->zero_bias_accels[1] = calibration_config[E_BIAS_ACCEL_Y_1000].value.number / 1000.0;
-        s->zero_bias_accels[2] = calibration_config[E_BIAS_ACCEL_Z_1000].value.number / 1000.0;
-        s->zero_bias_pitch = calibration_config[E_PITCH_1000].value.number / 1000.0;
-        s->zero_bias_roll = calibration_config[E_ROLL_1000].value.number / 1000.0;
+        s->is_calibration_completed = calibration_config[E_CALIBRATED].value.number;
+        s->G = calibration_config[E_CALIBRATED].value.decimal / 1000;
+        s->zero_bias_accels[0] = calibration_config[E_BIAS_ACCEL_X_1000].value.decimal / 1000.0;
+        s->zero_bias_accels[1] = calibration_config[E_BIAS_ACCEL_Y_1000].value.decimal / 1000.0;
+        s->zero_bias_accels[2] = calibration_config[E_BIAS_ACCEL_Z_1000].value.decimal / 1000.0;
+        s->zero_bias_pitch = calibration_config[E_PITCH_1000].value.decimal / 1000.0;
+        s->zero_bias_roll = calibration_config[E_ROLL_1000].value.decimal / 1000.0;
 
         // force update filter to match zero bias
         for (int i = 0; i < 10; i++) {

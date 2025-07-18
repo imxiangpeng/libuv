@@ -10,13 +10,13 @@ struct sconf_proto {
     const char* name;
 
     enum {
-        PROTO_VALUE_INT64,
         PROTO_VALUE_NUMBER,
+        PROTO_VALUE_DECIMAL,
         PROTO_VALUE_STRING
     } type;
     union {
-        int64_t int64;
-        double number;
+        int64_t number;
+        double decimal;
         // dynamic allocated memory, you should free it when not used
         char* string;
     } value;

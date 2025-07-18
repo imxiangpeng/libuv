@@ -20,6 +20,14 @@
 #include "libubus.h"
 #include "sconf.h"
 
+#define DOOR_CONTROL_ENABLED 0
+
+#if DOOR_CONTROL_ENABLED
+#include <gpiod.h>
+#endif
+#define GPIO_CHIP_NAME "/dev/gpiochip0"
+#define GPIOA_11 84  // GPIOA_11
+
 #define UBUS_SOCK "/tmp/ubus.sock"
 
 #define _UBUS_RETRY_TIMEOUT (2)
@@ -80,6 +88,7 @@ enum {
     OPTION_EGUARD_ALARM_SWITCH = 0,
     OPTION_EGUARD_DTOF_SWITCH,
     OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
+    OPTION_EGUARD_DOOR_CONTROL_ENABLED,
     OPTION_EGUARD_KUNREN,
     OPTION_EGUARD_,
 
@@ -87,13 +96,45 @@ enum {
 // default not enable
 
 static struct sconf_proto _eguard_options[] = {
-    [OPTION_EGUARD_ALARM_SWITCH] = {"EGUARD_ALARM_SWITCH", PROTO_VALUE_INT64, {.int64 = 0}},
-    [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
-    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_INT64, {.int64 = DTOF_OCCLUSION_DISTANCE_MM}},
-    [OPTION_EGUARD_KUNREN] = {"EGUARD_KUNREN", PROTO_VALUE_INT64, {.int64 = 0}},
+    [OPTION_EGUARD_ALARM_SWITCH] = {"EGUARD_ALARM_SWITCH", PROTO_VALUE_NUMBER, {.number = 0}},
+    [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_NUMBER, {.number = DTOF_OCCLUSION_DISTANCE_MM}},
+    [OPTION_EGUARD_DOOR_CONTROL_ENABLED] = {"EGUARD_DOOR_CONTROL_ENABLED", PROTO_VALUE_NUMBER, {.number = 0}},
+    [OPTION_EGUARD_KUNREN] = {"EGUARD_KUNREN", PROTO_VALUE_NUMBER, {.number = 0}},
 };
 
 static void _alarm_event_confirm(struct uloop_timeout* t);
+
+// control the elevator door to remain open
+static void _keep_door_open(int on) {
+    (void)on;
+#if DOOR_CONTROL_ENABLED
+    int ret = 0;
+    struct gpiod_chip* chip = NULL;
+    struct gpiod_line* line = NULL;
+
+    chip = gpiod_chip_open(GPIO_CHIP_NAME);
+    if (!chip) {
+        return;
+    }
+
+    line = gpiod_chip_get_line(chip, GPIOA_11);
+    if (!line) {
+        gpiod_chip_close(chip);
+        return;
+    }
+    ret = gpiod_line_request_output(line, "block_door", 1);
+    if (ret < 0) {
+        gpiod_chip_close(chip);
+        return;
+    }
+
+    gpiod_line_set_value(line, on != 0 ? 1 : 0);
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+#endif    
+}
 
 static void message_post(int which) {
     if (_pipefd[1] == -1) {
@@ -202,7 +243,7 @@ static void* _playback_thread_routin(void* arg) {
             continue;
         }
 
-        if (_eguard_options[OPTION_EGUARD_ALARM_SWITCH].value.int64 == 0) {
+        if (_eguard_options[OPTION_EGUARD_ALARM_SWITCH].value.number == 0) {
             printf("eguard is not enabled\n");
             continue;
         }
@@ -243,8 +284,8 @@ static void* _dtof_detector_thread_routin(void* arg) {
             printf("Distance: %d mm, Confidence: %d, Count: %d\n",
                    distance, confidence, count);
 
-            if (_eguard_options[OPTION_EGUARD_DTOF_SWITCH].value.int64 != 0) {
-                if (distance < _eguard_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64 && confidence > 90) {
+            if (_eguard_options[OPTION_EGUARD_DTOF_SWITCH].value.number != 0) {
+                if (distance < _eguard_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.number && confidence > 90) {
                     message_post(EVENT_DTOF_DISTANCE_ALARM);
                 } else {
                     message_post(EVENT_DTOF_DISTANCE_RESUME);
@@ -330,6 +371,7 @@ static void ubus_event_handler(struct ubus_context* ctx,
                     printf("ebike resume ...\n");
                     _alarm &= ~ALARM_EBIKE;
                     uloop_timeout_cancel(&_alarm_timer);
+                    _keep_door_open(0);  // not block door
                 }
             } else {
                 if (0 == (_alarm & ALARM_EBIKE)) {
@@ -337,48 +379,10 @@ static void ubus_event_handler(struct ubus_context* ctx,
                     _alarm |= ALARM_EBIKE;
                     _alarm_timer.cb = _alarm_event_confirm;
                     uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
-                }
-            }
-        } else if (0 == strcmp("fault", event)) {
-            uint32_t fault = 0;
-            const char* type = NULL;
-            int status = 0;
-            struct blob_attr* tb[3] = {NULL};
-            static const struct blobmsg_policy policy[] = {
-                {.name = "type", .type = BLOBMSG_TYPE_STRING},
-                {.name = "status", .type = BLOBMSG_TYPE_INT32},
-                {NULL, BLOBMSG_TYPE_UNSPEC},
-            };
 
-            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
-                          blobmsg_data_len(msg));
-
-            if (!tb[0] || !tb[1]) {
-                return;
-            }
-
-            type = blobmsg_get_string(tb[0]);
-            status = blobmsg_get_u32(tb[1]);
-
-            if (!type) {
-                return;
-            }
-
-            printf("type:%s, fault:%d, status:%d\n", type, fault, status);
-
-            if (0 == strcmp("kunren", type)) {
-                if (status == 0) {
-                    if (0 != (_alarm & ALARM_KUNREN)) {
-                        printf("kunren resume ...\n");
-                        _alarm &= ~ALARM_KUNREN;
-                        uloop_timeout_cancel(&_alarm_timer);
-                    }
-                } else {
-                    if (0 == (_alarm & ALARM_KUNREN)) {
-                        printf("kunren alarm ...\n");
-                        _alarm |= ALARM_KUNREN;
-                        _alarm_timer.cb = _alarm_event_confirm;
-                        uloop_timeout_set(&_alarm_timer, EGUARD_ALARM_CONFIRM_TIMEOUT);
+                    // the function maybe not enable
+                    if (_eguard_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED].value.number != 0) {
+                        _keep_door_open(1);  // block door
                     }
                 }
             }
@@ -442,6 +446,9 @@ int main(int argc, char** argv) {
 
     memset((void*)&_alarm_timer, 0, sizeof(_alarm_timer));
     memset((void*)&_b, 0, sizeof(_b));
+
+    // always not block door when bootup
+    _keep_door_open(0);  // must call it to release ...
 
     sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
 

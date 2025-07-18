@@ -48,6 +48,9 @@ struct motion_event {
     double temperature;
     int64_t timestamp_begin;
     int64_t timestamp_end;
+    double offset0; // accel offset relative to real floor height
+    double offset1; // pressure offset relative to real floor height
+    int confidence; // confidence of prediction, only care 100
 };
 #define CALIBRATION_EVENT_VALUES_MAX 10
 

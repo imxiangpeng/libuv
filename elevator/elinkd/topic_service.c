@@ -67,8 +67,7 @@ static int _on_svc_message(void* payload, int len) {
         return -1;
     }
 
-    for (act = &svc_action_tbl[0]; act != NULL; act++) {
-        // thing.service.StartAutoFloorCalibration
+    for (act = &svc_action_tbl[0]; act->name != NULL; act++) {
         if (!strcmp(act->name, method)) {
             /*int rc =*/act->method(params);
             break;

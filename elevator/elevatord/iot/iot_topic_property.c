@@ -22,8 +22,10 @@
 
 #define ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH "IOT_REPORT_SWITCH"
 #define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH "EGUARD_ALARM_SWITCH"
+#define ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_REPEAT_COUNT "EGUARD_ALARM_REPEAT_COUNT"
 #define ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_SWITCH "EGUARD_DTOF_SWITCH"
 #define ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_OCCLUSION_DISTANCE "EGUARD_DTOF_OCCLUSION_DISTANCE"
+#define ELEVATORD_RUNTIME_PARAM_DOOR_ZONE_STOPPED_THRESHOLD "DOOR_ZONE_STOPPED_THRESHOLD"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -57,9 +59,15 @@ enum {
     PROPERTY_REPORT_SWITCH,
     PROPERTY_HQLIFTD_CONFIG,
     PROPERTY_EGUARD_ALARM_SWITCH,
+    PROPERTY_EGUARD_ALARM_REPEAT_COUNT,
+    PROPERTY_EGUARD_ALARM_INTERVAL,
     PROPERTY_EGUARD_DTOF_SWITCH,
     PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE,
-    PROPERTY_DOOR_ROI,
+    PROPERTY_EGUARD_KUNREN_DETECT_ENABLED,
+    PROPERTY_EGUARD_KUNREN_DETECT_TIMEOUT,
+    PROPERTY_EGUARD_KUNREN_REPEAT_COUNT,
+    PROPERTY_DOOR_ZONE_STOPPED_THRESHOLD,
+    PROPERTY_EGUARD_DOOR_CONTROL_ENABLED,
     __PROPERTY_MAX
 };
 
@@ -102,22 +110,32 @@ struct property {
     [PROPERTY_REPORT_SWITCH] = {"report_switch", P_INT64, {0}, 0},
     [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", P_STRING, {0}, 0},
     [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", P_INT64, {0}, 0},
+    [PROPERTY_EGUARD_ALARM_REPEAT_COUNT] = {"eguard_alarm_repeat_count", P_INT64, {0}, 0},
+    [PROPERTY_EGUARD_ALARM_INTERVAL] = {"eguard_alarm_interval", P_INT64, {0}, 0},
     [PROPERTY_EGUARD_DTOF_SWITCH] = {"eguard_dtof_switch", P_INT64, {0}, 0},
     [PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"eguard_dtof_occlusion_distance", P_INT64, {0}, 0},
-    [PROPERTY_DOOR_ROI] = {"door_roi", P_STRING, {.val_str = ""}, 0},
-};
+    [PROPERTY_EGUARD_KUNREN_DETECT_ENABLED] = {"eguard_kunren_detect_enabled", P_INT64, {0}, 0},
+    [PROPERTY_EGUARD_KUNREN_DETECT_TIMEOUT] = {"eguard_kunren_detect_timeout", P_INT64, {0}, 0},
+    [PROPERTY_EGUARD_KUNREN_REPEAT_COUNT] = {"eguard_kunren_alarm_repeat_count", P_INT64, {0}, 0},
+    [PROPERTY_EGUARD_DOOR_CONTROL_ENABLED] = {"eguard_door_control_enabled", P_INT64, {0}, 1},};
 
 enum {
     OPTION_IOT_REPORT_SWITCH = 0,
     OPTION_EGUARD_ALARM_SWITCH,
+    OPTION_EGUARD_ALARM_REPEAT_COUNT,
     OPTION_EGUARD_DTOF_SWITCH,
     OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
+    OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD,
+    OPTION_EGUARD_DOOR_CONTROL_ENABLED,
 };
 static struct sconf_proto _elevatord_options[] = {
-    [OPTION_IOT_REPORT_SWITCH] = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_INT64, {.int64 = 1}},
-    [OPTION_EGUARD_ALARM_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_INT64, {.int64 = -1}},
-    [OPTION_EGUARD_DTOF_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_SWITCH, PROTO_VALUE_INT64, {.int64 = -1}},
-    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_OCCLUSION_DISTANCE, PROTO_VALUE_INT64, {.int64 = -1}},
+    [OPTION_IOT_REPORT_SWITCH] = {ELEVATORD_RUNTIME_PARAM_REPORT_SWITCH, PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_EGUARD_ALARM_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_SWITCH, PROTO_VALUE_NUMBER, {.number = -1}},
+    [OPTION_EGUARD_ALARM_REPEAT_COUNT] = {ELEVATORD_RUNTIME_PARAM_EGUARD_ALARM_REPEAT_COUNT, PROTO_VALUE_NUMBER, {.number = 3}},
+    [OPTION_EGUARD_DTOF_SWITCH] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_SWITCH, PROTO_VALUE_NUMBER, {.number = -1}},
+    [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {ELEVATORD_RUNTIME_PARAM_EGUARD_DTOF_OCCLUSION_DISTANCE, PROTO_VALUE_NUMBER, {.number = -1}},
+    [OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD] = {ELEVATORD_RUNTIME_PARAM_DOOR_ZONE_STOPPED_THRESHOLD, PROTO_VALUE_DECIMAL, {.decimal = 0}},
+    [OPTION_EGUARD_DOOR_CONTROL_ENABLED] = {"EGUARD_DOOR_CONTROL_ENABLED", PROTO_VALUE_NUMBER, {.number = 0}},
 };
 
 static int _realtime_report_times = 0;
@@ -308,10 +326,10 @@ static int _on_property_set_message(void* payload, int len) {
 
     val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_REPORT_SWITCH].name));
     if (!isnan(val)) {
-        _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.int64 = (int64_t)val;
+        _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.number = (int64_t)val;
         sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_IOT_REPORT_SWITCH], 1);
 
-        _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.int64;
+        _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.number;
 
         _properties_tbl[PROPERTY_REPORT_SWITCH].dirty = 1;
         schedule_report();
@@ -331,8 +349,21 @@ static int _on_property_set_message(void* payload, int len) {
         _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
         _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val_int64 = (int)val;
 
-        _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.int64 = (int)val;
+        _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.number = (int)val;
         sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_SWITCH], 1);
+        schedule_report();
+
+        system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
+    }
+
+    val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_EGUARD_ALARM_REPEAT_COUNT].name));
+    if (!isnan(val)) {
+        // burn elevator id
+        _properties_tbl[PROPERTY_EGUARD_ALARM_REPEAT_COUNT].dirty = 1;
+        _properties_tbl[PROPERTY_EGUARD_ALARM_REPEAT_COUNT].value.val_int64 = (int)val;
+
+        _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number = (int)val;
+        sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT], 1);
         schedule_report();
 
         system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
@@ -344,7 +375,7 @@ static int _on_property_set_message(void* payload, int len) {
         _properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].dirty = 1;
         _properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].value.val_int64 = (int)val;
 
-        _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.int64 = (int)val;
+        _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.number = (int)val;
         sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_SWITCH], 1);
         schedule_report();
 
@@ -357,17 +388,37 @@ static int _on_property_set_message(void* payload, int len) {
         _properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].dirty = 1;
         _properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].value.val_int64 = (int)val;
 
-        _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64 = (int)val;
+        _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.number = (int)val;
         sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE], 1);
         schedule_report();
 
         system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
     }
 
-    val_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_DOOR_ROI].name));
-    if (val_str) {
-        char cmd[LINE_MAX] = {0};
-        snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/aa/door/roi %s", val_str);
+    val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_DOOR_ZONE_STOPPED_THRESHOLD].name));
+    if (!isnan(val)) {
+        _elevatord_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal = val;
+        sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD], 1);
+
+        _properties_tbl[PROPERTY_DOOR_ZONE_STOPPED_THRESHOLD].value.val_double = val;
+
+        _properties_tbl[PROPERTY_DOOR_ZONE_STOPPED_THRESHOLD].dirty = 1;
+        schedule_report();
+
+        system("/etc/init.d/S68hqliftd restart 2>&1 > /dev/null");
+    }
+
+    val = cJSON_GetNumberValue(cJSON_GetObjectItem(params, _properties_tbl[PROPERTY_EGUARD_DOOR_CONTROL_ENABLED].name));
+    if (!isnan(val)) {
+        // burn elevator id
+        _properties_tbl[PROPERTY_EGUARD_DOOR_CONTROL_ENABLED].dirty = 1;
+        _properties_tbl[PROPERTY_EGUARD_DOOR_CONTROL_ENABLED].value.val_int64 = (int)val;
+
+        _elevatord_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED].value.number = (int)val;
+        sconf_save_with_proto(ELEVATORD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED], 1);
+        schedule_report();
+
+        system("/etc/init.d/S90eguard restart 2>&1 > /dev/null");
     }
 
     cJSON_Delete(root);
@@ -478,22 +529,22 @@ int iot_topic_property_init(struct uviot* iot, const char* public_key, const cha
     // should load from config
     sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));
 
-    _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.int64;
+    _properties_tbl[PROPERTY_REPORT_SWITCH].value.val_int64 = _elevatord_options[OPTION_IOT_REPORT_SWITCH].value.number;
     // always report when startup
     _properties_tbl[PROPERTY_REPORT_SWITCH].dirty = 1;
 
-    if (_elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.int64 != -1) {
-        _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val_int64 = _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.int64;
+    if (_elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.number != -1) {
+        _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].value.val_int64 = _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.number;
         _properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
     }
 
-    if (_elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.int64 != -1) {
-        _properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].value.val_int64 = _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.int64;
+    if (_elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.number != -1) {
+        _properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].value.val_int64 = _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.number;
         _properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].dirty = 1;
     }
 
-    if (_elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64 != -1) {
-        _properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].value.val_int64 = _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.int64;
+    if (_elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.number != -1) {
+        _properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].value.val_int64 = _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.number;
         _properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].dirty = 1;
     }
 
@@ -546,7 +597,7 @@ static void _observer_on_status(struct motion_status* st) {
     }
 
     // do not allow report property
-    if (_elevatord_options[OPTION_IOT_REPORT_SWITCH].value.int64 == 0) {
+    if (_elevatord_options[OPTION_IOT_REPORT_SWITCH].value.number == 0) {
         return;
     }
 
@@ -572,7 +623,7 @@ static void _observer_on_event(struct motion_event* data) {
         return;
 
     // do not allow report property
-    if (_elevatord_options[OPTION_IOT_REPORT_SWITCH].value.int64 == 0) {
+    if (_elevatord_options[OPTION_IOT_REPORT_SWITCH].value.number == 0) {
         return;
     }
 

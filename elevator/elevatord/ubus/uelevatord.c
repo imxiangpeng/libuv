@@ -68,7 +68,7 @@ static struct hrbuffer _jitter_freq_buffer;
 // 500ms or 1s report to ubus client
 static int _realtime_report_times = 0;
 // adjust according accelerometer's sampling rate
-static int _realtime_report_fac = DEFAULT_ACCELEROMETER_SAMPLING_RATE_HZ;  // 10 * sampling_rate = 100 * 1/100 = 1s
+static int _realtime_report_fac = DEFAULT_ACCELEROMETER_SAMPLING_RATE_HZ / 10;  // 10 * sampling_rate = 100 * 1/100 = 1s
 
 static enum motion_state _running_state = STOPPED;
 static enum motion_direction _running_direction = DIRECTION_NONE;
@@ -402,7 +402,7 @@ int uelevatord_init(void) {
         return -1;
     }
 
-    _realtime_report_fac = (int)motion_accelerometer_sampling_rate();
+    _realtime_report_fac = (int)motion_accelerometer_sampling_rate() / 10;
 
     if (pipe(_pipefd) < 0) {
         perror("pipe");
@@ -557,6 +557,9 @@ static void _observer_on_event(struct motion_event* data) {
             blobmsg_add_u64(&_historical_b, "timestamp_end", data->timestamp_end);
             blobmsg_add_u32(&_historical_b, "floor_begin", data->floor_begin);
             blobmsg_add_u32(&_historical_b, "floor_end", data->floor);
+            blobmsg_add_double(&_historical_b, "offset0", data->offset0);
+            blobmsg_add_double(&_historical_b, "offset1", data->offset1);
+            blobmsg_add_u32(&_historical_b, "confidence", data->confidence);
 
             void* root = blobmsg_open_array(&_historical_b, "accels");
 

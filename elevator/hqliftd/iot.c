@@ -38,8 +38,8 @@ enum {
 
 struct sconf_proto _mqtt_conf_fields[] = {
     [FIELD_SERVER] = {"MQ_SERVER", PROTO_VALUE_STRING, {.string = NULL}},
-    [FIELD_PORT] = {"MQ_PORT", PROTO_VALUE_INT64, {.int64 = BROKER_DEFAULT_PORT}},
-    [FIELD_KEEPALIVE] = {"MQ_KEEPALIVE", PROTO_VALUE_INT64, {.int64 = BROKER_DEFAULT_ALIVETIME}},
+    [FIELD_PORT] = {"MQ_PORT", PROTO_VALUE_NUMBER, {.number = BROKER_DEFAULT_PORT}},
+    [FIELD_KEEPALIVE] = {"MQ_KEEPALIVE", PROTO_VALUE_NUMBER, {.number = BROKER_DEFAULT_ALIVETIME}},
     [FIELD_USERNAME] = {"MQ_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
     [FIELD_PASSWORD] = {"MQ_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
 };
@@ -61,8 +61,8 @@ int iot_init(struct uv_loop_s* loop) {
             snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
         }
 
-        _iot->port = _mqtt_conf_fields[FIELD_PORT].value.int64;
-        _iot->alive_time = _mqtt_conf_fields[FIELD_KEEPALIVE].value.int64;
+        _iot->port = _mqtt_conf_fields[FIELD_PORT].value.number;
+        _iot->alive_time = _mqtt_conf_fields[FIELD_KEEPALIVE].value.number;
 
         snprintf(_iot->id, sizeof(_iot->id), "%s", elevator_serialno());
 

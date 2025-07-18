@@ -1,9 +1,11 @@
-#include "floor.h"
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
 
+#include "floor.h"
+
 #include <fcntl.h>
+#include <libgen.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +187,20 @@ static int floor_load_model(const char* path) {
     return 0;
 }
 
+static void fsync_parent_dir(const char* file) {
+    if (!file) return;
+    char* tmp = strdup(file);
+    char* dir = dirname(tmp);
+    int dirfd = open(dir, O_RDONLY);
+
+    if (dirfd != -1) {
+        fsync(dirfd);
+        close(dirfd);
+    }
+
+    free(tmp);
+}
+
 static int _replace_floor_model_config(const char* path, const char* data, int size) {
     int fd = -1;
     char* tmp = NULL;
@@ -209,13 +225,20 @@ static int _replace_floor_model_config(const char* path, const char* data, int s
 
     futil_write_fd(fd, (char*)data, size);
 
+    fsync(fd);
     close(fd);
 
     HR_LOGD("replace %s with :%s\n", path, tmp);
     unlink(path);
     rename(tmp, path);
 
+    // sync when it not in tmp
+    if (strcmp(path, "/tmp")) {
+        fsync_parent_dir(path);
+    }
+
     free(tmp);
+
     return 0;
 }
 
@@ -407,6 +430,10 @@ const char* floor_model_data_realtime_path(void) {
 static int floor_binary_predict_id(double height) {
     int left = 0;
     int right = _building.floor_nums - 1;
+
+    if (_building.floor_nums <= 0) {
+        return -1;
+    }
 
     if (height <= _building.model[left].height_relative) {
         return left;

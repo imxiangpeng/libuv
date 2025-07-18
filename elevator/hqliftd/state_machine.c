@@ -41,12 +41,23 @@ enum {
 };
 
 struct sconf_proto _hqlift_conf_fields[] = {
-    [FIELD_RUNTIME_SPEED_THRESHOLD] = {"SPEED_THRESHOLD", PROTO_VALUE_INT64, {.int64 = DEFAULT_SPEED_THRESHOLD * 1000}},
+    [FIELD_RUNTIME_SPEED_THRESHOLD] = {"SPEED_THRESHOLD", PROTO_VALUE_NUMBER, {.number = DEFAULT_SPEED_THRESHOLD * 1000}},
     [FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = NULL}},
     [FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
     [FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
-    [FIELD_FAULT_DOOR_DETECT_TIMEOUT] = {"LIFTFAULT_DOOR_DETECT_TIMEOUT", PROTO_VALUE_INT64, {.int64 = DOOR_OPEN_TIMEOUT_AFTER_STOPPED}},
-    [FIELD_FAULT_PERSON_LONG_INSIDE_TIMEOUT] = {"LIFTFAULT_PERSON_LONG_INSIDE_TIMEOUT", PROTO_VALUE_INT64, {.int64 = SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT}},
+    [FIELD_FAULT_DOOR_DETECT_TIMEOUT] = {"LIFTFAULT_DOOR_DETECT_TIMEOUT", PROTO_VALUE_NUMBER, {.number = DOOR_OPEN_TIMEOUT_AFTER_STOPPED}},
+    [FIELD_FAULT_PERSON_LONG_INSIDE_TIMEOUT] = {"LIFTFAULT_PERSON_LONG_INSIDE_TIMEOUT", PROTO_VALUE_NUMBER, {.number = SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT}},
+};
+
+// it's in elevatord.conf
+enum {
+    OPTION_EGUARD_KUNREN_DETECT_ENABLED = 0,
+    OPTION_EGUARD_KUNREN_DETECT_TIMEOUT,
+    _OPTION_MAX,
+};
+static struct sconf_proto _elevatord_options[] = {
+    {"EGUARD_KUNREN_DETECT_ENABLED", PROTO_VALUE_NUMBER, {.number = 1}},
+    {"EGUARD_KUNREN_DETECT_TIMEOUT", PROTO_VALUE_NUMBER, {.number = DOOR_OPEN_TIMEOUT_AFTER_STOPPED}},
 };
 
 // Fault:
@@ -107,6 +118,13 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
         if (st.passenger_count > 0) {
             _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
             HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+
+            // kunren maybe disabled
+            if (_elevatord_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number == 0) {
+                HR_LOGD("eguard_kunren_detect_enabled is 0!\n");
+                return;
+            }
+
             elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
         }
     }
@@ -124,6 +142,13 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
         if (st.passenger_count > 0) {
             _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
             HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+
+            // kunren maybe disabled
+            if (_elevatord_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number == 0) {
+                HR_LOGD("eguard_kunren_detect_enabled is 0!\n");
+                return;
+            }
+
             elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
         }
     }
@@ -205,7 +230,8 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     _state = SM_ELEVATOR_STOPPED_DOOR_CLOSED;
                     // check anyone is still in elevator but elevator is not running
                     // SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT
-                    uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, _hqlift_conf_fields[FIELD_FAULT_PERSON_LONG_INSIDE_TIMEOUT].value.int64, 0);
+                    // uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, _hqlift_conf_fields[FIELD_FAULT_PERSON_LONG_INSIDE_TIMEOUT].value.number, 0);
+                    uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number, 0);
                     break;
                 case SM_EVENT_RUNNING:
                     if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
@@ -249,7 +275,8 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     _state = SM_ELEVATOR_STOPPED;
                     // start timer to detect door open
                     // DOOR_OPEN_TIMEOUT_AFTER_STOPPED
-                    uv_timer_start(&_timer, _wait_door_opened_after_stopped_cb, _hqlift_conf_fields[FIELD_FAULT_DOOR_DETECT_TIMEOUT].value.int64, 0);
+                    // uv_timer_start(&_timer, _wait_door_opened_after_stopped_cb, _hqlift_conf_fields[FIELD_FAULT_DOOR_DETECT_TIMEOUT].value.number, 0);
+                    uv_timer_start(&_timer, _wait_door_opened_after_stopped_cb, _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number, 0);
                     break;
                 case SM_EVENT_DOOR_OPENED:
                     printf("%s(%d): Exception door is opened while running\n", __FUNCTION__, __LINE__);
@@ -284,6 +311,11 @@ int statemachine_init(uv_loop_t* loop) {
     }
 
     sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _hqlift_conf_fields, sizeof(_hqlift_conf_fields) / sizeof(_hqlift_conf_fields[0]));
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));
+
+    HR_LOGD("kunren :%ld, timeout:%ld\n",
+            _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number,
+            _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number);
 
     uv_poll_init(loop, &_state_machine_poll, _pipefd[0]);
     uv_poll_start(&_state_machine_poll, UV_READABLE, _statemachine_message_handle);

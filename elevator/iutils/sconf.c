@@ -169,20 +169,20 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
     }
 
     switch (proto[idx].type) {
-        case PROTO_VALUE_INT64: {
+        case PROTO_VALUE_NUMBER: {
             int64_t val = strtoll(p, &endptr, 10);
             if (p == endptr || val > INT64_MAX) {
                 return -1;
             }
-            proto[idx].value.int64 = val;
+            proto[idx].value.number = val;
             return 0;
         }
-        case PROTO_VALUE_NUMBER: {
+        case PROTO_VALUE_DECIMAL: {
             double val = strtod(p, &endptr);
             if (p == endptr || errno == ERANGE) {
                 return -1;
             }
-            proto[idx].value.number = val;
+            proto[idx].value.decimal = val;
             return 0;
         }
 
@@ -307,13 +307,13 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
 
     for (size_t i = 0; i < size; i++) {
         switch (proto[i].type) {
-            case PROTO_VALUE_INT64: {
-                int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", proto[i].name, proto[i].value.int64);
+            case PROTO_VALUE_NUMBER: {
+                int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", proto[i].name, proto[i].value.number);
                 futil_write_fd(fd, buffer, len);
                 break;
             }
-            case PROTO_VALUE_NUMBER: {
-                int len = snprintf(buffer, sizeof(buffer), "%s=%f\n", proto[i].name, proto[i].value.number);
+            case PROTO_VALUE_DECIMAL: {
+                int len = snprintf(buffer, sizeof(buffer), "%s=%f\n", proto[i].name, proto[i].value.decimal);
                 futil_write_fd(fd, buffer, len);
                 break;
             }

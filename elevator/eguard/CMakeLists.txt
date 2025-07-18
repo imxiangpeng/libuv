@@ -10,6 +10,8 @@ FIND_LIBRARY(cjson_library NAMES cjson)
 FIND_LIBRARY(ubus_library NAMES ubus PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
+# apt install libgpiod-dev
+FIND_LIBRARY(libgpiod_library NAMES gpiod)
 
 # ADD_DEFINITIONS(-Wall -Wextra -Werror)
 ADD_DEFINITIONS(-g )
@@ -33,6 +35,7 @@ target_include_directories(eguard PUBLIC /opt/3rdparty/include)
 TARGET_LINK_LIBRARIES(eguard ${libuv_library})
 # TARGET_LINK_LIBRARIES(eguard ${avformat_library} ${avcodec_library})
 TARGET_LINK_LIBRARIES(eguard ${ubox_library} ${ubus_library} ${blob_library})
+TARGET_LINK_LIBRARIES(eguard ${libgpiod_library})
 
 TARGET_LINK_LIBRARIES(eguard pthread)
 TARGET_LINK_LIBRARIES(eguard iutils)

@@ -236,7 +236,7 @@ static int elevatord_main(int argc, char** argv) {
     uelevatord_init();
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
-    iot_init(uv_default_loop());
+    // iot_init(uv_default_loop());
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     motion_deinitalize();

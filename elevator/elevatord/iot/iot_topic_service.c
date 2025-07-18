@@ -255,7 +255,8 @@ static void _on_floor_calibration_event(int id, int floor, const char* label, do
     if (!label) {
         return;
     }
-    HR_LOGD("%s(%d): auto calibration event:%d %d %s %f\n", __FUNCTION__, __LINE__, id, floor, label, height);
+
+    // HR_LOGD("%s(%d): auto calibration event:%d %d %s %f\n", __FUNCTION__, __LINE__, id, floor, label, height);
 
     e = calibration_event_alloc();
     if (!e) {

@@ -21,8 +21,10 @@
 #include "uviot.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
+// not limit kunren & ebike event
 #define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
-#define LIFTFAULT_REPORT_EVENT_VIDEO_DURATION 10
+#define LIFTFAULT_REPORT_EVENT_VIDEO_DURATION 20
+#define LIFTFAULT_REPORT_EBIKE_VIDEO_DURATION 60
 #define LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS 120
 
 // fault event only in memory do not save
@@ -49,14 +51,13 @@ enum {
     OPTION_FIELD_FTP_PASSWORD,
     OPTION_FAULT_REPORT_SWITCH,
     OPTION_FAULT_REPORT_LIMIT_PER_DAY,
-
 };
 static struct sconf_proto _options[] = {
     [OPTION_FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = "ftp://ftp.hqszjs.com:2100"}},
     [OPTION_FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = "inspur"}},
     [OPTION_FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
-    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_INT64, {.int64 = 1}},
-    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_INT64, {.int64 = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
+    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
 };
 
 // no persist storage
@@ -108,7 +109,7 @@ static int to_houqi_fault(enum elevator_exception fault) {
             return 12;
         // 202. 电瓶车
         case ELEVATOR_EXCEPTION_EBIKE:
-            return 202; // not in document
+            return 202;  // not in document
         case ELEVATOR_EXCEPTION_NONE:
         default:
             return 0;
@@ -200,7 +201,7 @@ static int _on_publish(void** payload, int* len) {
         free(e);
     }
 
-    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         cJSON_Delete(root);
         return 0;
     }
@@ -304,9 +305,12 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         return -1;
     }
 
-    if (s->report_count >= _options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.int64) {
-        HR_LOGD("%s(%d): fault:0x%X, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
-        return -1;
+    // not limit kunren & ebike
+    if (ELEVATOR_EXCEPTION_PEOPLE_TRAPPED != fault && ELEVATOR_EXCEPTION_EBIKE != fault) {
+        if (s->report_count >= _options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.number) {
+            HR_LOGD("%s(%d): fault:0x%X, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
+            return -1;
+        }
     }
 
     pthread_mutex_lock(&_queue_lock);
@@ -325,8 +329,8 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     pthread_mutex_unlock(&_queue_lock);
 
-     // mxp, 20250702, do not report & generate fault video when fault is disabled
-    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+    // mxp, 20250702, do not report & generate fault video when fault is disabled
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         return 0;
     }
 
@@ -387,7 +391,7 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     pthread_mutex_unlock(&_queue_lock);
 
     // mxp, 20250702, do not report & generate fault video when fault is disabled
-    if (_options[OPTION_FAULT_REPORT_SWITCH].value.int64 == 0) {
+    if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         HR_INIT_LIST_HEAD(&e->entry);
         free(e);
         return 0;
@@ -466,12 +470,20 @@ static void upload_fault_video(struct lift_fault_event* e) {
             /*size_t size =*/strftime(name, sizeof(name), "%Y%m%d_%H%M%S.mp4", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            if (ELEVATOR_EXCEPTION_EBIKE == e->type) {
+                t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EBIKE_VIDEO_DURATION / 2;
+            } else {
+                t = e->fault_begin_time / 1000 - LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            }
             (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            t = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            if (ELEVATOR_EXCEPTION_EBIKE == e->type) {
+                t = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EBIKE_VIDEO_DURATION / 2;
+            } else {
+                t = e->fault_begin_time / 1000 + LIFTFAULT_REPORT_EVENT_VIDEO_DURATION / 2;
+            }
             (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
