@@ -12,6 +12,7 @@
 #include "hr_log.h"
 #include "uelevator.h"
 #include "uviot.h"
+#include "option.h"
 
 #define EVENT_RUNINFO_TOPIC_NAME "LiftRunInfo"
 static struct uviot* _iot = NULL;
@@ -27,10 +28,14 @@ static int _on_publish(void** payload, int* len) {
     struct elevator_historical* his = NULL;
 
     memset((void*)&st, 0, sizeof(st));
-    // int need_report = 0;
+
 
     if (!payload || !len)
         return -1;
+
+    if (_options[OPTION_RUNINFO_REPORT_SWITCH].value.number == 0) {
+        return 0;
+    }
 
     uelevator_get_status(&st);
 

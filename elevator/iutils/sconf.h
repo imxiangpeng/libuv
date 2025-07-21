@@ -22,6 +22,7 @@ struct sconf_proto {
     } value;
 };
 
+typedef void (*sconf_observer)(const char* path, void* priv);
 
 int sconf_load_int64(const char* path, const char** fields, int64_t* result, size_t max);
 
@@ -30,4 +31,6 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
 int sconf_load_with_proto(const char* path, struct sconf_proto* proto, size_t size);
 
 int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t size);
+
+int sconf_register_observer(const char* path, sconf_observer, void* priv);
 #endif

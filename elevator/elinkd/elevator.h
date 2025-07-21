@@ -27,6 +27,12 @@ int elevator_property_set_hqliftd_config(struct property*self, struct property_v
 int elevator_property_get_eguard_alarm_switch(struct property*self);
 int elevator_property_set_eguard_alarm_switch(struct property*self, struct property_value* value);
 
+int elevator_property_get_eguard_alarm_interval(struct property*self);
+int elevator_property_set_eguard_alarm_interval(struct property*self, struct property_value* value);
+
+int elevator_property_get_eguard_alarm_repeat_count(struct property* self);
+int elevator_property_set_eguard_alarm_repeat_count(struct property* self, struct property_value* value);
+
 int elevator_property_get_eguard_dtof_switch(struct property*self);
 int elevator_property_set_eguard_dtof_switch(struct property* self, struct property_value* value);
 

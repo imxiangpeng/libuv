@@ -27,7 +27,7 @@
 #include "file_util.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
-#include "sconf.h"
+#include "option.h"
 #include "uviot.h"
 
 // #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
@@ -66,18 +66,6 @@ struct record {
 };
 
 static pthread_t _upload_tid = -1;
-
-enum {
-    FIELD_FTP_ADDRESS = 0,
-    FIELD_FTP_USERNAME,
-    FIELD_FTP_PASSWORD
-};
-
-struct sconf_proto _ftp_conf_fields[] = {
-    [FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = "ftp://ftp.hqszjs.com:2100"}},
-    [FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = "inspur"}},
-    [FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
-};
 
 extern void topic_houqi_liftstate_report_enable(int on);
 
@@ -413,9 +401,6 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
 
     _iot = iot;
 
-    // we will use default value when no setting or failed
-    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _ftp_conf_fields, sizeof(_ftp_conf_fields) / sizeof(_ftp_conf_fields[0]));
-
     // ignore error
     pipe(_pipe_fd);
 
@@ -566,7 +551,7 @@ static int do_upload(const char* local_path, const char* remote_url) {
         return -1;
     }
 
-    snprintf(userpwd, sizeof(userpwd), "%s:%s", _ftp_conf_fields[FIELD_FTP_USERNAME].value.string, _ftp_conf_fields[FIELD_FTP_PASSWORD].value.string);
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
     curl_easy_setopt(curl, CURLOPT_URL, remote_url);
     curl_easy_setopt(curl, CURLOPT_READDATA, fp);
@@ -665,7 +650,7 @@ static void* background_upload_thread_routin(void* args) {
         s = strftime(name + s, sizeof(name) - s, "%Y%m%d%H%M%S", tm);
 
         //  http://gd.hqszjs.com:910/record/GD500107001385/20250526233500_20250526234000.mp4
-        asprintf(&remote_url, "%s/record/%s/%s.mp4", _ftp_conf_fields[FIELD_FTP_ADDRESS].value.string,
+        asprintf(&remote_url, "%s/record/%s/%s.mp4", _options[OPTION_FTP_ADDRESS].value.string,
                  elevator_deviceid(), name);
         if (!remote_url) {
             free(local_path);

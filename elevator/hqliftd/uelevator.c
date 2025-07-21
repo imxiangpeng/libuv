@@ -15,7 +15,7 @@
 #include "libubox/blobmsg.h"
 #include "libubox/blobmsg_json.h"
 #include "libubus.h"
-#include "sconf.h"
+#include "option.h"
 #include "state_machine.h"
 #include "time_utils.h"
 
@@ -64,8 +64,6 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 static struct elevator_historical _historical;
 
 static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
-static struct sconf_proto _speed_limit_threhold = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_DECIMAL, {.decimal = DEFAULT_SPEED_THRESHOLD}};
-static struct sconf_proto _door_zone_stopped_threshold = {"EGUARD_DOOR_ZONE_STOPPED_THRESHOLD", PROTO_VALUE_DECIMAL, {.decimal = 0}};
 extern void topic_houqi_liftruninfo_post(void);
 
 static int _uelevator_send_fault_event(enum elevator_exception e, int status);
@@ -173,13 +171,13 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             _status.jitter_freq = blobmsg_get_double(tb[RT_JITTER_FREQ]);
         if (tb[RT_JITTER_ACCEL])
             _status.jitter_accel = blobmsg_get_double(tb[RT_JITTER_ACCEL]);
-        printf("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
-        HR_LOGD("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
-        if (_status.speed > _speed_limit_threhold.value.decimal) {
+        HR_LOGD("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed,_options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
+        printf("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed,_options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
+        if (_status.speed > _options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal) {
             if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
                 _elevator_exception |= ELEVATOR_EXCEPTION_OVERSPEED;
                 elevator_fault_occurred(ELEVATOR_EXCEPTION_OVERSPEED);
-                HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _speed_limit_threhold.value.decimal);
+                HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
             }
         } else {
             if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
@@ -284,7 +282,7 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         HR_LOGD("floor:%d->%d, confidence:%d, offset0:%f, offset1:%f, door zone threshold:%f, _historical.distance:%f\n",
                 _historical.floor_begin, _historical.floor_end,
                 confidence, offset0, offset1,
-                _door_zone_stopped_threshold.value.decimal, _historical.distance);
+                _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal, _historical.distance);
 
         hrbuffer_reset(&_historical.accel_array);
         hrbuffer_reset(&_historical.speed_array);
@@ -315,8 +313,8 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
 
         topic_houqi_liftruninfo_post();
 
-        if (_door_zone_stopped_threshold.value.decimal > 0) {
-            if (offset0 > _door_zone_stopped_threshold.value.decimal && offset1 > _door_zone_stopped_threshold.value.decimal) {
+        if (_eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal > 0) {
+            if (offset0 > _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal && offset1 > _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal) {
                 if (confidence == 100) {
                     if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
                         // mxp, 20250715, periodic realtime reporting:
@@ -776,6 +774,7 @@ static void* uelevator_thread_routin(void* args) {
 
     return NULL;
 }
+
 int uelevator_init(void) {
     int ret = -1;
     pthread_attr_t attr;
@@ -798,9 +797,6 @@ int uelevator_init(void) {
         perror("pipe");
         return -1;
     }
-
-    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, &_speed_limit_threhold, 1);
-    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, &_door_zone_stopped_threshold, 1);
 
     pthread_attr_init(&attr);
 

@@ -12,6 +12,7 @@
 #include "elevator.h"
 #include "hr_log.h"
 #include "iot.h"
+#include "option.h"
 #include "state_machine.h"
 #include "uelevator.h"
 
@@ -71,6 +72,8 @@ static int hqliftd_main(int argc, char** argv) {
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGTERM, &action, NULL);
+
+    option_init();
 
     serial = elevator_serialno();
     elevator_no = elevator_deviceid();
@@ -154,6 +157,8 @@ int main(int argc, char** argv) {
 
     HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
 
+    return hqliftd_main(argc, argv);
+    
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_SIGINFO | SA_RESTART;

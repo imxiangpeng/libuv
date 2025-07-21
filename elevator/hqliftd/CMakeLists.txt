@@ -19,6 +19,7 @@ INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 
 set(SOURCES main
+    option
     iot
     iot_topic
     topic_houqi_heartbeat
@@ -37,8 +38,8 @@ TARGET_COMPILE_OPTIONS(hqliftd PRIVATE -Wall -Wextra -Werror -Wno-unused-functio
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE LOG_TAG="hqliftd")
 # define config file when compile
 #TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
-TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
-TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ELEVATORD_CONFIG_PATH="elevatord.conf")
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="config/hqliftd/hqliftd.conf")
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ELEVATORD_CONFIG_PATH="config/elevatord/elevatord.conf")
 
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 

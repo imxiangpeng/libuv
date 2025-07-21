@@ -234,8 +234,8 @@ int main(int argc, const char** argv) {
 
     if (count == 0) {
         fclose(fp);
-        hrbuffer_free(&list);
         unlink(concat_list);
+        hrbuffer_free(&list);
         return -1;
     }
 
@@ -252,6 +252,8 @@ int main(int argc, const char** argv) {
                 system(cmd);
 
                 fclose(fp);
+                unlink(concat_list);
+
                 hrbuffer_free(&list);
                 return 0;
             }

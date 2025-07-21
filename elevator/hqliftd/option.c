@@ -1,0 +1,127 @@
+#include "option.h"
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "sconf.h"
+
+#define DEFAULT_BROKER_PORT 1883     // 8883 //1883
+#define DEFAULT_BROKER_ALIVETIME 60  // 300 //60                       // 60s
+
+// not limit kunren & ebike event
+#define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
+
+static char DEFAULT_BROKER_SERVER[] = {"mq.hqszjs.com"};
+static char DEFAULT_MQ_USERNAME[] = {"inspur"};
+static char DEFAULT_MQ_PASSWORD[] = {"inspur88*"};
+
+static char DEFAULT_FTP_ADDRESS[] = {"ftp://ftp.hqszjs.com:2100"};
+static char DEFAULT_FTP_USERNAME[] = {"inspur"};
+static char DEFAULT_FTP_PASSWORD[] = {"inspur88*"};
+
+struct sconf_proto _options[_OPTION_MAX] = {
+    // MQTT
+    [OPTION_MQ_SERVER] = {"MQ_SERVER", PROTO_VALUE_STRING, {.string = DEFAULT_BROKER_SERVER}},
+    [OPTION_MQ_PORT] = {"MQ_PORT", PROTO_VALUE_NUMBER, {.number = DEFAULT_BROKER_PORT}},
+    [OPTION_MQ_KEEPALIVE] = {"MQ_KEEPALIVQE", PROTO_VALUE_NUMBER, {.number = DEFAULT_BROKER_ALIVETIME}},
+    [OPTION_MQ_USERNAME] = {"MQ_USERNAME", PROTO_VALUE_STRING, {.string = DEFAULT_MQ_USERNAME}},
+    [OPTION_MQ_PASSWORD] = {"MQ_PASSWORD", PROTO_VALUE_STRING, {.string = DEFAULT_MQ_PASSWORD}},
+
+    // FTP
+    [OPTION_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = DEFAULT_FTP_ADDRESS}},
+    [OPTION_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = DEFAULT_FTP_USERNAME}},
+    [OPTION_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = DEFAULT_FTP_PASSWORD}},
+
+    // LiftState
+    [OPTION_REALTIME_REPORT_PERIOD_MS] = {"REALTIME_REPORT_PERIOD_MS", PROTO_VALUE_NUMBER, {.number = 1000}},
+    // speed
+    [OPTION_SPEED_LIMIT_THRESHOLD] = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_DECIMAL, {.decimal = 2.8}},  // 2.8m/s
+
+    // LiftRunInfo
+    [OPTION_RUNINFO_REPORT_SWITCH] = {"RUNINFO_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    // LiftFault
+    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    // [OPTION_FAULT_SPEED_LIMIT_THRESHOLD]
+    [OPTION_FAULT_VIDEO_UPLOAD_SWITCH] = {"LIFTFAULT_VIDEO_UPLOAD_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
+};
+
+struct sconf_proto _eguard_options[_OPTION_EGUARD_MAX] = {
+    [OPTION_EGUARD_KUNREN_DETECT_ENABLED] = {"EGUARD_KUNREN_DETECT_ENABLED", PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_EGUARD_KUNREN_DETECT_TIMEOUT] = {"EGUARD_KUNREN_DETECT_TIMEOUT", PROTO_VALUE_NUMBER, {.number = 90000}},            // 90min
+    [OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD] = {"EGUARD_DOOR_ZONE_STOPPED_THRESHOLD", PROTO_VALUE_DECIMAL, {.decimal = 0}},  // default not enabled
+};
+
+static void _on_observer(const char* path, void* priv) {
+    (void)priv;
+    if (!path) return;
+
+    printf("observer path:%s\n", path);
+
+    if (0 == strcmp(HQLIFTD_CONFIG_PATH, path)) {
+        int64_t realtime_period_ms = _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number;
+        // please manually process default string value
+        if (_options[OPTION_MQ_SERVER].value.string != DEFAULT_BROKER_SERVER) {
+            free(_options[OPTION_MQ_SERVER].value.string);
+            _options[OPTION_MQ_SERVER].value.string = NULL;
+        }
+        if (_options[OPTION_MQ_USERNAME].value.string != DEFAULT_MQ_USERNAME) {
+            free(_options[OPTION_MQ_USERNAME].value.string);
+            _options[OPTION_MQ_USERNAME].value.string = NULL;
+        }
+        if (_options[OPTION_MQ_PASSWORD].value.string != DEFAULT_MQ_PASSWORD) {
+            free(_options[OPTION_MQ_PASSWORD].value.string);
+            _options[OPTION_MQ_PASSWORD].value.string = NULL;
+        }
+        if (_options[OPTION_FTP_ADDRESS].value.string != DEFAULT_FTP_ADDRESS) {
+            free(_options[OPTION_FTP_ADDRESS].value.string);
+            _options[OPTION_FTP_ADDRESS].value.string = NULL;
+        }
+        if (_options[OPTION_FTP_USERNAME].value.string != DEFAULT_FTP_USERNAME) {
+            free(_options[OPTION_FTP_USERNAME].value.string);
+            _options[OPTION_FTP_USERNAME].value.string = NULL;
+        }
+        if (_options[OPTION_FTP_PASSWORD].value.string != DEFAULT_FTP_PASSWORD) {
+            free(_options[OPTION_FTP_PASSWORD].value.string);
+            _options[OPTION_FTP_PASSWORD].value.string = NULL;
+        }
+
+        sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
+
+        printf("mqtt:%s, %s, %s\n", _options[OPTION_MQ_SERVER].value.string, _options[OPTION_MQ_USERNAME].value.string, _options[OPTION_MQ_PASSWORD].value.string);
+        printf("ftp:%s, %s, %s\n", _options[OPTION_FTP_ADDRESS].value.string, _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
+
+        // realtime report period need restart
+        if (realtime_period_ms != _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number) {
+            // we should restart
+
+            exit(0);
+        }
+
+    } else if (0 == strcmp(ELEVATORD_CONFIG_PATH, path)) {
+        sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+    }
+}
+
+int option_init(void) {
+    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
+    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+
+    for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
+        switch (_options[i].type) {
+            case PROTO_VALUE_NUMBER:
+                printf("_option -> %s:%ld\n", _options[i].name, _options[i].value.number);
+                break;
+            case PROTO_VALUE_DECIMAL:
+                printf("_option -> %s:%f\n", _options[i].name, _options[i].value.decimal);
+                break;
+            case PROTO_VALUE_STRING:
+                printf("_option -> %s:%s\n", _options[i].name, _options[i].value.string ? _options[i].value.string : "");
+                break;
+        }
+    }
+    return 0;
+}

@@ -15,14 +15,12 @@
 #include "elevator.h"
 #include "hr_list.h"
 #include "hr_log.h"
-#include "sconf.h"
+#include "option.h"
 #include "time_utils.h"
 #include "uelevator.h"
 #include "uviot.h"
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
-// not limit kunren & ebike event
-#define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
 #define LIFTFAULT_REPORT_EVENT_VIDEO_DURATION 20
 #define LIFTFAULT_REPORT_EBIKE_VIDEO_DURATION 60
 #define LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS 120
@@ -44,21 +42,6 @@ static HR_LIST_HEAD(_lift_fault_message_queue);
 static HR_LIST_HEAD(_lift_fault_idle_queue);
 
 static pthread_mutex_t _queue_lock;
-
-enum {
-    OPTION_FIELD_FTP_ADDRESS = 0,
-    OPTION_FIELD_FTP_USERNAME,
-    OPTION_FIELD_FTP_PASSWORD,
-    OPTION_FAULT_REPORT_SWITCH,
-    OPTION_FAULT_REPORT_LIMIT_PER_DAY,
-};
-static struct sconf_proto _options[] = {
-    [OPTION_FIELD_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = "ftp://ftp.hqszjs.com:2100"}},
-    [OPTION_FIELD_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = "inspur"}},
-    [OPTION_FIELD_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = "inspur88*"}},
-    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
-    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
-};
 
 // no persist storage
 static struct fault_report_statistics {
@@ -230,8 +213,6 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     _iot = iot;
 
     pthread_mutex_init(&_queue_lock, NULL);
-
-    sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
 
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
@@ -488,9 +469,9 @@ static void upload_fault_video(struct lift_fault_event* e) {
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
             if (e->type == ELEVATOR_EXCEPTION_EBIKE) {
-                snprintf(url, sizeof(url), "%s/record/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+                snprintf(url, sizeof(url), "%s/record/%s/%s", _options[OPTION_FTP_ADDRESS].value.string, elevator_deviceid(), name);
             } else {
-                snprintf(url, sizeof(url), "%s/fault_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+                snprintf(url, sizeof(url), "%s/fault_files/%s/%s", _options[OPTION_FTP_ADDRESS].value.string, elevator_deviceid(), name);
             }
             break;
 
@@ -510,11 +491,20 @@ static void upload_fault_video(struct lift_fault_event* e) {
             /*size_t size =*/strftime(begin_str, sizeof(begin_str), "%Y%m%d%H%M%S", &tm);
 
             memset((void*)&tm, 0, sizeof(tm));
-            t = e->fault_end_time / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+
+            // 20250718, rescue must arrive within 30 minutes when trapping
+            // we limit the duration of trapping video to 1h
+            // we can save a significant amount of data traffic when trapping was incorrect triggered
+            if ((e->fault_end_time - e->fault_begin_time) / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS > 3600) {
+                t = t + 3600;  // only keep 1h
+            } else {
+                t = e->fault_end_time / 1000 + LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS;
+            }
+
             (void)localtime_r(&t, &tm);
             /*size_t size =*/strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
-            snprintf(url, sizeof(url), "%s/event_files/%s/%s", _options[OPTION_FIELD_FTP_ADDRESS].value.string, elevator_deviceid(), name);
+            snprintf(url, sizeof(url), "%s/event_files/%s/%s", _options[OPTION_FTP_ADDRESS].value.string, elevator_deviceid(), name);
             break;
 
         default:
@@ -544,8 +534,8 @@ static void upload_fault_video(struct lift_fault_event* e) {
             NULL,
         };
 
-        setenv("FTP_USERNAME", _options[OPTION_FIELD_FTP_USERNAME].value.string, 1);
-        setenv("FTP_PASSWORD", _options[OPTION_FIELD_FTP_PASSWORD].value.string, 1);
+        setenv("FTP_USERNAME", _options[OPTION_FTP_USERNAME].value.string, 1);
+        setenv("FTP_PASSWORD", _options[OPTION_FTP_PASSWORD].value.string, 1);
         for (size_t i = 0; i < sizeof(argv) / sizeof(argv[0]); i++) {
             printf("%ld --> %s\n", i, argv[i]);
         }
