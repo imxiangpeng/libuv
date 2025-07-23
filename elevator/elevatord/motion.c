@@ -34,6 +34,15 @@
 // mxp，20250626, 目前加速度精度已经可以，我们融合气压和加速生成新的高度来推算楼层信息
 // 或许后续我们也可以完全依赖加速度，运行一段时间再观察一下
 
+// 20250723, mxp, 关于气压静止强制停止加速度运行的风险，我们在维修速度下经常触发
+// 可恶，电梯有个维修速度，正常应该是不能超过 0.63, 我们遇到的一台速度应该在 0.3x 左右。
+// 当长时间在某层禁止的时候，_motion_barometer_stationary_event_timestamp 可能是很久的一个值
+// 所以，在刚开始运行的时候，气压反映不过来，就会进入这里
+// 由于加速度非常小，进入这里的时候，可能已经达到 0.3x 然后加速度为 0 保持匀速运行
+// 这个时候就会强制触发这个停止，但是这个是不正常的
+// 我们在加速度检测到开始运行的时候，就强制打破气压这个静止状态，或者至少要让上面静止时间戳_motion_barometer_stationary_event_timestamp 发生变化
+// 然后，我们才会有 MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME 秒的时间
+
 #define MOTION_EVENT_CONFIRM_FROM_PRESSURE 0
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -390,7 +399,22 @@ static void* _accelerometer_thread_routin(void* args) {
 #ifdef MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME
         // mxp, 20250625, force reset accelerometer when pressure is stationary
         if (_motion_init_status & MOTION_INIT_STATUS_BAROMETER_STATIONARY && new_state != STOPPED) {
+            // 如果运行状态发生变化，这里，我们强制破坏气压的静止时间戳，争取一定的时间，来允许气压进行状态更新
+            if (_accelerometer_motion.state == STOPPED) {
+                HR_LOGE("!!! begin running, reset barometer stationary timestamp:%ld -> %ld...\n", _motion_barometer_stationary_event_timestamp, now);
+                _motion_barometer_stationary_event_timestamp = now;
+            }
+
             if (now > _motion_barometer_stationary_event_timestamp + seconds_to_nanoseconds(MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME)) {
+                // 可恶，电梯有个维修速度，正常应该是不能超过 0.63, 我们遇到的一台速度应该在 0.3x 左右。
+                // 当长时间在某层禁止的时候，_motion_barometer_stationary_event_timestamp 可能是很久的一个值
+                // 所以，在刚开始运行的时候，气压反映不过来，就会进入这里
+                // 由于加速度非常小，进入这里的时候，可能已经达到 0.3x 然后加速度为 0 保持匀速运行
+                // 这个时候就会强制触发这个停止，但是这个是不正常的
+                // 我们在加速度检测到开始运行的时候，就强制打破气压这个静止状态，或者至少要让上面静止时间戳_motion_barometer_stationary_event_timestamp 发生变化
+                // 然后，我们才会有 MOTION_BAROMETER_STATIONARY_ZUPT_PREDICT_TIME 秒的时间
+                // 这里应该进来好几次，但是直到最后匀速才触发停止
+                // 还是说，我们在检测到运动的时候，强制破坏气压的静止状态呢
                 // confirm stationary
                 if (fabs(accel) == 0) {
                     // we should reset? open it after capture data
