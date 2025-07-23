@@ -23,9 +23,9 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-#if 1 // aliyun
+#if 1  // aliyun
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
-#define BROKER_DEFAULT_PORT 1883     // 1883     // 8883 //1883
+#define BROKER_DEFAULT_PORT 1883  // 1883     // 8883 //1883
 
 // https://living.aliyun.com/project/a123Vlj9ublcLvZq/dev/
 #define TIHUIYAN_PRODUCT_KEY "a1z1g0btxvW"
@@ -268,10 +268,16 @@ int iot_init() {
     }
     name[j] = '\0';
 
-    printf("device name:%s\n", name);
+    // printf("device name:%s\n", name);
+    if (name[0] == '\0') {
+        return -1;
+    }
 
     // platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
     // printf("device secret:%s\n", hmac_secret);
+    if (hmac_secret[0] == '\0') {
+        return -1;
+    }
 
     // client can be mac or any other custom string
     // we use format: TIHUIYAN_PRODUCT_KEY.TIHUIYAN_DEVICE_NAME

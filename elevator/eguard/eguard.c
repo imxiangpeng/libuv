@@ -34,9 +34,11 @@
 
 #define DTOF_OCCLUSION_DISTANCE_MM 100     // 5cm // 30cm
 #define EGUARD_ALARM_CONFIRM_TIMEOUT 2000  // 2s
-#define EGUARD_ALARM_REPEAT_DELAY 5000     // 5s
+#define EGUARD_ALARM_REPEAT_DELAY 3000     // 3s
 
 #define EGUARD_ALARM_REPEAT_COUNT 3
+#define EGUARD_ALARM_PLAY_WITHOUT_LIMITED -1
+// #define EGUARD_ALARM_PLAY_NEVER 0
 
 #define ELEVATOR_ALARM_EVENT_PREFIX "elevator.event."
 
@@ -76,20 +78,22 @@ const char* _cared_ubus_event[] = {
 struct alarm_sound {
     enum alarm alarm;
     const char* sound;
+    const char* user_sound;  // user custom sound
     int count;
     int limit;
 } _alarm_sounds[] = {
     // 为了你和他人的安全，请勿将电瓶车驶入电梯，谢谢合作
-    {ALARM_EBIKE, "./alarm_ebike.wav", 0, EGUARD_ALARM_REPEAT_COUNT},
+    {ALARM_EBIKE, "./alarm_ebike.wav", "/data/local/media/alarm_ebike.wav", 0, EGUARD_ALARM_REPEAT_COUNT},
     // 请勿遮挡相机谢谢合作.wav
-    {ALARM_DTOF, "./alarm_dtof.wav", 0, EGUARD_ALARM_REPEAT_COUNT},
-    {ALARM_NONE, NULL, 0, EGUARD_ALARM_REPEAT_COUNT},
+    {ALARM_DTOF, "./alarm_dtof.wav", "/data/local/media/alarm_dtof.wav", 0, EGUARD_ALARM_REPEAT_COUNT},
+    {ALARM_NONE, NULL, NULL, 0, EGUARD_ALARM_REPEAT_COUNT},
 };
 // # 播报次数
 enum {
     OPTION_EGUARD_ALARM_SWITCH = 0,
     OPTION_EGUARD_ALARM_INTERVAL,
     OPTION_EGUARD_ALARM_REPEAT_COUNT,
+    OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT,
     OPTION_EGUARD_DTOF_SWITCH,
     OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
     OPTION_EGUARD_DOOR_CONTROL_ENABLED,
@@ -98,8 +102,9 @@ enum {
 
 static struct sconf_proto _eguard_options[] = {
     [OPTION_EGUARD_ALARM_SWITCH] = {"EGUARD_ALARM_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
-    [OPTION_EGUARD_ALARM_INTERVAL] = {"EGUARD_ALARM_INTERVAL", PROTO_VALUE_NUMBER, {.number = 5000}}, // 5s
-    [OPTION_EGUARD_ALARM_REPEAT_COUNT] = {"EGUARD_ALARM_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = 3}},
+    [OPTION_EGUARD_ALARM_INTERVAL] = {"EGUARD_ALARM_INTERVAL", PROTO_VALUE_NUMBER, {.number = EGUARD_ALARM_REPEAT_DELAY}},  // 3s
+    [OPTION_EGUARD_ALARM_REPEAT_COUNT] = {"EGUARD_ALARM_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = EGUARD_ALARM_REPEAT_COUNT}},
+    [OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT] = {"EGUARD_ALARM_EBIKE_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = INT64_MIN}},  // not special, use global settings
     [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
     [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_NUMBER, {.number = DTOF_OCCLUSION_DISTANCE_MM}},
     [OPTION_EGUARD_DOOR_CONTROL_ENABLED] = {"EGUARD_DOOR_CONTROL_ENABLED", PROTO_VALUE_NUMBER, {.number = 0}},
@@ -179,15 +184,13 @@ static int read_sensor_data(int* distance, int* confidence, int* count) {
     return 0;
 }
 
-static const char* get_alarm_sound(enum alarm a) {
-    const char* sound = NULL;
+static struct alarm_sound* get_alarm_sound(enum alarm a) {
     for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
         if (_alarm_sounds[i].alarm == a) {
-            sound = _alarm_sounds[i].sound;
-            break;
+            return &_alarm_sounds[i];
         }
     }
-    return sound;
+    return NULL;
 }
 
 // match the first alarm in _alarm_sounds array
@@ -207,6 +210,7 @@ static void* _playback_thread_routin(void* arg) {
     char cmd[256] = {0};
 
     while (_request_exit != 1) {
+        struct stat st;
         struct alarm_sound* sound = NULL;
 
         struct pollfd fds = {
@@ -214,7 +218,7 @@ static void* _playback_thread_routin(void* arg) {
             .events = POLLIN,
         };
 
-        int ret = poll(&fds, 1, _eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number/*EGUARD_ALARM_REPEAT_DELAY*/);
+        int ret = poll(&fds, 1, _eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number /*EGUARD_ALARM_REPEAT_DELAY*/);
         if (ret < 0) {
             printf("%s(%d): error ...\n", __FUNCTION__, __LINE__);
             continue;
@@ -242,6 +246,11 @@ static void* _playback_thread_routin(void* arg) {
         }
         // == 0, timeout, play repeat!
 
+        // the event maybe resume, must verify it
+        if (0 == (event & _alarm)) {
+            event = ALARM_NONE;
+        }
+
         // do not use global _alarm, when _alarm is updated, timeout maybe at front of event
         // then we may play multi times
         if (event == ALARM_NONE) {
@@ -252,7 +261,7 @@ static void* _playback_thread_routin(void* arg) {
         // use global _alarm variable
         sound = get_alarm_sound_with_priority(event);
 
-        if (!sound || !sound->sound) {
+        if (!sound || (!sound->sound && !sound->user_sound)) {
             continue;
         }
 
@@ -261,7 +270,10 @@ static void* _playback_thread_routin(void* arg) {
             continue;
         }
 
-        if (sound->count >= sound->limit) {
+        // limit -1: -> do not limit
+        // limit = 0: no play
+        // limit > 0: do limit
+        if (sound->limit != EGUARD_ALARM_PLAY_WITHOUT_LIMITED && sound->count >= sound->limit) {
             // printf("eguard 0x%X -> %s, reach limit %d vs %d\n", sound->alarm, sound->sound, sound->count, sound->limit);
             // mark as end
             event = ALARM_NONE;
@@ -269,8 +281,14 @@ static void* _playback_thread_routin(void* arg) {
         }
 
         memset((void*)cmd, 0, sizeof(cmd));
+
         // snprintf(cmd, sizeof(cmd), "ffmpeg -hide_banner -i %s -f wav - | aplay", path);
-        snprintf(cmd, sizeof(cmd), "aplay -q %s", sound->sound);
+        if (lstat(sound->user_sound, &st) == 0 && st.st_size != 0) {
+            snprintf(cmd, sizeof(cmd), "aplay -q %s", sound->user_sound);
+        } else {
+            snprintf(cmd, sizeof(cmd), "aplay -q %s", sound->sound);
+        }
+
         system(cmd);
         sound->count++;
 
@@ -452,6 +470,37 @@ static void _connection_lost(struct ubus_context* ctx) {
     _reconnect_timer(NULL);
 }
 
+static void load_option() {
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+
+    for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
+        _alarm_sounds[i].count = 0;
+        _alarm_sounds[i].limit = _eguard_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number;
+    }
+
+    // ebike also have it's self settings
+    if (_eguard_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number != INT64_MIN) {
+        struct alarm_sound* s = get_alarm_sound(ALARM_EBIKE);
+        if (s) {
+            s->limit = _eguard_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number;
+        }
+    }
+
+    // we use interval as timeout in poll, so do not use 0 or -1
+    if (_eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number <= 1000) {
+        _eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number = 1000;
+    }
+}
+
+static void on_option_changed(const char* path, void* priv) {
+    (void)path;
+    (void)priv;
+    load_option();
+
+    // force release
+    _keep_door_open(0);
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -471,12 +520,28 @@ int main(int argc, char** argv) {
     // always not block door when bootup
     _keep_door_open(0);  // must call it to release ...
 
-    sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+    load_option();
+    sconf_register_observer(EGUARD_CONFIG_PATH, on_option_changed, NULL);
 
-    for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
-        _alarm_sounds[i].count = 0;
-        _alarm_sounds[i].limit = _eguard_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number;
-    }
+    // sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+
+    // for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
+    //     _alarm_sounds[i].count = 0;
+    //     _alarm_sounds[i].limit = _eguard_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number;
+    // }
+
+    // // ebike also have it's self settings
+    // if (_eguard_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number != INT64_MIN) {
+    //     struct alarm_sound* s = get_alarm_sound(ALARM_EBIKE);
+    //     if (s) {
+    //         s->limit = _eguard_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number;
+    //     }
+    // }
+
+    // // we use interval as timeout in poll, so do not use 0 or -1
+    // if (_eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number <= 1000) {
+    //     _eguard_options[OPTION_EGUARD_ALARM_INTERVAL].value.number = 1000;
+    // }
 
     if (0 != pipe(_pipefd)) {
         return -1;

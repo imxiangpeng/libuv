@@ -75,7 +75,7 @@ static void* _sconf_auto_reload_task(void* args) {
             printf("nr:%d\n", nr);
             if (nr == 0 || nr == -1) {
                 // timeout
-                printf("maybe timeout ...\n");
+                // printf("maybe timeout ...\n");
                 epoll_loop_break = 1;
                 break;
             }
@@ -85,7 +85,6 @@ static void* _sconf_auto_reload_task(void* args) {
             for (int i = 0; i < nr; i++) {
                 struct epoll_event* e = evs + i;
 
-                printf("nr:%d, fd:%d\n", nr, e->data.fd);
                 if (e->data.fd == event_fd) {
                     // receive event, should we
                     int msg = 0;
@@ -115,25 +114,22 @@ static void* _sconf_auto_reload_task(void* args) {
                             printf("The file '%s' was deleted. Recreating...\n", ie->name);
                         }
                         if ((ie->mask & IN_MOVED_TO) || ie->mask & (IN_ATTRIB | IN_MODIFY)) {
-                            printf("The file '%s' was moved to, or modified.\n", ie->name);
+                            // printf("The file '%s' was moved to, or modified.\n", ie->name);
 
                             pthread_mutex_lock(&_queue_lock);
                             if (!hr_list_empty(&_inotify_watcher_queue)) {
                                 struct watcher* w = NULL;
                                 hr_list_for_each_entry(w, &_inotify_watcher_queue, entry) {
-                                    printf("wd: %d vs %d\n", ie->wd, w->wd);
                                     if (ie->wd == w->wd) {
-                                        printf("check watcher ...\n");
                                         if (!hr_list_empty(&_sconf_observer_queue)) {
-                                            printf("check watcher ...\n");
                                             struct observer* e = NULL;
                                             hr_list_for_each_entry(e, &_sconf_observer_queue, entry) {
-                                                printf("check watcher dir:%s vs %s...cmp:%d, name:%s %d\n", e->dir, w->dir, strcmp(e->dir, w->dir), e->name, strcmp(e->name, ie->name));
+                                                // printf("check watcher dir:%s vs %s...cmp:%d, name:%s %d\n", e->dir, w->dir, strcmp(e->dir, w->dir), e->name, strcmp(e->name, ie->name));
                                                 // exist!
                                                 if (!strcmp(e->dir, w->dir) && !strcmp(e->name, ie->name) && e->observer != NULL) {
                                                     char path[512] = {0};
                                                     snprintf(path, sizeof(path), "%s/%s", e->dir, e->name);
-                                                    printf("fire for :%s\n", path);
+                                                    // printf("fire for :%s\n", path);
                                                     e->observer(path, e->priv);
                                                 }
                                             }
@@ -393,24 +389,19 @@ int sconf_load_with_proto(const char* path, struct sconf_proto* proto, size_t si
         return -1;
     }
 
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     len = futil_read(path, &buf);
     if (len <= 0 || !buf) {
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
     for (line = strtok_r(buf, "\n", &save_ptr); line;
          line = strtok_r(NULL, "\n", &save_ptr)) {
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
         if (0 != parse_conf_line_with_proto(line, proto, size)) {
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
             free(buf);
             return -1;
         }
     }
 
-    printf("%s(%d): ..........\n", __FUNCTION__, __LINE__);
     free(buf);
     return 0;
 }
@@ -437,6 +428,7 @@ static int match_field(char* line, struct sconf_proto* proto, size_t size) {
         p++;
 
     for (size_t i = 0; i < size; i++) {
+        if (!proto[i].name) continue;
         if (0 == strncmp(proto[i].name, line, p - line)) {
             return 1;
         }
@@ -493,6 +485,7 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
     }
 
     for (size_t i = 0; i < size; i++) {
+        if (!proto[i].name) continue;
         switch (proto[i].type) {
             case PROTO_VALUE_NUMBER: {
                 int len = snprintf(buffer, sizeof(buffer), "%s=%ld\n", proto[i].name, proto[i].value.number);
@@ -545,13 +538,11 @@ int sconf_register_observer(const char* path, sconf_observer observer, void* pri
     pthread_once(&_once_init, _sconf_init);
 
     if (epoll_fd < 0 || event_fd < 0) {
-        printf("%s(%d): failed .....\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
     tmp = strdup(path);
     if (!tmp) {
-        printf("%s(%d): failed .....\n", __FUNCTION__, __LINE__);
         return -1;
     }
     char* last_slash = strrchr(tmp, '/');
@@ -568,7 +559,6 @@ int sconf_register_observer(const char* path, sconf_observer observer, void* pri
         hr_list_for_each_entry(e, &_sconf_observer_queue, entry) {
             // exist!
             if (!strcmp(e->dir, path) && !strcmp(e->name, name) && e->observer == observer) {
-                printf("%s(%d): failed .....\n", __FUNCTION__, __LINE__);
                 pthread_mutex_unlock(&_queue_lock);
                 free(tmp);
                 return -1;
@@ -576,11 +566,9 @@ int sconf_register_observer(const char* path, sconf_observer observer, void* pri
         }
     }
 
-    printf("%s(%d): failed .....\n", __FUNCTION__, __LINE__);
     // memory will not be freed
     e = (struct observer*)calloc(1, sizeof(struct observer));
     if (!e) {
-        printf("%s(%d): failed .....\n", __FUNCTION__, __LINE__);
         pthread_mutex_unlock(&_queue_lock);
         free(tmp);
         return -1;
@@ -605,9 +593,7 @@ int sconf_register_observer(const char* path, sconf_observer observer, void* pri
         }
     }
 
-    printf("%s(%d): exist:%d .....\n", __FUNCTION__, __LINE__, exist);
     if (exist == 0) {
-        printf("add %s %s\n", e->dir, e->name);
         int events = IN_ATTRIB | IN_CREATE | IN_MODIFY | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO;
         struct watcher* w = (struct watcher*)calloc(1, sizeof(struct watcher));
         if (!w) {
@@ -622,17 +608,16 @@ int sconf_register_observer(const char* path, sconf_observer observer, void* pri
         strncpy(w->dir, dir, sizeof(w->dir));
         w->wd = inotify_add_watch(inotify_fd, w->dir, events);
         if (w->wd < 0) {
+            hr_list_del(&e->entry);
+
             free(e);
             free(w);
-
-            hr_list_del(&e->entry);
 
             pthread_mutex_unlock(&_queue_lock);
             free(tmp);
             return -1;
         }
 
-        printf("wd:%d\n", w->wd);
         hr_list_add_tail(&w->entry, &_inotify_watcher_queue);
 
         int msg = 1;

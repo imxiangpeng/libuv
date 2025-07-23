@@ -20,10 +20,13 @@
     
     - `IOT_REPORT_SWITCH`： 阿里云平台参数上报开关（必要的时候，可以关闭运行参数的上报， 但是启动时相关参数还是正常上报的） 
     - `EGUARD_ALARM_SWITCH`: 0/1 配置 eguard 是否播放音频通知
+    - `EGUARD_ALARM_INTERVAL`: 重复播放间隔时间（毫秒），不允许小于 1000
     - `EGUARD_DTOF_SWITCH`: 0/1 配置是否开启遮挡检测
     - `EGUARD_DTOF_OCCLUSION_DISTANCE`: 配置 DTOF 遮挡检测距离，单位毫米
     - `EGUARD_DOOR_ZONE_STOPPED_THRESHOLD`: 非门区停车检测距离，注意，因为加速度和气压都可能有误差，我们仅在两者同时判定超过这个阈值的时候才上报
     - `EGUARD_DOOR_CONTROL_ENABLED`: 是否通过继电器控制电梯门，例如检测到电瓶车后，是否禁止关门
+    - `EGUARD_ALARM_REPEAT_COUNT`: 报警重复次数： -1 不限制， 0 不播放， > 0 播放指定次数
+    - `EGUARD_ALARM_EBIKE_REPEAT_COUNT`: 同上，仅控制电瓶车报警
 
 2.  SENSOR_CALIBRATION_CONF： /etc/elevatord/sensor_calibration.conf
 

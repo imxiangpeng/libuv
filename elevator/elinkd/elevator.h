@@ -33,6 +33,9 @@ int elevator_property_set_eguard_alarm_interval(struct property*self, struct pro
 int elevator_property_get_eguard_alarm_repeat_count(struct property* self);
 int elevator_property_set_eguard_alarm_repeat_count(struct property* self, struct property_value* value);
 
+int elevator_property_get_eguard_alarm_ebike_repeat_count(struct property* self);
+int elevator_property_set_eguard_alarm_ebike_repeat_count(struct property* self, struct property_value* value);
+
 int elevator_property_get_eguard_dtof_switch(struct property*self);
 int elevator_property_set_eguard_dtof_switch(struct property* self, struct property_value* value);
 
@@ -44,9 +47,6 @@ int elevator_property_set_eguard_kunren_detect_enabled(struct property* self, st
 
 int elevator_property_get_eguard_kunren_detect_timeout(struct property* self);
 int elevator_property_set_eguard_kunren_detect_timeout(struct property* self, struct property_value* value);
-
-int elevator_property_get_eguard_kunren_alarm_repeat_count(struct property* self);
-int elevator_property_set_eguard_kunren_alarm_repeat_count(struct property* self, struct property_value* value);
 
 int elevator_property_get_eguard_door_zone_stopped_threshold(struct property* self);
 int elevator_property_set_eguard_door_zone_stopped_threshold(struct property* self, struct property_value* value);

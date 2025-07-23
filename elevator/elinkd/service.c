@@ -122,6 +122,62 @@ static int _StopSSHTunnel(cJSON* params) {
     return 0;
 }
 
+static void _download(const char* name, const char* url) {
+    if (!name || !url) return;
+    // delete user sound
+    if (url[0] == '\0') {
+        if (!strcmp(name, "dtof")) {
+            unlink("/data/local/media/alarm_dtof.wav");
+        } else if (!strcmp(name, "ebike")) {
+            unlink("/data/local/media/alarm_ebike.wav");
+        } else if (!strcmp(name, "kunren")) {
+            unlink("/data/local/media/alarm_kunren.wav");
+        }
+        sync();
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        char cmd[2048] = {0};
+        snprintf(cmd, sizeof(cmd),
+                 "mkdir -p /data/local/media;"
+                 "TMP=/data/local/media/alarm_%s.wav.downloading;"
+                 "curl -L -s --max-filesize 5242880 -o \"$TMP\" \"%s\" && "
+                 "mv \"$TMP\" \"/data/local/media/alarm_%s.wav\" || rm -f \"$TMP\";"
+                 "sync;",
+                 name, url, name);
+
+        execl("/bin/sh", "sh", "-c", cmd, (char*)NULL);
+        _exit(127);
+    }
+}
+// {"sounds":[{"name":"dtof","url":"https://server/alarm_dtof.wav"},{"name":"ebike","url":"https://server/alarm_ebike.wav"}]}
+static int _SetAlarmSound(cJSON* params) {
+    cJSON* sounds = NULL;
+    cJSON* ele = NULL;
+    if (!params) {
+        return -1;
+    }
+
+    sounds = cJSON_GetObjectItem(params, "sounds");
+    if (!sounds || !cJSON_IsArray(sounds)) {
+        return -1;
+    }
+
+    cJSON_ArrayForEach(ele, sounds) {
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "name"));
+        const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(ele, "url"));
+        if (!name || !url) continue;
+        // printf("%s(%d): .........name:%s, url:%s.........\n", __FUNCTION__, __LINE__, name, url);
+        // we should download wav
+        // directly fork child process using curl to download
+        _download(name, url);
+    }
+
+    return 0;
+}
+
 struct svc_action svc_action_tbl[] = {
     {"StartAutoFloorCalibration", _StartAutoFloorCalibration},
     {"CalibrateAtFloorManually", _CalibrateAtFloorManually},
@@ -133,6 +189,7 @@ struct svc_action svc_action_tbl[] = {
     // {"StopSSHTunnel", _StopSSHTunnel},
     {"Reboot", _Reboot},
     // {"DoCommand", _DoCommand},
+    {"SetAlarmSound", _SetAlarmSound},
     {NULL, NULL},  // keep it
 };
 

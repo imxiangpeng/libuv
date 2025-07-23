@@ -1,3 +1,4 @@
+// mxp, 20250721, orignize option in one file
 #include "option.h"
 
 #include <stddef.h>
@@ -6,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sconf.h"
+#include "hr_log.h"
 
 #define DEFAULT_BROKER_PORT 1883     // 8883 //1883
 #define DEFAULT_BROKER_ALIVETIME 60  // 300 //60                       // 60s
@@ -55,73 +56,101 @@ struct sconf_proto _eguard_options[_OPTION_EGUARD_MAX] = {
     [OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD] = {"EGUARD_DOOR_ZONE_STOPPED_THRESHOLD", PROTO_VALUE_DECIMAL, {.decimal = 0}},  // default not enabled
 };
 
-static void _on_observer(const char* path, void* priv) {
-    (void)priv;
-    if (!path) return;
-
-    printf("observer path:%s\n", path);
-
-    if (0 == strcmp(HQLIFTD_CONFIG_PATH, path)) {
-        int64_t realtime_period_ms = _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number;
-        // please manually process default string value
-        if (_options[OPTION_MQ_SERVER].value.string != DEFAULT_BROKER_SERVER) {
-            free(_options[OPTION_MQ_SERVER].value.string);
-            _options[OPTION_MQ_SERVER].value.string = NULL;
-        }
-        if (_options[OPTION_MQ_USERNAME].value.string != DEFAULT_MQ_USERNAME) {
-            free(_options[OPTION_MQ_USERNAME].value.string);
-            _options[OPTION_MQ_USERNAME].value.string = NULL;
-        }
-        if (_options[OPTION_MQ_PASSWORD].value.string != DEFAULT_MQ_PASSWORD) {
-            free(_options[OPTION_MQ_PASSWORD].value.string);
-            _options[OPTION_MQ_PASSWORD].value.string = NULL;
-        }
-        if (_options[OPTION_FTP_ADDRESS].value.string != DEFAULT_FTP_ADDRESS) {
-            free(_options[OPTION_FTP_ADDRESS].value.string);
-            _options[OPTION_FTP_ADDRESS].value.string = NULL;
-        }
-        if (_options[OPTION_FTP_USERNAME].value.string != DEFAULT_FTP_USERNAME) {
-            free(_options[OPTION_FTP_USERNAME].value.string);
-            _options[OPTION_FTP_USERNAME].value.string = NULL;
-        }
-        if (_options[OPTION_FTP_PASSWORD].value.string != DEFAULT_FTP_PASSWORD) {
-            free(_options[OPTION_FTP_PASSWORD].value.string);
-            _options[OPTION_FTP_PASSWORD].value.string = NULL;
-        }
-
-        sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
-
-        printf("mqtt:%s, %s, %s\n", _options[OPTION_MQ_SERVER].value.string, _options[OPTION_MQ_USERNAME].value.string, _options[OPTION_MQ_PASSWORD].value.string);
-        printf("ftp:%s, %s, %s\n", _options[OPTION_FTP_ADDRESS].value.string, _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
-
-        // realtime report period need restart
-        if (realtime_period_ms != _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number) {
-            // we should restart
-
-            exit(0);
-        }
-
-    } else if (0 == strcmp(ELEVATORD_CONFIG_PATH, path)) {
-        sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+static void load_option() {
+    // int64_t realtime_period_ms = _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number;
+    // please manually process default string value
+    if (_options[OPTION_MQ_SERVER].value.string != DEFAULT_BROKER_SERVER) {
+        free(_options[OPTION_MQ_SERVER].value.string);
+        _options[OPTION_MQ_SERVER].value.string = NULL;
     }
-}
+    if (_options[OPTION_MQ_USERNAME].value.string != DEFAULT_MQ_USERNAME) {
+        free(_options[OPTION_MQ_USERNAME].value.string);
+        _options[OPTION_MQ_USERNAME].value.string = NULL;
+    }
+    if (_options[OPTION_MQ_PASSWORD].value.string != DEFAULT_MQ_PASSWORD) {
+        free(_options[OPTION_MQ_PASSWORD].value.string);
+        _options[OPTION_MQ_PASSWORD].value.string = NULL;
+    }
+    if (_options[OPTION_FTP_ADDRESS].value.string != DEFAULT_FTP_ADDRESS) {
+        free(_options[OPTION_FTP_ADDRESS].value.string);
+        _options[OPTION_FTP_ADDRESS].value.string = NULL;
+    }
+    if (_options[OPTION_FTP_USERNAME].value.string != DEFAULT_FTP_USERNAME) {
+        free(_options[OPTION_FTP_USERNAME].value.string);
+        _options[OPTION_FTP_USERNAME].value.string = NULL;
+    }
+    if (_options[OPTION_FTP_PASSWORD].value.string != DEFAULT_FTP_PASSWORD) {
+        free(_options[OPTION_FTP_PASSWORD].value.string);
+        _options[OPTION_FTP_PASSWORD].value.string = NULL;
+    }
 
-int option_init(void) {
     sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
-    sconf_load_with_proto(ELEVATORD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+
+    // printf("mqtt:%s, %s, %s\n", _options[OPTION_MQ_SERVER].value.string, _options[OPTION_MQ_USERNAME].value.string, _options[OPTION_MQ_PASSWORD].value.string);
+    // printf("ftp:%s, %s, %s\n", _options[OPTION_FTP_ADDRESS].value.string, _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
 
     for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
         switch (_options[i].type) {
             case PROTO_VALUE_NUMBER:
-                printf("_option -> %s:%ld\n", _options[i].name, _options[i].value.number);
+                HR_LOGD("_option -> %s:%ld\n", _options[i].name, _options[i].value.number);
                 break;
             case PROTO_VALUE_DECIMAL:
-                printf("_option -> %s:%f\n", _options[i].name, _options[i].value.decimal);
+                HR_LOGD("_option -> %s:%f\n", _options[i].name, _options[i].value.decimal);
                 break;
             case PROTO_VALUE_STRING:
-                printf("_option -> %s:%s\n", _options[i].name, _options[i].value.string ? _options[i].value.string : "");
+                HR_LOGD("_option -> %s:%s\n", _options[i].name, _options[i].value.string ? _options[i].value.string : "");
                 break;
         }
     }
+    // realtime report period need restart
+    // if (realtime_period_ms != _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number) {
+    //     // we should restart
+    //
+    //     exit(0);
+    // }
+}
+
+static void load_eguard_option() {
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, _eguard_options, sizeof(_eguard_options) / sizeof(_eguard_options[0]));
+
+    for (size_t i = 0; i < sizeof(_eguard_options) / sizeof(_eguard_options[0]); i++) {
+        switch (_eguard_options[i].type) {
+            case PROTO_VALUE_NUMBER:
+                HR_LOGD("_eguard_options -> %s:%ld\n", _eguard_options[i].name, _eguard_options[i].value.number);
+                break;
+            case PROTO_VALUE_DECIMAL:
+                HR_LOGD("_eguard_options -> %s:%f\n", _eguard_options[i].name, _eguard_options[i].value.decimal);
+                break;
+            case PROTO_VALUE_STRING:
+                HR_LOGD("_eguard_options -> %s:%s\n", _eguard_options[i].name, _eguard_options[i].value.string ? _eguard_options[i].value.string : "");
+                break;
+        }
+    }
+
+    if (_eguard_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number < 30000) {
+        _eguard_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number = 30000;
+    }
+
+    if (_eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal < 0) {
+        _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal = 0;
+    }
+}
+static void on_option_changed(const char* path, void* priv) {
+    (void)priv;
+    if (!path) return;
+
+    /*if (0 == strcmp(HQLIFTD_CONFIG_PATH, path)) {
+        load_option();
+    } else*/ if (0 == strcmp(EGUARD_CONFIG_PATH, path)) {
+        load_eguard_option();
+    }
+}
+
+int option_init(void) {
+    load_option();
+    load_eguard_option();
+
+    sconf_register_observer(EGUARD_CONFIG_PATH, on_option_changed, NULL);
+
     return 0;
 }

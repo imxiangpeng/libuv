@@ -26,7 +26,7 @@ TARGET_COMPILE_OPTIONS(eguard PRIVATE -Wall -Wextra -Werror -Wno-unused-function
 
 TARGET_COMPILE_DEFINITIONS(eguard PRIVATE LOG_TAG="eguard")
 # define config file when compile
-TARGET_COMPILE_DEFINITIONS(eguard PRIVATE EGUARD_CONFIG_PATH="/etc/elevatord/elevatord.conf")
+TARGET_COMPILE_DEFINITIONS(eguard PRIVATE EGUARD_CONFIG_PATH="/etc/eguard/eguard.conf")
 
 # only on my pc
 target_include_directories(eguard PUBLIC /opt/3rdparty/include)

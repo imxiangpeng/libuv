@@ -74,6 +74,8 @@ static int _on_property_publish(void** payload, int* len) {
                 if (prop->value.val.string) {
                     cJSON_AddStringToObject(param, prop->name, prop->value.val.string);
                     break;
+                } else {
+                    cJSON_AddStringToObject(param, prop->name, "");
                 }
                 break;
             }
@@ -108,7 +110,6 @@ static int _on_property_set(void* payload, int len) {
     double number = 0;
     const char* string = NULL;
     struct property_value value;
-    printf("set message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     // double val = 0;
     // const char* val_str = NULL;
@@ -117,6 +118,8 @@ static int _on_property_set(void* payload, int len) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
         return -1;
     }
+
+    HR_LOGD("set %d -> %s\n", len, (char*)payload);
 
     root = cJSON_ParseWithLength((const char*)payload, len);
     if (!root) {
@@ -130,14 +133,16 @@ static int _on_property_set(void* payload, int len) {
     }
 
     params = cJSON_GetObjectItem(root, "params");
-    if (!params) {
+    if (!params || !cJSON_IsObject(params)) {
         cJSON_Delete(root);
         return -1;
     }
 
     memset((void*)&value, 0, sizeof(value));
     cJSON_ArrayForEach(ele, params) {
-        HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+        // HR_LOGD("%s(%d):ele: %s -> type:%d\n", __FUNCTION__, __LINE__, ele->string, ele->type);
+
+        if (!ele->string) continue;
 
         struct property* prop = property_get(ele->string);
         if (!prop || !prop->setter) {
@@ -148,11 +153,21 @@ static int _on_property_set(void* payload, int len) {
         // verify property's type, value type maybe not set
         switch (prop->type) {
             case E_NUMBER:
-                number = cJSON_GetNumberValue(ele);
-                if (!isnan(number)) {
-                    property_value_set_number(&value, (int64_t)number);
+                if (cJSON_IsNumber(ele)) {
+                    number = cJSON_GetNumberValue(ele);
+                    if (!isnan(number)) {
+                        property_value_set_number(&value, (int64_t)number);
+                        prop->setter(prop, &value);
+                        property_value_reset(&value);
+                    }
+                } else if (cJSON_IsBool(ele)) {
+                    // support convert boolean to number
+                    int boolean = cJSON_IsTrue(ele) ? 1 : 0;
+                    property_value_set_number(&value, boolean);
                     prop->setter(prop, &value);
                     property_value_reset(&value);
+                } else {
+                   // not support
                 }
                 break;
             case E_DECIMAL:
@@ -166,6 +181,7 @@ static int _on_property_set(void* payload, int len) {
                 break;
             case E_STRING: {
                 string = cJSON_GetStringValue(ele);
+                printf("set string :%s, %ld\n", string, strlen(string));
                 if (string) {
                     // string is const, no need free
                     property_value_set_string_ext(&value, string, 1);
@@ -204,6 +220,8 @@ static int _on_property_get(void* payload, int len) {
         HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
         return -1;
     }
+
+    HR_LOGD("get %d -> %s\n", len, (char*)payload);
 
     root = cJSON_ParseWithLength((const char*)payload, len);
     if (!root) {
