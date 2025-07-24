@@ -888,6 +888,8 @@ static void* _barometer_thread_routin(void* args) {
 
     _barometer_motion.state = STOPPED;
 
+    // 这里纯粹是因为我们要模拟，而模拟情况下，并不会主动读取模拟数据
+    // 数据实在读取加速度信息的时候读取的，所以，这里我们强制等待
     // force delay 1s
     usleep(1000 * 1000);
     while (1) {
