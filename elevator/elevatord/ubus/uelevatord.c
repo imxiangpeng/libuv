@@ -372,6 +372,13 @@ static void* uelevatord_thread_routin(void* args) {
         pthread_testcancel();
     }
 
+    // we not call pthread_cancel, must verify _request_exit!
+    // you can run without ubusd
+    if (_request_exit == 1) {
+        uloop_done();
+        return NULL;
+    }
+
     _ubus_ctx->connection_lost = _connection_lost;
 
     ubus_add_uloop(_ubus_ctx);
