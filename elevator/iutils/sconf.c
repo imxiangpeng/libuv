@@ -72,7 +72,6 @@ static void* _sconf_auto_reload_task(void* args) {
             int timeout = -1;  // 12000;
 
             int nr = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd, evs, ARRAY_SIZE(evs), timeout));
-            printf("nr:%d\n", nr);
             if (nr == 0 || nr == -1) {
                 // timeout
                 // printf("maybe timeout ...\n");
@@ -343,7 +342,8 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
 
     p = strtok_r(NULL, " =", &save_ptr);
     if (!p) {
-        return -1;
+        // do not return error which cause losing all left data
+        return 0;
     }
 
     switch (proto[idx].type) {
@@ -498,8 +498,8 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
                 break;
             }
             case PROTO_VALUE_STRING: {
-                // when data is null it will be deleted
-                if (proto[i].value.string) {
+                // when data is null or empty string it will be deleted
+                if (proto[i].value.string && proto[i].value.string[0] != '\0') {
                     futil_write_fd(fd, (void*)proto[i].name, strlen(proto[i].name));
                     futil_write_fd(fd, "=", 1);  // append line eof
                     futil_write_fd(fd, (void*)proto[i].value.string, strlen(proto[i].value.string));
