@@ -4,6 +4,8 @@
 
 1.  HQLIFTD_CONFIG_PATH: /etc/hqliftd/hqliftd.conf
 
+    - `MQ_ID=device_serialno` MQTT client id, 默认采用设备序列号
+    - `MQ_PROTO=mqtt` # 支持 `mqtt/mqtts`, `mqtts` 会使用 `ssl/tls` 来连接，开启 `ssl` 会对服务器进行证书校验，如果服务器采用的是自签名证书需要特别注意。
     - `MQ_SERVER=mq.hqszjs.com`
     - `MQ_PORT=1883`
     - `MQ_KEEPALIVE=60`
@@ -11,6 +13,7 @@
     - `MQ_PASSWORD=inspur88*`
     - `REALTIME_REPORT_PERIOD_MS=1000`
     - `SPEED_LIMIT_THREHOLD=2.8`
+    - `RTMP_URL=rtmp://srs.hqszjs.com:1935/live/device_serialno`
     - `FTP_ADDRESS=`
     - `FTP_USERNAME=`
     - `FTP_PASSWORD=`

@@ -44,7 +44,7 @@
 // 2025-05-26_18-22-00.mp4
 #define MEDIA_RECORD_DATE_STRING_FORMAT "%Y-%m-%d_%H-%M-%S"
 
-#define COMMAND_RTMP_URL_PREFIX "rtmp://srs.hqszjs.com:1935/live/"
+// #define COMMAND_RTMP_URL_PREFIX "rtmp://srs.hqszjs.com:1935/live/"
 
 // mxp, 20250609, do not send video without stop
 // houqi's sim is data limited about 85G
@@ -150,7 +150,8 @@ static int _on_command_message(void* payload, int len) {
         // mxp, 20250609, do not restart when timer is not fired
         if (!uv_is_active((uv_handle_t*)&_sendvideo_timer)) {
             char cmd[512] = {0};
-            snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location " COMMAND_RTMP_URL_PREFIX "/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
+            // snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location " COMMAND_RTMP_URL_PREFIX "/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
+            snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location %s;ipc-property set /ipc/livertmp/enabled true", _options[OPTION_LIVE_URL].value.string);
             system(cmd);
         }
 
@@ -178,6 +179,7 @@ static int _on_command_message(void* payload, int len) {
             cJSON_Delete(root);
             return -1;
         }
+
         timestamp_begin = command_date_format_string_to_seconds(start_time);
         timestamp_end = command_date_format_string_to_seconds(end_time);
         if (timestamp_begin == 0 || timestamp_end == 0) {
@@ -191,7 +193,8 @@ static int _on_command_message(void* payload, int len) {
         gmtime_r(&timestamp_end, &tm);  // localtime_r
         strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
-        snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
+        // snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
+        snprintf(url, sizeof(url), "%s", _options[OPTION_LIVE_URL].value.string);
 
         // todo
         cJSON_Delete(root);

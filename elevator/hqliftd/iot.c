@@ -12,7 +12,6 @@
 #include <string.h>
 #include <uv.h>
 
-#include "elevator.h"
 #include "hr_log.h"
 #include "iot_topic.h"
 #include "option.h"
@@ -30,7 +29,7 @@ int iot_init(struct uv_loop_s* loop) {
     _iot->port = _options[OPTION_MQ_PORT].value.number;
     _iot->alive_time = _options[OPTION_MQ_KEEPALIVE].value.number;
 
-    snprintf(_iot->id, sizeof(_iot->id), "%s", elevator_serialno());
+    snprintf(_iot->id, sizeof(_iot->id), "%s", _options[OPTION_MQ_ID].value.string/*elevator_serialno()*/);
 
     snprintf(_iot->username, sizeof(_iot->username), "%s", _options[OPTION_MQ_USERNAME].value.string);
     snprintf(_iot->password, sizeof(_iot->password), "%s", _options[OPTION_MQ_PASSWORD].value.string);
