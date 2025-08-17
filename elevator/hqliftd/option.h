@@ -3,7 +3,8 @@
 #include "sconf.h"
 
 enum {
-    OPTION_MQ_ID = 0,
+    OPTION_VERSION = 0,
+    OPTION_MQ_ID,
     OPTION_MQ_PROTO,
     OPTION_MQ_SERVER,
     OPTION_MQ_PORT,

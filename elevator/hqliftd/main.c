@@ -66,6 +66,7 @@ static int hqliftd_main(int argc, char** argv) {
 
     struct sigaction action;
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
 
     memset(&action, 0, sizeof(action));
@@ -73,11 +74,14 @@ static int hqliftd_main(int argc, char** argv) {
     action.sa_sigaction = _signal_action;
     sigaction(SIGTERM, &action, NULL);
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     option_init();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     serial = elevator_serialno();
     elevator_no = elevator_deviceid();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     // houqi require the serial number to be at least 12 characters long.
     if (!serial || strlen(serial) <= 12) {
         HR_LOGE("serial is invalid!\n");
@@ -89,32 +93,44 @@ static int hqliftd_main(int argc, char** argv) {
         return -1;
     }
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     elevator_init();
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
 
     statemachine_init(uv_default_loop());
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     uelevator_init();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     // block until connected
     iot_init(uv_default_loop());
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     iot_deinit();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     uelevator_deinit();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     statemachine_deinit();
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     MAKE_VALGRIND_HAPPY(uv_default_loop());
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     curl_global_cleanup();
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     return 0;
 }
 

@@ -116,4 +116,3 @@ int hrbuffer_append_string(struct hrbuffer *buf, const char *str) {
    
     return 0;
 }
-

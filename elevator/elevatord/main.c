@@ -11,7 +11,9 @@
 #include <uv.h>
 #include "floor.h"
 #include "hr_log.h"
+#if ENABLE_IOT
 #include "iot/iot.h"
+#endif
 #include "motion.h"
 #include "sensor.h"
 #include "tui.h"
@@ -236,7 +238,9 @@ static int elevatord_main(int argc, char** argv) {
     uelevatord_init();
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
+#if ENABLE_IOT
     iot_init(uv_default_loop());
+#endif
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
     motion_deinitalize();
@@ -246,7 +250,9 @@ static int elevatord_main(int argc, char** argv) {
 
     uelevatord_deinit();
 
+#if ENABLE_IOT
     iot_deinit();
+#endif
 
     // run once after iot_finally release resource
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);

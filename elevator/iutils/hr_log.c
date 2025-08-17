@@ -245,6 +245,7 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     } else {
         syslog(LOG_SYSLOG, "%s", buf);
     }
+    printf("%s", buf);
 #else
     // rsyslog(buf);
     printf("%s", buf);

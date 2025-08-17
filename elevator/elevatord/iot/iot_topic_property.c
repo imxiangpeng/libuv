@@ -643,15 +643,18 @@ static void _observer_on_event(struct motion_event* data) {
 
 // can be called multi times, uv_async will run only once
 static void schedule_report(void) {
+    if (!_iot) return;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }
 
 void report_floor_model_property() {
+    if (!_iot) return;
     _properties_tbl[PROPERTY_FLOOR_MODEL].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }
 
 void report_hqliftd_config_property() {
+    if (!_iot) return;
     _properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
     uviot_publish_async(_iot, &_iot_property_topics[PROPERTY_TOPIC_POST]);
 }

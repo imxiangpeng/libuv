@@ -98,10 +98,20 @@ static time_t media_record_date_format_string_to_seconds(const char* date) {
     return timegm(&tm);  // do not care timezone
 }
 
+static void _stop_livertmp(void) {
+    // mxp, 20250813, ipc-property-service maybe blocked!
+    // which causing our loop blocked
+    // replace system("ipc-property set /ipc/livertmp/enabled false");
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("ipc-property", "ipc-property", "set", "/ipc/livertmp/enabled", "false", NULL);
+        _exit(127);
+    }
+}
 static void _sendvideo_command_timeout(uv_timer_t* handle) {
     (void)handle;
     HR_LOGD("send video timeout, stop it\n");
-    system("ipc-property set /ipc/livertmp/enabled false");
+    _stop_livertmp();
 }
 
 static void _sendstate_command_timeout(uv_timer_t* handle) {
@@ -152,7 +162,14 @@ static int _on_command_message(void* payload, int len) {
             char cmd[512] = {0};
             // snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location " COMMAND_RTMP_URL_PREFIX "/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
             snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location %s;ipc-property set /ipc/livertmp/enabled true", _options[OPTION_LIVE_URL].value.string);
-            system(cmd);
+            // mxp, 20250813, ipc-property-service maybe blocked!
+            // which causing our loop blocked
+            // replace system(cmd) with following code
+            pid_t pid = fork();
+            if (pid == 0) {
+                execl("sh", "sh", "-c", cmd, NULL);
+                _exit(127);
+            }
         }
 
         uv_timer_stop(&_sendvideo_timer);
@@ -200,7 +217,8 @@ static int _on_command_message(void* payload, int len) {
         cJSON_Delete(root);
 
         // stop live video
-        system("ipc-property set /ipc/livertmp/enabled false");
+        // system("ipc-property set /ipc/livertmp/enabled false");
+        _stop_livertmp();
 
         pid_t pid = fork();
 

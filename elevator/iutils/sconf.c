@@ -1,4 +1,8 @@
 // mxp, 20250520, smart/simple conf utils
+// support:
+// KEY=VALUE
+// KEY VALUE
+// KEY = VALUE
 
 #define _GNU_SOURCE
 
@@ -343,6 +347,9 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
     p = strtok_r(NULL, " =", &save_ptr);
     if (!p) {
         // do not return error which cause losing all left data
+        if (PROTO_VALUE_STRING == proto[idx].type) {
+            proto[idx].value.string = strdup("");
+        }
         return 0;
     }
 
@@ -498,8 +505,8 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
                 break;
             }
             case PROTO_VALUE_STRING: {
-                // when data is null or empty string it will be deleted
-                if (proto[i].value.string && proto[i].value.string[0] != '\0') {
+                // when data is null it will be deleted
+                if (proto[i].value.string) {
                     futil_write_fd(fd, (void*)proto[i].name, strlen(proto[i].name));
                     futil_write_fd(fd, "=", 1);  // append line eof
                     futil_write_fd(fd, (void*)proto[i].value.string, strlen(proto[i].value.string));

@@ -31,7 +31,12 @@ static char DEFAULT_FTP_ADDRESS[] = "ftp://ftp.hqszjs.com:2100";
 static char DEFAULT_FTP_USERNAME[] = "inspur";
 static char DEFAULT_FTP_PASSWORD[] = "inspur88*";
 
+// mxp, 20250817, when stored VERSION not match this, we should update option to storage
+// you should increase _VERSION when you add or modify _options
+static const int _VERSION = 1;
+
 struct sconf_proto _options[_OPTION_MAX] = {
+    [OPTION_VERSION] = {"VERSION", PROTO_VALUE_NUMBER, {.number = 0}},
     // MQTT
     [OPTION_MQ_ID] = {"MQ_ID", PROTO_VALUE_STRING, {.string = DEFAULT_MQ_ID}},
     [OPTION_MQ_PROTO] = {"MQ_PROTO", PROTO_VALUE_STRING, {.string = DEFAULT_MQ_PROTO}},
@@ -241,9 +246,8 @@ int option_init(void) {
     load_option();
 
     // verify config has been initialized
-    if (_options[OPTION_MQ_ID].value.string == DEFAULT_MQ_ID /*&&
-        _options[OPTION_MQ_SERVER].value.string == DEFAULT_BROKER_SERVER*/
-    ) {
+    if (_options[OPTION_VERSION].value.number != _VERSION ) {
+        _options[OPTION_VERSION].value.number = _VERSION;
         HR_LOGD("hqliftd has too many default parameters, we should write them\n");
         sconf_save_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
     }

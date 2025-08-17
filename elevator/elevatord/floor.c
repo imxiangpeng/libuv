@@ -71,7 +71,7 @@ static floor_calibration_cb _floor_calibration_cb = NULL;
 static double _uncommit_pressure_delta = 0;
 
 // temp code
-extern void report_floor_model_property();
+// extern void report_floor_model_property();
 
 static int floor_load_model(const char* path) {
     ssize_t len = 0;
@@ -676,7 +676,7 @@ int floor_update_pressure_when_stationary(int num, double pressure, double tempe
     floor_store_model(mode);
 
     // mxp, 20250604 temp monitor code
-    report_floor_model_property();
+    // report_floor_model_property();
     return 0;
 }
 // height relative to base floor

@@ -13,7 +13,7 @@
     - `MQ_PASSWORD=inspur88*`
     - `REALTIME_REPORT_PERIOD_MS=1000`
     - `SPEED_LIMIT_THREHOLD=2.8`
-    - `RTMP_URL=rtmp://srs.hqszjs.com:1935/live/device_serialno`
+    - `LIVE_URL=rtmp://srs.hqszjs.com:1935/live/device_serialno`
     - `FTP_ADDRESS=`
     - `FTP_USERNAME=`
     - `FTP_PASSWORD=`

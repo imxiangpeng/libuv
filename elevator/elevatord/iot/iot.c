@@ -25,6 +25,37 @@
 
 static struct uviot* _iot = NULL;
 
+// aliyun register devices
+static const char* aliyun_devices[] = {
+    "5CB4E215D2A2",
+    "5CB4E215D2A3",
+    "5CB4E215D2A4",
+    "5CB4E215D2A5",
+    "5CB4E215D2A6",
+    "5CB4E215D2A7",
+    "5CB4E215D2A8",
+    "5CB4E215D2A9",
+    "5CB4E215D2AA",
+    "5CB4E215D2AB",
+    "5CB4E215D2AC",
+    "5CB4E215D2AD",
+    "5CB4E215D2AF",
+    "5CB4E215D2B0",
+};
+
+// 0: now allowed
+// !0: allowed
+static int is_allowed(const char* name) {
+    if (!name) return 0;
+    
+    for (size_t i = 0; i < sizeof(aliyun_devices)/sizeof(aliyun_devices[0]); i++) {
+        if (0 == strcmp(aliyun_devices[i], name)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 static long long time_ms() {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
@@ -48,13 +79,6 @@ int iot_init(struct uv_loop_s* loop) {
 
     long long ts = time_ms();
 
-    _iot = uviot_alloc(loop);
-    if (!_iot)
-        return -1;
-
-    snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
-    _iot->port = BROKER_DEFAULT_PORT;
-
     // get mac address into name buffer
     platform_get_property(PROPERTY_MACADDR, name, sizeof(name));
     // printf("mac:%s\n", name);
@@ -66,6 +90,18 @@ int iot_init(struct uv_loop_s* loop) {
         }
     }
     name[j] = '\0';
+
+    // we should return when device is not registered on aliyun
+    if (is_allowed(name) == 0) {
+        return -1;
+    }
+
+    _iot = uviot_alloc(loop);
+    if (!_iot)
+        return -1;
+
+    snprintf(_iot->server, sizeof(_iot->server), "%s", BROKER_DEFAULT_SERVER);
+    _iot->port = BROKER_DEFAULT_PORT;
 
     // printf("device name:%s\n", name);
     platform_get_property(PROPERTY_DEVICE_SECRET, hmac_secret, sizeof(hmac_secret));
@@ -110,6 +146,7 @@ int iot_init(struct uv_loop_s* loop) {
 }
 
 int iot_deinit(void) {
+    if (!_iot) return -1;
     uviot_release(_iot);
     _iot = NULL;
     return 0;

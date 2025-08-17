@@ -17,6 +17,7 @@ FIND_LIBRARY(libuv_library NAMES uv)
 
 option(USE_LOCAL_SIMULATE_DATA "Runing using local simulate data" OFF)
 option(DUMP_DATA_TO_FILE "Dump result to local csv file" OFF)
+option(ENABLE_IOT "Support iot feature" OFF)
 
 string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 
@@ -36,16 +37,19 @@ set(SOURCES main.c
     sensors/sensor_bmi270.c
     sensors/sensor_bmp388.c
     tui.c 
-    iot/iot.c
-    iot/iot_topic.c
-    iot/iot_topic_property.c
-    iot/iot_topic_service.c
     ubus/uelevatord.c
     butterworth_filter.c
     moving_window.c)
 
 if(USE_LOCAL_SIMULATE_DATA)
 list(APPEND SOURCES sensors/sensor_simulate.c)
+endif()
+
+if(ENABLE_IOT)
+list(APPEND SOURCES iot/iot.c
+    iot/iot_topic.c
+    iot/iot_topic_property.c
+    iot/iot_topic_service.c)
 endif()
 
 ADD_EXECUTABLE(elevatord ${SOURCES})
@@ -64,6 +68,10 @@ TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE DEFAULT_ACCELEROMETER_SAMPLING_RATE
 
 if(USE_LOCAL_SIMULATE_DATA)
 TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE USE_LOCAL_SIMULATE_DATA=1)
+endif()
+
+if(ENABLE_IOT)
+TARGET_COMPILE_DEFINITIONS(elevatord PRIVATE ENABLE_IOT=1)
 endif()
 
 if(DUMP_DATA_TO_FILE)
