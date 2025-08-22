@@ -24,6 +24,7 @@ struct topic auto_floor_calibration_event_post = {
     .name = "event/AutoFloorCalibrationEvent/post",
     .topic = {0},
     .period = 0,
+    .qos = 2,
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_auto_floor_calibration_event_publish,
 };

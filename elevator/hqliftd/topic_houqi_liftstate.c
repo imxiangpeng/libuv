@@ -63,7 +63,7 @@ static int _on_publish(void** payload, int* len) {
 
     // mxp, 20250609, add threshold, because ekf maybe generate invalid speed when stationary
     if (st.speed <= 0.1) {
-        _running_direction = 3;
+        _running_direction = ELEVATOR_DIR_STATIONARY;
     }
 
     cJSON* root = cJSON_CreateObject();

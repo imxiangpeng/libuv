@@ -203,6 +203,7 @@ static struct uviot_topic dm_topic_liftfault = {
     .name = EVENT_FAULT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_FAULT_TOPIC_NAME,
     .period = 0,
+    .qos = 2,
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };

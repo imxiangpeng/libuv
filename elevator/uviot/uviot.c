@@ -114,7 +114,7 @@ static void _topic_period_timer_cb(uv_timer_t* handle) {
     if (payload != NULL && len > 0) {
         int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
                                          len, (const void*)payload,
-                                         0, false);
+                                         t->self->qos, false);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d\n", rc);
         }
@@ -156,7 +156,7 @@ static void iot__topic_async_cb(uv_async_t* handle) {
     if (payload != NULL && len > 0) {
         int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
                                          len, (const void*)payload,
-                                         0, false);
+                                         t->self->qos, false);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d, errno:%d\n", rc, errno);
         }
@@ -244,7 +244,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                     if (payload != NULL && len > 0) {
                         int rc = uviot_mosquitto_publish(iot, &p->mid, p->self->topic,
                                                          len, (const void*)payload,
-                                                         0, false);
+                                                         p->self->qos, false);
                         if (rc != MOSQ_ERR_SUCCESS) {
                             HR_LOGE("publish failed :%d\n", rc);
                         }

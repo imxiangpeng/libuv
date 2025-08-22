@@ -89,7 +89,7 @@ static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
     if (payload != NULL && len > 0) {
         int rc = mosquitto_publish(_priv.mosq, &topic->mid, topic->self->topic,
                                    len, (const void*)payload,
-                                   0, false);
+                                   topic->self->qos, false);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d\n", rc);
         }
@@ -167,7 +167,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                 if (payload != NULL && len > 0) {
                     int rc = mosquitto_publish(mosq, &p->mid, p->self->topic,
                                                len, (const void*)payload,
-                                               0, false);
+                                               p->self->qos, false);
                     if (rc != MOSQ_ERR_SUCCESS) {
                         HR_LOGE("publish failed :%d\n", rc);
                     }
