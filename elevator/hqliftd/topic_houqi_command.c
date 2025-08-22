@@ -37,6 +37,8 @@
     "/"                                   \
     ".command_upload_record_playlist"
 
+#define IPC_CONFIG_JSON_PATH "/etc/ipc/config.json"
+
 #define MEDIA_RECORD_DURATION 300  // 5min
 
 // 2024-04-06 15:57:20
@@ -104,10 +106,11 @@ static void _stop_livertmp(void) {
     // replace system("ipc-property set /ipc/livertmp/enabled false");
     pid_t pid = fork();
     if (pid == 0) {
-        execl("ipc-property", "ipc-property", "set", "/ipc/livertmp/enabled", "false", NULL);
+        execlp("ipc-property", "ipc-property", "set", "/ipc/livertmp/enabled", "false", NULL);
         _exit(127);
     }
 }
+
 static void _sendvideo_command_timeout(uv_timer_t* handle) {
     (void)handle;
     HR_LOGD("send video timeout, stop it\n");
@@ -118,6 +121,61 @@ static void _sendstate_command_timeout(uv_timer_t* handle) {
     (void)handle;
     HR_LOGD("send state timeout, stop it\n");
     topic_houqi_liftstate_report_enable(0);
+}
+
+// mxp, 20250822, we parse /etc/ipc/config.json manually
+// do not call ipc-property
+static int _detect_ipc_livertmp_property(int *active, char** url) {
+    ssize_t len = 0;
+    char *data = NULL;
+    cJSON *root = NULL, *ipc = NULL, *livertmp = NULL;
+    const char* location = NULL, *enabled = NULL;
+
+    if (!active || !url) {
+        return -1;
+    }
+
+    len = futil_read(IPC_CONFIG_JSON_PATH, &data);
+    if (len <= 0) {
+        return -1;
+    }
+
+    root = cJSON_ParseWithLength(data, len);
+    free(data);
+
+    if (!root) {
+        HR_LOGE("error:%s\n", cJSON_GetErrorPtr());
+        return -1;
+    }
+
+    ipc = cJSON_GetObjectItem(root, "ipc");
+    // it's safe when ipc is null
+    livertmp = cJSON_GetObjectItem(ipc, "livertmp");
+
+    if (!ipc|| !livertmp) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    location = cJSON_GetStringValue(cJSON_GetObjectItem(livertmp, "location"));
+    enabled = cJSON_GetStringValue(cJSON_GetObjectItem(livertmp, "enabled"));
+    if (!location || !enabled) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    HR_LOGD("location: %s, enabled:%s\n", location, enabled);
+
+    *url = strdup(location);
+
+    if (!strcmp("true", enabled)) {
+        *active = 1;
+    } else {
+        *active = 0;
+    }
+
+    cJSON_Delete(root);
+    return 0;
 }
 
 static int _on_command_message(void* payload, int len) {
@@ -152,13 +210,36 @@ static int _on_command_message(void* payload, int len) {
 
     if (0 == strcasecmp("Sendvideo", type)) {
         // todo
+        int active = 0;
+        char *url = NULL;
+        int ret = -1;
         cJSON_Delete(root);
 
+        if (!_options[OPTION_LIVE_URL].value.string) {
+            return 0;
+        }
         // ipc-property set /ipc/livertmp/location rtmp://srs.hqszjs.com:1935/live/LC40025120000001
         // ipc-property set /ipc/livertmp/enabled true
 
         // mxp, 20250609, do not restart when timer is not fired
-        if (!uv_is_active((uv_handle_t*)&_sendvideo_timer)) {
+        // mxp, 20250822, force reset when livertmp is disabled
+        // because there maybe multi instance to op livertmp
+        ret = _detect_ipc_livertmp_property(&active, &url);
+
+        if (ret == 0) {
+            if (active != 1 || !url ||
+                    !_options[OPTION_LIVE_URL].value.string ||
+                    0 != strcmp(url, _options[OPTION_LIVE_URL].value.string)) {
+                HR_LOGE("active:%d, url:%s\n", active, url ? url : "");
+                ret = -1;
+            }
+        }
+
+        if (url) {
+            free(url);
+        }
+
+        if (ret != 0 || !uv_is_active((uv_handle_t*)&_sendvideo_timer)) {
             char cmd[512] = {0};
             // snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location " COMMAND_RTMP_URL_PREFIX "/%s;ipc-property set /ipc/livertmp/enabled true", elevator_serialno());
             snprintf(cmd, sizeof(cmd), "ipc-property set /ipc/livertmp/location %s;ipc-property set /ipc/livertmp/enabled true", _options[OPTION_LIVE_URL].value.string);
@@ -167,7 +248,7 @@ static int _on_command_message(void* payload, int len) {
             // replace system(cmd) with following code
             pid_t pid = fork();
             if (pid == 0) {
-                execl("sh", "sh", "-c", cmd, NULL);
+                execl("/bin/sh", "sh", "-c", cmd, NULL);
                 _exit(127);
             }
         }
