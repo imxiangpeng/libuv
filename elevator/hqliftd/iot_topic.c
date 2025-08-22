@@ -10,6 +10,7 @@ extern int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key,
 extern int topic_houqi_liftruninfo_init(struct uviot* iot, const char* public_key, const char* device_name);
 
 extern int topic_houqi_command_deinit(void);
+extern int topic_houqi_liftfault_deinit(void);
 
 static int _mid = 1;
 int iot_generate_mid() {
@@ -32,6 +33,7 @@ int iot_topic_init(struct uviot* iot, const char* public_key, const char* device
 int iot_topic_deinit(void) {
 
     topic_houqi_command_deinit();
+    topic_houqi_liftfault_deinit();
 
     return 0;
 }

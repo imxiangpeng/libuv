@@ -10,6 +10,9 @@ FIND_LIBRARY(ubox_library NAMES ubox PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(blob_library NAMES blobmsg_json PATHS /opt/3rdparty/lib NO_DEFAULT_PATH)
 FIND_LIBRARY(uuid_library NAMES uuid)
 FIND_LIBRARY(curl_library NAMES curl)
+FIND_LIBRARY(libgpiod_library NAMES gpiod)
+
+option(ENABLE_RESCURE_BTN "Enable Rescure Button feature" OFF)
 
 string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 
@@ -44,6 +47,10 @@ TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE EGUARD_CONFIG_PATH="/etc/eguard/eguar
 
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 
+if(ENABLE_RESCURE_BTN)
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ENABLE_RESCURE_BTN=1)
+TARGET_LINK_LIBRARIES(hqliftd ${libgpiod_library} pthread)
+endif()
 
 # only on my pc
 target_include_directories(hqliftd PUBLIC /opt/3rdparty/include)

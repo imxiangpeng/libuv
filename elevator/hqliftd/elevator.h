@@ -18,6 +18,11 @@
 // #define HQLIFTD_CONF_PATH "hqliftd.conf"
 
 
+enum rescure_mode {
+    RESCURE_MODE_AUTO = 0,
+    RESCURE_MODE_MANUAL,
+};
+
 enum elevator_direction {
     ELEVATOR_DIR_STATIONARY = 0,
     ELEVATOR_DIR_UP,   // 1

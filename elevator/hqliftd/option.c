@@ -66,6 +66,8 @@ struct sconf_proto _options[_OPTION_MAX] = {
     // [OPTION_FAULT_SPEED_LIMIT_THRESHOLD]
     [OPTION_FAULT_VIDEO_UPLOAD_SWITCH] = {"LIFTFAULT_VIDEO_UPLOAD_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
     [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
+                                                                                                                                               //
+    [OPTION_RESCURE_MODE] = {"RESCURE_MODE", PROTO_VALUE_NUMBER, {.number = RESCURE_MODE_MANUAL /*AUTO*/}},
 };
 
 struct sconf_proto _eguard_options[_OPTION_EGUARD_MAX] = {
@@ -248,7 +250,7 @@ int option_init(void) {
     // verify config has been initialized
     if (_options[OPTION_VERSION].value.number != _VERSION ) {
         _options[OPTION_VERSION].value.number = _VERSION;
-        HR_LOGD("hqliftd has too many default parameters, we should write them\n");
+        HR_LOGD("option version changed, do update.\n");
         sconf_save_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
     }
 
