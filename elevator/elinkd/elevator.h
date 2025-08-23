@@ -36,6 +36,9 @@ int elevator_property_set_eguard_alarm_repeat_count(struct property* self, struc
 int elevator_property_get_eguard_alarm_ebike_repeat_count(struct property* self);
 int elevator_property_set_eguard_alarm_ebike_repeat_count(struct property* self, struct property_value* value);
 
+int elevator_property_get_eguard_alarm_kunren_repeat_count(struct property* self);
+int elevator_property_set_eguard_alarm_kunren_repeat_count(struct property* self, struct property_value* value);
+
 int elevator_property_get_eguard_dtof_switch(struct property*self);
 int elevator_property_set_eguard_dtof_switch(struct property* self, struct property_value* value);
 

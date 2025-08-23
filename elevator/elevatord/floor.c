@@ -191,7 +191,7 @@ static void fsync_parent_dir(const char* file) {
     if (!file) return;
     char* tmp = strdup(file);
     char* dir = dirname(tmp);
-    int dirfd = open(dir, O_RDONLY);
+    int dirfd = open(dir, O_RDONLY| O_DIRECTORY);
 
     if (dirfd != -1) {
         fsync(dirfd);

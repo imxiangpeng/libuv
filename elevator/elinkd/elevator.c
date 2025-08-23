@@ -64,6 +64,7 @@ enum {
     OPTION_EGUARD_ALARM_INTERVAL,
     OPTION_EGUARD_ALARM_REPEAT_COUNT,
     OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT,
+    OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT,
     OPTION_EGUARD_DTOF_SWITCH,
     OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE,
     OPTION_EGUARD_KUNREN_DETECT_ENABLED,
@@ -77,6 +78,7 @@ static struct sconf_proto _elevatord_options[] = {
     [OPTION_EGUARD_ALARM_INTERVAL] = {"EGUARD_ALARM_INTERVAL", PROTO_VALUE_NUMBER, {.number = 3000}},  // 3s
     [OPTION_EGUARD_ALARM_REPEAT_COUNT] = {"EGUARD_ALARM_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = 3}},
     [OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT] = {"EGUARD_ALARM_EBIKE_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = INT64_MIN}},  // not set, use global
+    [OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT] = {"EGUARD_ALARM_KUNREN_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = INT64_MIN}},
     [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
     [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_NUMBER, {.number = 100}},  // 100mm
     [OPTION_EGUARD_KUNREN_DETECT_ENABLED] = {"EGUARD_KUNREN_DETECT_ENABLED", PROTO_VALUE_NUMBER, {.number = 1}},
@@ -85,10 +87,10 @@ static struct sconf_proto _elevatord_options[] = {
     [OPTION_EGUARD_DOOR_CONTROL_ENABLED] = {"EGUARD_DOOR_CONTROL_ENABLED", PROTO_VALUE_NUMBER, {.number = 0}},
 };
 
-static void read_elevator_options() {
-    // no string(dynamic memory), so we can directly reload
-    sconf_load_with_proto(EGUARD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));
-}
+// static void read_elevator_options() {
+//     // no string(dynamic memory), so we can directly reload
+//     sconf_load_with_proto(EGUARD_CONFIG_PATH, _elevatord_options, sizeof(_elevatord_options) / sizeof(_elevatord_options[0]));
+// }
 
 static void restart_service(const char* svc) {
     if (!svc) return;
@@ -149,7 +151,6 @@ int elevator_property_set_elevator_id(struct property* self, struct property_val
     printf("now elevator id:%s\n", _elevator_id);
     platform_set_property(PROPERTY_DEVICEID, _elevator_id);
     properties_tbl[PROPERTY_ELEVATOR_ID].dirty = 1;
-    topic_property_report();
 
     // we should restart hqliftd immediately
     // system("/etc/init.d/hqliftd restart > /dev/null 2>&1");
@@ -221,7 +222,7 @@ int elevator_property_set_hqliftd_config(struct property* self, struct property_
 
     futil_write(HQLIFTD_CONFIG_PATH, (void*)value->val.string, strlen(value->val.string));
     properties_tbl[PROPERTY_HQLIFTD_CONFIG].dirty = 1;
-    topic_property_report();
+
     // hqliftd can auto reload but some parameter also take effect only after restart
     // such as lift realtime report period: REALTIME_REPORT_PERIOD_MS
     // system("/etc/init.d/hqliftd restart > /dev/null 2>&1");
@@ -235,7 +236,7 @@ int elevator_property_get_eguard_alarm_switch(struct property* self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_SWITCH], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_SWITCH].value.number);
     return 0;
@@ -251,8 +252,6 @@ int elevator_property_set_eguard_alarm_switch(struct property* self, struct prop
 
     properties_tbl[PROPERTY_EGUARD_ALARM_SWITCH].dirty = 1;
 
-    topic_property_report();
-
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");
     // eguard auto reload
     // restart_service("eguard");
@@ -264,7 +263,7 @@ int elevator_property_get_eguard_alarm_interval(struct property* self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_INTERVAL], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_INTERVAL].value.number);
     return 0;
@@ -286,8 +285,6 @@ int elevator_property_set_eguard_alarm_interval(struct property* self, struct pr
 
     properties_tbl[PROPERTY_EGUARD_ALARM_INTERVAL].dirty = 1;
 
-    topic_property_report();
-
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");
     // eguard auto reload
     // restart_service("eguard");
@@ -300,7 +297,7 @@ int elevator_property_get_eguard_alarm_repeat_count(struct property* self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number);
     return 0;
@@ -320,7 +317,6 @@ int elevator_property_set_eguard_alarm_repeat_count(struct property* self, struc
     sconf_save_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT], 1);
 
     properties_tbl[PROPERTY_EGUARD_ALARM_REPEAT_COUNT].dirty = 1;
-    topic_property_report();
 
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");
     // eguard auto reload
@@ -334,10 +330,10 @@ int elevator_property_get_eguard_alarm_ebike_repeat_count(struct property* self)
         return -1;
     }
 
-    read_elevator_options();
-
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT], 1);
     // not set, use global
     if (_elevatord_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number == INT64_MIN) {
+        sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT], 1);
         property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number);
     } else {
         property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT].value.number);
@@ -360,7 +356,6 @@ int elevator_property_set_eguard_alarm_ebike_repeat_count(struct property* self,
     sconf_save_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT], 1);
 
     properties_tbl[PROPERTY_EGUARD_ALARM_EBIKE_REPEAT_COUNT].dirty = 1;
-    topic_property_report();
 
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");
 
@@ -370,12 +365,47 @@ int elevator_property_set_eguard_alarm_ebike_repeat_count(struct property* self,
     return 0;
 }
 
+int elevator_property_get_eguard_alarm_kunren_repeat_count(struct property* self) {
+    if (!self) {
+        return -1;
+    }
+
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT], 1);
+
+    // not set, use global
+    if (_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number == INT64_MIN) {
+        property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number);
+    } else {
+        property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number);
+    }
+
+    return 0;
+}
+
+int elevator_property_set_eguard_alarm_kunren_repeat_count(struct property* self, struct property_value* value) {
+    if (!self || !value || value->type != E_NUMBER) {
+        return -1;
+    }
+
+    if (value->val.number < -1) {
+        HR_LOGE("invalid eguard_alarm_kunren_repeat_count:%d < -1, accept: -1/0/>0\n", value->val.number);
+        return -1;
+    }
+
+    _elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number = (int)value->val.number;
+    sconf_save_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT], 1);
+
+    properties_tbl[PROPERTY_EGUARD_ALARM_KUNREN_REPEAT_COUNT].dirty = 1;
+
+    return 0;
+}
+
 int elevator_property_get_eguard_dtof_switch(struct property* self) {
     if (!self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_SWITCH], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_DTOF_SWITCH].value.number);
     return 0;
@@ -391,8 +421,6 @@ int elevator_property_set_eguard_dtof_switch(struct property* self, struct prope
 
     properties_tbl[PROPERTY_EGUARD_DTOF_SWITCH].dirty = 1;
 
-    topic_property_report();
-
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");
 
     // eguard auto reload
@@ -405,7 +433,7 @@ int elevator_property_get_eguard_dtof_occlusion_distance(struct property* self) 
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE].value.number);
     return 0;
@@ -426,8 +454,6 @@ int elevator_property_set_eguard_dtof_occlusion_distance(struct property* self, 
 
     properties_tbl[PROPERTY_EGUARD_DTOF_OCCLUSION_DISTANCE].dirty = 1;
 
-    topic_property_report();
-
     // eguard auto reload
     // restart_service("eguard");
 
@@ -439,7 +465,7 @@ int elevator_property_get_eguard_kunren_detect_enabled(struct property* self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number);
     return 0;
@@ -455,8 +481,6 @@ int elevator_property_set_eguard_kunren_detect_enabled(struct property* self, st
 
     properties_tbl[PROPERTY_EGUARD_KUNREN_DETECT_ENABLED].dirty = 1;
 
-    topic_property_report();
-
     // no need restart hqliftd, it will auto reload
     // system("/etc/init.d/hqliftd restart > /dev/null 2>&1");
     // restart_service("hqliftd");
@@ -469,7 +493,7 @@ int elevator_property_get_eguard_kunren_detect_timeout(struct property* self) {
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number);
     return 0;
@@ -491,8 +515,6 @@ int elevator_property_set_eguard_kunren_detect_timeout(struct property* self, st
 
     properties_tbl[PROPERTY_EGUARD_KUNREN_DETECT_TIMEOUT].dirty = 1;
 
-    topic_property_report();
-
     // no need restart hqliftd, it will auto reload
     // system("/etc/init.d/hqliftd restart > /dev/null 2>&1");
     // restart_service("hqliftd");
@@ -505,7 +527,7 @@ int elevator_property_get_eguard_door_zone_stopped_threshold(struct property* se
         return -1;
     }
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD], 1);
 
     property_value_set_decimal(&self->value, _elevatord_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal);
 
@@ -526,8 +548,6 @@ int elevator_property_set_eguard_door_zone_stopped_threshold(struct property* se
 
     properties_tbl[PROPERTY_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].dirty = 1;
 
-    topic_property_report();
-
     // no need restart hqliftd, it will auto reload
     // system("/etc/init.d/hqliftd restart > /dev/null 2>&1");
     // restart_service("hqliftd");
@@ -538,7 +558,7 @@ int elevator_property_set_eguard_door_zone_stopped_threshold(struct property* se
 int elevator_property_get_eguard_door_control_enabled(struct property* self) {
     if (!self) return -1;
 
-    read_elevator_options();
+    sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED], 1);
 
     property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED].value.number);
 
@@ -554,8 +574,6 @@ int elevator_property_set_eguard_door_control_enabled(struct property* self, str
     sconf_save_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_DOOR_CONTROL_ENABLED], 1);
 
     properties_tbl[PROPERTY_EGUARD_DOOR_CONTROL_ENABLED].dirty = 1;
-
-    topic_property_report();
 
     // should restart to release control when you disable it,
     // system("/etc/init.d/eguard restart > /dev/null 2>&1");

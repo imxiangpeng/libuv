@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -154,6 +155,21 @@ static void* _sconf_auto_reload_task(void* args) {
 
     return NULL;
 }
+
+static void fsync_parent_dir(const char* file) {
+    if (!file) return;
+    char* tmp = strdup(file);
+    char* dir = dirname(tmp);
+    int dirfd = open(dir, O_RDONLY | O_DIRECTORY);
+
+    if (dirfd != -1) {
+        fsync(dirfd);
+        close(dirfd);
+    }
+
+    free(tmp);
+}
+
 
 static void _sconf_init(void) {
     pthread_attr_t attr;
@@ -305,8 +321,11 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
     fdatasync(fd);
     close(fd);
 
-    unlink(path);
-    rename(tmp, path);
+    // no need call unlink
+    if (rename(tmp, path) != 0) {
+       unlink(tmp);
+    }
+    fsync_parent_dir(path);
     free(tmp);
     return 0;
 }
@@ -522,8 +541,13 @@ int sconf_save_with_proto(const char* path, struct sconf_proto* proto, size_t si
     fdatasync(fd);
     close(fd);
 
-    unlink(path);
-    rename(tmp, path);
+    // no need call unlink
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+    }
+
+    fsync_parent_dir(path);
+
     free(tmp);
 
     return 0;

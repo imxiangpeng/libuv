@@ -207,6 +207,10 @@ static int _on_property_set(void* payload, int len) {
     }
 
     cJSON_Delete(root);
+
+    // auto report dirty properties
+    topic_property_report();
+
     return 0;
 }
 
