@@ -54,7 +54,8 @@
 // detect fault status:
 // 1. kunren (manual mode) should wait gpio to confirm
 // 2. kunren should be released after 90min
-static uv_timer_t _fault_timer;
+static uv_timer_t _rescure_timer;
+static uv_timer_t _alive_timer;
 
 // fault event only in memory do not save
 struct lift_fault_event {
@@ -239,7 +240,7 @@ static struct uviot_topic dm_topic_liftfault = {
     .name = EVENT_FAULT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_FAULT_TOPIC_NAME,
     .period = 0,
-    .qos = 1, // houqi not support Qos2
+    .qos = 1,  // houqi not support Qos2
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };
@@ -252,19 +253,25 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     pthread_mutex_init(&_queue_lock, NULL);
 
     // init timer for sendvideo & sendsate command timeout
-    memset((void*)&_fault_timer, 0, sizeof(_fault_timer));
-    uv_timer_init(uv_default_loop(), &_fault_timer);
+    memset((void*)&_rescure_timer, 0, sizeof(_rescure_timer));
+    memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
+    uv_timer_init(uv_default_loop(), &_rescure_timer);
+    uv_timer_init(uv_default_loop(), &_alive_timer);
 
     uviot_topic_register(iot, &dm_topic_liftfault);
     return 0;
 }
 
 int topic_houqi_liftfault_deinit(void) {
-    if (_fault_timer.type == UV_UNKNOWN_HANDLE) {
-        return 0;
+    if (_rescure_timer.type != UV_UNKNOWN_HANDLE) {
+        if (!uv_is_closing((uv_handle_t*)&_rescure_timer)) {
+            uv_close((uv_handle_t*)&_rescure_timer, NULL);
+        }
     }
-    if (!uv_is_closing((uv_handle_t*)&_fault_timer)) {
-        uv_close((uv_handle_t*)&_fault_timer, NULL);
+    if (_alive_timer.type != UV_UNKNOWN_HANDLE) {
+        if (!uv_is_closing((uv_handle_t*)&_alive_timer)) {
+            uv_close((uv_handle_t*)&_alive_timer, NULL);
+        }
     }
     return 0;
 }
@@ -295,6 +302,7 @@ static void fault_event_free(struct lift_fault_event* e) {
 }
 
 // 考虑在这个函数中，将事件永久存储，应对重启或者断电情况
+// 在这里还是在 publish 之后呢，因为这里还没有发送，丢也就丢了
 static int publish_fault_event(struct lift_fault_event* e) {
     pthread_mutex_lock(&_queue_lock);
     hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
@@ -302,10 +310,21 @@ static int publish_fault_event(struct lift_fault_event* e) {
     return uviot_publish_async(_iot, &dm_topic_liftfault);
 }
 
+// call this function when you have lcok
+static int publish_fault_event_without_lock(struct lift_fault_event* e) {
+    // pthread_mutex_lock(&_queue_lock);
+    hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
+    // pthread_mutex_unlock(&_queue_lock);
+    return uviot_publish_async(_iot, &dm_topic_liftfault);
+}
+
 #if ENABLE_RESCURE_BTN
 // 0: no press
 // 1: press
 static int _people_trapped_fault_wait_rescure_button(void) {
+    // low: press active
+    return gpiod_ctxless_get_value(GPIO_CHIP_NAME, RESCURE_GPIO_PIN, true, "rescure-btn");
+#if 0    
     int ret = 0;
     struct gpiod_chip* chip = gpiod_chip_open(GPIO_CHIP_NAME);
     if (!chip) {
@@ -330,14 +349,13 @@ out:
         gpiod_line_release(line);
     }
     gpiod_chip_close(chip);
+#endif
     return ret;
 }
 #endif
 
-// 1. detect rescure button when it's pending
-// 2. detect timeout, then auto resolve fault
-static void _people_trapped_fault_detect(uv_timer_t* handle) {
-    (void)handle;
+// filter out timeout event and auto resolve it
+static void _fault_event_alive_timeout_detect() {
     struct lift_fault_event *e = NULL, *f = NULL;
 
     int64_t now = get_realtime_ms();
@@ -347,7 +365,35 @@ static void _people_trapped_fault_detect(uv_timer_t* handle) {
 
     // 1.1 lookup kunren event
     hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
-        if (f->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+        begin = e->fault_begin_time;
+        // timeout without confirmed
+        if (now - begin >= LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT) {
+            HR_LOGD("%s(%d): fault:0x%X timeout pending:%d !\n", __FUNCTION__, __LINE__, e->type, e->pending);
+
+            e->fault_end_time = get_realtime_ms();
+
+            HR_LOGD("%s(%d): fault:0x%X timeout auto resolved!\n", __FUNCTION__, __LINE__, e->type);
+            pthread_mutex_unlock(&_queue_lock);
+            // elevator_fault_resolved will auto process pending event
+            elevator_fault_resolved(e->type);
+            pthread_mutex_lock(&_queue_lock);
+        }
+    }
+
+    pthread_mutex_unlock(&_queue_lock);
+}
+// 1. detect rescure button when it's pending
+// 2. detect timeout, then auto resolve fault
+static void _people_trapped_fault_rescure_detect(uv_timer_t* handle) {
+    (void)handle;
+    struct lift_fault_event *e = NULL, *f = NULL;
+
+    // 1. when kunren fault is pending, we should detect rescure button
+    pthread_mutex_lock(&_queue_lock);
+
+    // 1.1 lookup pending kunren event
+    hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
+        if (f->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED && f->pending != 0) {
             e = f;
             break;
         }
@@ -355,67 +401,37 @@ static void _people_trapped_fault_detect(uv_timer_t* handle) {
 
     if (!e) {
         pthread_mutex_unlock(&_queue_lock);
+        if (uv_is_active((const uv_handle_t*)&_rescure_timer)) {
+            uv_timer_stop(&_rescure_timer);
+        }
         return;
     }
-
-    begin = e->fault_begin_time;
 
     HR_LOGD("%s(%d) fault:%d, pending:%d\n", __FUNCTION__, __LINE__, e->type, e->pending);
+
     // 2. the event is pending
-    if (e->pending != 0 && e->pending < 3) {
-        // detect rescure gpio button
+    // detect rescure gpio button
 #if ENABLE_RESCURE_BTN
-        int pressed = _people_trapped_fault_wait_rescure_button();
-        HR_LOGD("%s(%d) fault:%d, pending:%d, pressed:%d\n", __FUNCTION__, __LINE__, e->type, e->pending, pressed);
-        if (pressed == 1) {
-            e->pending++;
-        }
+    int pressed = _people_trapped_fault_wait_rescure_button();
+    HR_LOGD("%s(%d) fault:%d, pending:%d, pressed:%d\n", __FUNCTION__, __LINE__, e->type, e->pending, pressed);
+    if (pressed == 1) {
+        e->pending++;
+    }
 #else
-        e->pending++; // no need, because pending is 0, never come in
+    e->pending++;  // no need, because pending is 0, never come in
 #endif
 
-        // timeout without confirmed
-        if (now - begin >= LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT) {
-            HR_LOGD("%s(%d): fault:0x%X timeout in pending status!\n", __FUNCTION__, __LINE__, e->type);
-            // take off from idle queue
-            hr_list_del(&e->entry);
-
-            e->fault_end_time = get_realtime_ms();
-            pthread_mutex_unlock(&_queue_lock);
-
-            // we should drop pending event
-            HR_INIT_LIST_HEAD(&e->entry);
-            free(e);
-
-            return;
-        }
-
-        pthread_mutex_unlock(&_queue_lock);
-
-        uv_timer_start(&_fault_timer, _people_trapped_fault_detect, 500, 0);
-        return;
-    }
-
     // kunren event has been confirmed from rescure button, fire it
-    if (e->pending != 0) {
+    if (e->pending >= 3) {
         e->pending = 0;
         HR_LOGD("%s(%d) fault:%d, pending:%d, fire!!!\n", __FUNCTION__, __LINE__, e->type, e->pending);
         hr_list_del(&e->entry);
         pthread_mutex_unlock(&_queue_lock);
         publish_fault_event(e);
-        uv_timer_start(&_fault_timer, _people_trapped_fault_detect, 1000 * 60, 0);
         return;
     }
 
     pthread_mutex_unlock(&_queue_lock);
-    // after confirmed, we should force release kunren event after 90min
-    if (now - begin < LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT) {
-        uv_timer_start(&_fault_timer, _people_trapped_fault_detect, 1000 * 60, 0);
-        return;
-    }
-
-    HR_LOGD("kunren fault timeout without resolved, begin:%ld\n", e->fault_begin_time);
-    elevator_fault_resolved(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
 }
 int elevator_fault_occurred(enum elevator_exception fault) {
     struct lift_fault_event* e = NULL;
@@ -500,8 +516,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         HR_LOGD("%s(%d): fault:0x%X, rescure mode:%d\n", __FUNCTION__, __LINE__, fault, _options[OPTION_RESCURE_MODE].value.number);
         e->pending = _options[OPTION_RESCURE_MODE].value.number == RESCURE_MODE_AUTO ? 0 : 1;
-        uv_timer_stop(&_fault_timer);
-        uv_timer_start(&_fault_timer, _people_trapped_fault_detect, 500, 0);
+        uv_timer_start(&_rescure_timer, _people_trapped_fault_rescure_detect, 500, 1);
     }
 
     // mxp, 20250707, broadcast fault event to system
@@ -520,6 +535,8 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
         pthread_mutex_unlock(&_queue_lock);
     }
+    // detect every second
+    uv_timer_start(&_alive_timer, _fault_event_alive_timeout_detect, 1000 * 60, 1);
     return 0;
 }
 
