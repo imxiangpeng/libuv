@@ -104,6 +104,9 @@ int elevator_light_brightness();
 
 // it's implement in houqi_liftfault
 
+// not thread safe!
+// should only be called in main thread such as uv loop
+// maybe you should call statemachine_post_fault in uloop
 int elevator_fault_occurred(enum elevator_exception fault);
 int elevator_fault_resolved(enum elevator_exception fault);
 

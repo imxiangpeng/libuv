@@ -1,6 +1,7 @@
 #ifndef STATE_MACHINE_H
 #define STATE_MACHINE_H
 
+#include "elevator.h"
 enum state_machine_state {
     SM_ELEVATOR_UNINIT = 0,
     SM_ELEVATOR_STOPPED,
@@ -14,6 +15,8 @@ enum state_machine_event {
     SM_EVENT_DOOR_OPENED,
     SM_EVENT_DOOR_CLOSED,
     SM_EVENT_RUNNING,
+
+    SM_EVENT_POST_FAULT = 0x10000,
 };
 
 struct state_machine {
@@ -30,5 +33,6 @@ int statemachine_init(struct uv_loop_s *loop);
 int statemachine_deinit();
 
 int statemachine_post(enum state_machine_event message);
+int statemachine_post_fault(enum elevator_exception e, int status);
 
 #endif

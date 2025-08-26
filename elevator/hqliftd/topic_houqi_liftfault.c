@@ -39,22 +39,40 @@
 // 2. 在 RESCURE_MODE_MANUAL 模式，elevator_fault_occurred 会这是事件为 pending 事件，初始值为 1
 //    然后启动 500ms 间隔的定时器 _people_trapped_fault_detect 来检测救援按钮是否按下
 //    每次检测到按键就会将 pending 值 + 1， 如果达到 3 我们将确认故障发生，将事件推送给厚齐平台
-// 3. 以上任意情况，在将事件发送给厚齐平台后，会启动间隔 1min 的定时器来检测事件发生时长，
-//    当事件发生时长达到 90min 后，主动结束故障事件。
-//    ==> 这里需要完善，不确认也需要 90min 超时检测，如果仍然是 pending 状态直接销毁
+// 3. 在任意故障发生后，会启动间隔 1min 的定时器来检测事件发生时长，
+//    当事件发生时长达到 150min 后，主动结束故障事件。
+//    ==> 这里需要完善，不确认也需要 150min 超时检测，如果仍然是 pending 状态直接销毁
+//    ==> 中国超时逻辑适用于所有的事件
 // 4. 我们使用了两个队列，正常非 pending 事件直接进入 _lift_fault_message_queue 等待 MQ发送，
 //    在发送后，调度到 _lift_fault_idle_queue 队列，等待结束事件，
 //    再次进入 _lift_fault_message_queue 发送后自动销毁
 //    对于 pending 事件（手动救援模式下困人事件），首先进入 _lift_fault_idle_queue 等待确认，或者等待结束事件（pending事件不会发送）
+// 5. 困人的实际检测实在 state_machine 里面，我们在内部释放了事件，但是在外部其仍然是出于困人的状态，实际上电梯也仍然出于困人状态, 等待解除
+//    只是在解除时因为之前已经上报过解除事件，所以这里不会再做什么了。
+//    在模拟测试的时候一定要注意这一点。
 
-#ifndef LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT
-#define LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT (1000 * 60 * 90)  // 90min
+#ifndef LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT
+#define LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT (1000 * 60 * 150)  // 150min
 #endif
+
+#ifndef LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT
+#define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000 * 60)  // detect every min
+#endif
+
+#ifndef LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT
+#define LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT 300
+#endif
+
+#ifndef LIFTFAULT_FAULT_RESCURE_PENDING_MAX
+// initial pending 1,  3 - 1 = 2 * 300 ms
+#define LIFTFAULT_FAULT_RESCURE_PENDING_MAX 3
+#endif
+
 
 // detect fault status:
 // 1. kunren (manual mode) should wait gpio to confirm
 // 2. kunren should be released after 90min
-static uv_timer_t _rescure_timer;
+static uv_timer_t _rescure_btn_timer;
 static uv_timer_t _alive_timer;
 
 // fault event only in memory do not save
@@ -77,7 +95,12 @@ static HR_LIST_HEAD(_lift_fault_message_queue);
 // pending fault which have publish but not finished
 static HR_LIST_HEAD(_lift_fault_idle_queue);
 
-static pthread_mutex_t _queue_lock;
+// most time we are running in uv loop thread,
+// but ebike/speed occure in uloop thread
+// mxp, 20259826, remove mutex lock,
+// all fault will be report from statemachine,
+// which schedule event to uv loop thread
+// static pthread_mutex_t _queue_lock;
 
 // no persist storage
 static struct fault_report_statistics {
@@ -98,6 +121,7 @@ static struct fault_report_statistics {
 // date to record and reset report statistics
 static struct tm _fault_report_statistics_tm;
 
+static void dump_fault_queue(void);
 static void upload_fault_video(struct lift_fault_event* e);
 
 static int to_houqi_fault(enum elevator_exception fault) {
@@ -150,9 +174,11 @@ static int _on_publish(void** payload, int* len) {
     if (!root)
         return -1;
 
-    pthread_mutex_lock(&_queue_lock);
+    dump_fault_queue();
+
+    // pthread_mutex_lock(&_queue_lock);
     if (hr_list_empty(&_lift_fault_message_queue)) {
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
         cJSON_Delete(root);
         return -1;
     }
@@ -161,7 +187,7 @@ static int _on_publish(void** payload, int* len) {
     // take off from list
     hr_list_del(&e->entry);
 
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 
     uuid_generate(uuid);
 
@@ -212,14 +238,16 @@ static int _on_publish(void** payload, int* len) {
     // the fault have finished, release it
     if (e->fault_end_time == 0) {
         // we should keep it for finish event
-        pthread_mutex_lock(&_queue_lock);
+        // pthread_mutex_lock(&_queue_lock);
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
     } else {
         // now we can free event
         HR_INIT_LIST_HEAD(&e->entry);
         free(e);
     }
+
+    dump_fault_queue();
 
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         cJSON_Delete(root);
@@ -250,12 +278,12 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     (void)device_name;
     _iot = iot;
 
-    pthread_mutex_init(&_queue_lock, NULL);
+    // pthread_mutex_init(&_queue_lock, NULL);
 
     // init timer for sendvideo & sendsate command timeout
-    memset((void*)&_rescure_timer, 0, sizeof(_rescure_timer));
+    memset((void*)&_rescure_btn_timer, 0, sizeof(_rescure_btn_timer));
     memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
-    uv_timer_init(uv_default_loop(), &_rescure_timer);
+    uv_timer_init(uv_default_loop(), &_rescure_btn_timer);
     uv_timer_init(uv_default_loop(), &_alive_timer);
 
     uviot_topic_register(iot, &dm_topic_liftfault);
@@ -263,9 +291,9 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
 }
 
 int topic_houqi_liftfault_deinit(void) {
-    if (_rescure_timer.type != UV_UNKNOWN_HANDLE) {
-        if (!uv_is_closing((uv_handle_t*)&_rescure_timer)) {
-            uv_close((uv_handle_t*)&_rescure_timer, NULL);
+    if (_rescure_btn_timer.type != UV_UNKNOWN_HANDLE) {
+        if (!uv_is_closing((uv_handle_t*)&_rescure_btn_timer)) {
+            uv_close((uv_handle_t*)&_rescure_btn_timer, NULL);
         }
     }
     if (_alive_timer.type != UV_UNKNOWN_HANDLE) {
@@ -292,9 +320,9 @@ static void fault_event_free(struct lift_fault_event* e) {
         return;
     }
 
-    pthread_mutex_lock(&_queue_lock);
+    // pthread_mutex_lock(&_queue_lock);
     hr_list_del(&e->entry);
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 
     HR_INIT_LIST_HEAD(&e->entry);
 
@@ -304,18 +332,74 @@ static void fault_event_free(struct lift_fault_event* e) {
 // 考虑在这个函数中，将事件永久存储，应对重启或者断电情况
 // 在这里还是在 publish 之后呢，因为这里还没有发送，丢也就丢了
 static int publish_fault_event(struct lift_fault_event* e) {
-    pthread_mutex_lock(&_queue_lock);
-    hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
-    pthread_mutex_unlock(&_queue_lock);
-    return uviot_publish_async(_iot, &dm_topic_liftfault);
-}
-
-// call this function when you have lcok
-static int publish_fault_event_without_lock(struct lift_fault_event* e) {
     // pthread_mutex_lock(&_queue_lock);
     hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
     // pthread_mutex_unlock(&_queue_lock);
     return uviot_publish_async(_iot, &dm_topic_liftfault);
+}
+
+static void dump_fault_queue(void) {
+    struct lift_fault_event* e = NULL;
+    // we should lookup in idle list
+    // ignore when can not find
+
+    HR_LOGD("message queue begin:\n");
+    hr_list_for_each_entry(e, &_lift_fault_message_queue, entry) {
+        HR_LOGD("-> message: %p, type:0x%x, pending:%d, begin:%lld\n", e, e->type, e->pending, e->fault_begin_time);
+    }
+    HR_LOGD("message queue end!\n");
+
+    HR_LOGD("idle queue begin:\n");
+    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
+        HR_LOGD("-> idle: %p, type:0x%x, pending:%d, begin:%lld\n", e, e->type, e->pending, e->fault_begin_time);
+    }
+    HR_LOGD("idle queue end!\n");
+}
+
+// filter out timeout event and auto resolve it
+static void _fault_event_alive_timeout_detect(uv_timer_t* handle) {
+    (void)handle;
+    struct lift_fault_event* e = NULL;
+
+    int64_t now = get_realtime_ms();
+    int64_t begin = 0;
+    HR_LOGD("%s(%d): in!\n", __FUNCTION__, __LINE__);
+    dump_fault_queue();
+begin:
+    // 1. when kunren fault is pending, we should detect rescure button
+    // pthread_mutex_lock(&_queue_lock);
+
+    // can we stop timer? it maybe reenter idle from message queue
+    if (hr_list_empty(&_lift_fault_idle_queue) && hr_list_empty(&_lift_fault_message_queue)) {
+        // pthread_mutex_unlock(&_queue_lock);
+        // timer should be stopped when both idle and message queues are empty
+        uv_timer_stop(handle);
+        return;
+    }
+
+    // 1.1 lookup kunren event
+    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
+        begin = e->fault_begin_time;
+        // timeout without confirmed
+        if (now - begin >= LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT) {
+            HR_LOGD("%s(%d): fault:0x%X timeout pending:%d !\n", __FUNCTION__, __LINE__, e->type, e->pending);
+
+            e->fault_end_time = get_realtime_ms();
+
+            HR_LOGD("%s(%d): fault:0x%X timeout auto resolved!\n", __FUNCTION__, __LINE__, e->type);
+            // pthread_mutex_unlock(&_queue_lock);
+            // it's in same idle queue, directly call elevator_fault_resolved
+            // elevator_fault_resolved will auto process pending event
+            elevator_fault_resolved(e->type);
+            // or we can use hr_list_for_each_entry_safe
+            // we not use hr_list_for_each_entry_safe because elevator_fault_resolved accept type will loop again
+            // we should add new function directly fire and release e not use type
+            goto begin;
+        }
+    }
+
+    HR_LOGD("%s(%d): out!\n", __FUNCTION__, __LINE__);
+    // pthread_mutex_unlock(&_queue_lock);
 }
 
 #if ENABLE_RESCURE_BTN
@@ -354,42 +438,20 @@ out:
 }
 #endif
 
-// filter out timeout event and auto resolve it
-static void _fault_event_alive_timeout_detect() {
-    struct lift_fault_event *e = NULL, *f = NULL;
-
-    int64_t now = get_realtime_ms();
-    int64_t begin = 0;
-    // 1. when kunren fault is pending, we should detect rescure button
-    pthread_mutex_lock(&_queue_lock);
-
-    // 1.1 lookup kunren event
-    hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
-        begin = e->fault_begin_time;
-        // timeout without confirmed
-        if (now - begin >= LIFTFAULT_KUNREN_AUTO_RESOLVED_TIMEOUT) {
-            HR_LOGD("%s(%d): fault:0x%X timeout pending:%d !\n", __FUNCTION__, __LINE__, e->type, e->pending);
-
-            e->fault_end_time = get_realtime_ms();
-
-            HR_LOGD("%s(%d): fault:0x%X timeout auto resolved!\n", __FUNCTION__, __LINE__, e->type);
-            pthread_mutex_unlock(&_queue_lock);
-            // elevator_fault_resolved will auto process pending event
-            elevator_fault_resolved(e->type);
-            pthread_mutex_lock(&_queue_lock);
-        }
-    }
-
-    pthread_mutex_unlock(&_queue_lock);
-}
 // 1. detect rescure button when it's pending
-// 2. detect timeout, then auto resolve fault
-static void _people_trapped_fault_rescure_detect(uv_timer_t* handle) {
+static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     (void)handle;
     struct lift_fault_event *e = NULL, *f = NULL;
 
+    int pressed = 1;
+#if ENABLE_RESCURE_BTN
+    // detect button without lock
+    pressed = _people_trapped_fault_wait_rescure_button();
+#endif
+
+    dump_fault_queue();
     // 1. when kunren fault is pending, we should detect rescure button
-    pthread_mutex_lock(&_queue_lock);
+    // pthread_mutex_lock(&_queue_lock);
 
     // 1.1 lookup pending kunren event
     hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
@@ -400,38 +462,32 @@ static void _people_trapped_fault_rescure_detect(uv_timer_t* handle) {
     }
 
     if (!e) {
-        pthread_mutex_unlock(&_queue_lock);
-        if (uv_is_active((const uv_handle_t*)&_rescure_timer)) {
-            uv_timer_stop(&_rescure_timer);
-        }
+        // pthread_mutex_unlock(&_queue_lock);
+        uv_timer_stop(&_rescure_btn_timer);
         return;
     }
 
-    HR_LOGD("%s(%d) fault:%d, pending:%d\n", __FUNCTION__, __LINE__, e->type, e->pending);
+    HR_LOGD("%s(%d) fault:%d, pending:%d, pressed:%d\n", __FUNCTION__, __LINE__, e->type, e->pending, pressed);
 
+    if (pressed != 1) {
+        // pthread_mutex_unlock(&_queue_lock);
+        return;
+    }
     // 2. the event is pending
     // detect rescure gpio button
-#if ENABLE_RESCURE_BTN
-    int pressed = _people_trapped_fault_wait_rescure_button();
-    HR_LOGD("%s(%d) fault:%d, pending:%d, pressed:%d\n", __FUNCTION__, __LINE__, e->type, e->pending, pressed);
-    if (pressed == 1) {
-        e->pending++;
-    }
-#else
-    e->pending++;  // no need, because pending is 0, never come in
-#endif
+    e->pending++;
 
     // kunren event has been confirmed from rescure button, fire it
-    if (e->pending >= 3) {
+    if (e->pending >= LIFTFAULT_FAULT_RESCURE_PENDING_MAX) {
         e->pending = 0;
         HR_LOGD("%s(%d) fault:%d, pending:%d, fire!!!\n", __FUNCTION__, __LINE__, e->type, e->pending);
         hr_list_del(&e->entry);
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
         publish_fault_event(e);
         return;
     }
 
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 }
 int elevator_fault_occurred(enum elevator_exception fault) {
     struct lift_fault_event* e = NULL;
@@ -442,6 +498,10 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
+
+    HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
+
+    dump_fault_queue();
 
     if (_fault_report_statistics_tm.tm_year != tm.tm_year ||
         _fault_report_statistics_tm.tm_mon != tm.tm_mon ||
@@ -477,7 +537,18 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         }
     }
 
-    pthread_mutex_lock(&_queue_lock);
+    // pthread_mutex_lock(&_queue_lock);
+
+    if (!hr_list_empty(&_lift_fault_message_queue)) {
+        struct lift_fault_event* f = NULL;
+        hr_list_for_each_entry(f, &_lift_fault_message_queue, entry) {
+            if (f->type == fault) {
+                HR_LOGE("%s(%d): fault:0x%X is occurring and ready to report, do not report again\n", __FUNCTION__, __LINE__, fault);
+                // pthread_mutex_unlock(&_queue_lock);
+                return -1;
+            }
+        }
+    }
 
     if (!hr_list_empty(&_lift_fault_idle_queue)) {
         struct lift_fault_event* f = NULL;
@@ -485,13 +556,13 @@ int elevator_fault_occurred(enum elevator_exception fault) {
             if (f->type == fault) {
                 HR_LOGE("%s(%d): fault:0x%X is occurring, do not report again\n", __FUNCTION__, __LINE__, fault);
 
-                pthread_mutex_unlock(&_queue_lock);
+                // pthread_mutex_unlock(&_queue_lock);
                 return -1;
             }
         }
     }
 
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 
     // mxp, 20250702, do not report & generate fault video when fault is disabled
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
@@ -516,12 +587,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         HR_LOGD("%s(%d): fault:0x%X, rescure mode:%d\n", __FUNCTION__, __LINE__, fault, _options[OPTION_RESCURE_MODE].value.number);
         e->pending = _options[OPTION_RESCURE_MODE].value.number == RESCURE_MODE_AUTO ? 0 : 1;
-        uv_timer_start(&_rescure_timer, _people_trapped_fault_rescure_detect, 500, 1);
     }
-
-    // mxp, 20250707, broadcast fault event to system
-    uelevator_send_fault_event(fault, 1);
-
     // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
     // filter it in upload_fault_video
     if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
@@ -531,27 +597,68 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     if (e->pending == 0) {
         publish_fault_event(e);
     } else {
-        pthread_mutex_lock(&_queue_lock);
+        // pthread_mutex_lock(&_queue_lock);
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
+
+        // only support ELEVATOR_EXCEPTION_PEOPLE_TRAPPED
+        if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+            uv_timer_start(&_rescure_btn_timer, _people_trapped_fault_rescure_btn_detect, LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT, LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT);
+        }
     }
+
     // detect every second
-    uv_timer_start(&_alive_timer, _fault_event_alive_timeout_detect, 1000 * 60, 1);
+    if (!uv_is_active((const uv_handle_t*)&_alive_timer)) {
+        uv_timer_start(&_alive_timer, _fault_event_alive_timeout_detect, LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT, LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT);
+    }
+
+    // mxp, 20250707, broadcast fault event to system
+    uelevator_send_fault_event(fault, 1);
+
+    dump_fault_queue();
     return 0;
 }
 
 // the same fault can not report more than once, before it end
+// pending event will not report
 int elevator_fault_resolved(enum elevator_exception fault) {
     struct lift_fault_event *e = NULL, *f = NULL;
     // we should lookup in idle list
     // ignore when can not find
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
-    pthread_mutex_lock(&_queue_lock);
+    // pthread_mutex_lock(&_queue_lock);
+
+    dump_fault_queue();
+    // drop event in message queue
+    hr_list_for_each_entry(f, &_lift_fault_message_queue, entry) {
+        if (f->type == fault) {
+            e = f;
+            break;
+        }
+    }
+
+    if (e) {
+        HR_LOGD("%s(%d): found fault:0x%X, in message queue!\n", __FUNCTION__, __LINE__, fault);
+        // take off from idle queue
+        hr_list_del(&e->entry);
+
+        // pthread_mutex_unlock(&_queue_lock);
+
+        // we should drop pending event
+        HR_LOGD("%s(%d): fault:0x%X in message queue, drop it\n", __FUNCTION__, __LINE__, fault);
+        HR_INIT_LIST_HEAD(&e->entry);
+        free(e);
+        dump_fault_queue();
+        return 0;
+    }
 
     if (hr_list_empty(&_lift_fault_idle_queue)) {
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
+        HR_LOGD("%s(%d): fault queue empty fault:0x%X\n", __FUNCTION__, __LINE__, fault);
         return -1;
     }
+
+    e = NULL;
 
     hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
         if (f->type == fault) {
@@ -561,15 +668,19 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     }
 
     if (!e) {
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
+        HR_LOGD("%s(%d): not found fault:0x%X\n", __FUNCTION__, __LINE__, fault);
         return -1;
     }
 
     // take off from idle queue
     hr_list_del(&e->entry);
 
+    HR_LOGD("take off from idle queue ...\n");
+    dump_fault_queue();
+
     e->fault_end_time = get_realtime_ms();
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 
     // we should drop pending event
     if (e->pending != 0) {
@@ -594,7 +705,9 @@ int elevator_fault_resolved(enum elevator_exception fault) {
         upload_fault_video(e);
     }
 
+    HR_LOGD("add to message queue again ...\n");
     publish_fault_event(e);
+    dump_fault_queue();
     return 0;
 }
 
@@ -605,9 +718,9 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
         return -1;
     }
 
-    pthread_mutex_lock(&_queue_lock);
+    // pthread_mutex_lock(&_queue_lock);
     if (hr_list_empty(&_lift_fault_idle_queue)) {
-        pthread_mutex_unlock(&_queue_lock);
+        // pthread_mutex_unlock(&_queue_lock);
         return 0;
     }
 
@@ -615,7 +728,7 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
     *type = to_houqi_fault(e->type);
     *occurred_ms = e->fault_begin_time;
 
-    pthread_mutex_unlock(&_queue_lock);
+    // pthread_mutex_unlock(&_queue_lock);
 
     return 0;
 }

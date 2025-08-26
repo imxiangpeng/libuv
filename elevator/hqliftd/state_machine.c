@@ -69,6 +69,8 @@ static const char* event_str(enum state_machine_event event) {
             return "door closed";
         case SM_EVENT_RUNNING:
             return "running";
+        case SM_EVENT_POST_FAULT:
+            return "post fault";
         default:
             return "known";
     }
@@ -142,7 +144,24 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
         return;
     }
 
-    printf("state machine message: %d(%s) received event %d(%s), exception:%d\n", _state, state_str(_state), event, event_str(event), _elevator_exception);
+    if (event == SM_EVENT_POST_FAULT) {
+        enum elevator_exception fault = ELEVATOR_EXCEPTION_NONE;
+
+        int status = 0;
+
+        read(_pipefd[0], &fault, sizeof(fault));
+        read(_pipefd[0], &status, sizeof(status));
+
+        HR_LOGD("post fault event: fault:%d, status:%d\n", fault, status);
+
+        if (status == 1) {
+            elevator_fault_occurred(fault);
+        } else {
+            elevator_fault_resolved(fault);
+        }
+        return;
+    }
+
     HR_LOGD("state machine message: %d(%s) received event %d(%s), exception:%d\n", _state, state_str(_state), event, event_str(event), _elevator_exception);
 
     // finished trapped event when door opened in any case
@@ -173,6 +192,8 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     break;
                 case SM_EVENT_DOOR_CLOSED:
                     _state = SM_ELEVATOR_STOPPED_DOOR_CLOSED;
+                    break;
+                default:
                     break;
             }
             break;
@@ -308,5 +329,20 @@ int statemachine_post(enum state_machine_event message) {
     }
 
     write(_pipefd[1], &message, sizeof(message));
+    return 0;
+}
+
+int statemachine_post_fault(enum elevator_exception e, int status) {
+    if (_pipefd[1] == -1) {
+        return -1;
+    }
+
+    struct {
+        enum state_machine_event event;
+        enum elevator_exception fault;
+        int status;
+    } __attribute__((packed)) data = {SM_EVENT_POST_FAULT, e, status};
+
+    write(_pipefd[1], &data, sizeof(data));
     return 0;
 }
