@@ -20,6 +20,12 @@
 static struct uviot* _iot = NULL;
 
 int iot_init(struct uv_loop_s* loop) {
+    if (!_options[OPTION_MQ_SERVER].value.string ||
+        !_options[OPTION_MQ_ID].value.string ||
+        !_options[OPTION_MQ_USERNAME].value.string ||
+        !_options[OPTION_MQ_PASSWORD].value.string) {
+        return -1;
+    }
     _iot = uviot_alloc(loop);
     if (!_iot)
         return -1;
@@ -35,9 +41,11 @@ int iot_init(struct uv_loop_s* loop) {
     snprintf(_iot->password, sizeof(_iot->password), "%s", _options[OPTION_MQ_PASSWORD].value.string);
 
     // we should use tls/ssl protocol, special cafile or capath
-    if (0 == strcasecmp("mqtts", _options[OPTION_MQ_PROTO].value.string)) {
-
+    if (_options[OPTION_MQ_PROTO].value.string) {
+        if (0 == strcasecmp("mqtts", _options[OPTION_MQ_PROTO].value.string)) {
+        }
     }
+
     HR_LOGD("server:%s:%d, alive:%d seconds, client id:%s, username:%s, password:%s\n", _iot->server, _iot->port, _iot->alive_time, _iot->id, _iot->username, _iot->password);
     // topic init early, we can observe motion event early before motion started
     iot_topic_init(_iot, "", "");

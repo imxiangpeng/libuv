@@ -7,9 +7,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "elevator.h"
 #include "hr_log.h"
+
+#define ENABLE_DEFAULT_PARAMS 0
+
+// mxp, 20250817, when stored VERSION not match this, we should update option to storage
+// you should increase _VERSION when you add or modify _options
+static const int _VERSION = 1;
 
 #define DEFAULT_BROKER_PORT 1883     // 8883 //1883
 #define DEFAULT_BROKER_ALIVETIME 60  // 300 //60                       // 60s
@@ -17,9 +24,11 @@
 // not limit kunren & ebike event
 #define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
 
+#if ENABLE_DEFAULT_PARAMS
+
 #define RTMP_URL_PREFIX "rtmp://srs.hqszjs.com:1935/live"
 
-static char DEFAULT_MQ_ID[128] = {0};  // please init id when initialize
+static char DEFAULT_MQ_ID[128] = {0};     // please init id when initialize
 static char DEFAULT_LIVE_URL[512] = {0};  // please init id when initialize
 
 static char DEFAULT_MQ_PROTO[] = "mqtt";
@@ -31,9 +40,19 @@ static char DEFAULT_FTP_ADDRESS[] = "ftp://ftp.hqszjs.com:2100";
 static char DEFAULT_FTP_USERNAME[] = "inspur";
 static char DEFAULT_FTP_PASSWORD[] = "inspur88*";
 
-// mxp, 20250817, when stored VERSION not match this, we should update option to storage
-// you should increase _VERSION when you add or modify _options
-static const int _VERSION = 1;
+const char* _default_string_values[_OPTION_MAX] = {
+    [OPTION_MQ_ID] = DEFAULT_MQ_ID,
+    [OPTION_MQ_PROTO] = DEFAULT_MQ_PROTO,
+    [OPTION_MQ_SERVER] = DEFAULT_BROKER_SERVER,
+    [OPTION_MQ_USERNAME] = DEFAULT_MQ_USERNAME,
+    [OPTION_MQ_PASSWORD] = DEFAULT_MQ_PASSWORD,
+    [OPTION_LIVE_URL] = DEFAULT_LIVE_URL,
+    [OPTION_FTP_ADDRESS] = DEFAULT_FTP_ADDRESS,
+    [OPTION_FTP_USERNAME] = DEFAULT_FTP_USERNAME,
+    [OPTION_FTP_PASSWORD] = DEFAULT_FTP_PASSWORD,
+};
+#endif
+#if 0 // ENABLE_DEFAULT_PARAMS
 
 struct sconf_proto _options[_OPTION_MAX] = {
     [OPTION_VERSION] = {"VERSION", PROTO_VALUE_NUMBER, {.number = 0}},
@@ -66,9 +85,45 @@ struct sconf_proto _options[_OPTION_MAX] = {
     // [OPTION_FAULT_SPEED_LIMIT_THRESHOLD]
     [OPTION_FAULT_VIDEO_UPLOAD_SWITCH] = {"LIFTFAULT_VIDEO_UPLOAD_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
     [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
-                                                                                                                                               //
-    [OPTION_RESCURE_MODE] = {"RESCURE_MODE", PROTO_VALUE_NUMBER, {.number = RESCURE_MODE_MANUAL /*AUTO*/}},
+
+    [OPTION_RESCURE_MODE] = {"RESCURE_MODE", PROTO_VALUE_NUMBER, {.number = RESCURE_MODE_MANUAL}},  // default manual
 };
+#else
+struct sconf_proto _options[_OPTION_MAX] = {
+    [OPTION_VERSION] = {"VERSION", PROTO_VALUE_NUMBER, {.number = 0}},
+    // MQTT
+    [OPTION_MQ_ID] = {"MQ_ID", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_PROTO] = {"MQ_PROTO", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_SERVER] = {"MQ_SERVER", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_PORT] = {"MQ_PORT", PROTO_VALUE_NUMBER, {.number = DEFAULT_BROKER_PORT}},
+    [OPTION_MQ_KEEPALIVE] = {"MQ_KEEPALIVQE", PROTO_VALUE_NUMBER, {.number = DEFAULT_BROKER_ALIVETIME}},
+    [OPTION_MQ_USERNAME] = {"MQ_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_PASSWORD] = {"MQ_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
+
+    // rtmp
+    [OPTION_LIVE_URL] = {"LIVE_URL", PROTO_VALUE_STRING, {.string = NULL}},
+
+    // FTP
+    [OPTION_FTP_ADDRESS] = {"FTP_ADDRESS", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_FTP_USERNAME] = {"FTP_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_FTP_PASSWORD] = {"FTP_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
+
+    // LiftState
+    [OPTION_REALTIME_REPORT_PERIOD_MS] = {"REALTIME_REPORT_PERIOD_MS", PROTO_VALUE_NUMBER, {.number = 1000}},
+    // speed
+    [OPTION_SPEED_LIMIT_THRESHOLD] = {"SPEED_LIMIT_THREHOLD", PROTO_VALUE_DECIMAL, {.decimal = 2.8}},  // 2.8m/s
+
+    // LiftRunInfo
+    [OPTION_RUNINFO_REPORT_SWITCH] = {"RUNINFO_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    // LiftFault
+    [OPTION_FAULT_REPORT_SWITCH] = {"LIFTFAULT_REPORT_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    // [OPTION_FAULT_SPEED_LIMIT_THRESHOLD]
+    [OPTION_FAULT_VIDEO_UPLOAD_SWITCH] = {"LIFTFAULT_VIDEO_UPLOAD_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
+    [OPTION_FAULT_REPORT_LIMIT_PER_DAY] = {"LIFTFAULT_REPORT_LIMIT_PER_DAY", PROTO_VALUE_NUMBER, {.number = LIFTFAULT_REPORT_LIMIT_PER_DAY}},  // default 3
+
+    [OPTION_RESCURE_MODE] = {"RESCURE_MODE", PROTO_VALUE_NUMBER, {.number = RESCURE_MODE_MANUAL}},  // default manual
+};
+#endif
 
 struct sconf_proto _eguard_options[_OPTION_EGUARD_MAX] = {
     [OPTION_EGUARD_KUNREN_DETECT_ENABLED] = {"EGUARD_KUNREN_DETECT_ENABLED", PROTO_VALUE_NUMBER, {.number = 1}},
@@ -79,102 +134,28 @@ struct sconf_proto _eguard_options[_OPTION_EGUARD_MAX] = {
 static void load_option() {
     // int64_t realtime_period_ms = _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number;
     // please manually process default string value
-    // 要这么复杂吗，还是说每次都是动态申请，然后每次强制释放
 
-    if (_options[OPTION_MQ_PROTO].value.string != DEFAULT_MQ_PROTO) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_MQ_PROTO].value.string) {
-            free(_options[OPTION_MQ_PROTO].value.string);
-            _options[OPTION_MQ_PROTO].value.string = NULL;
+    for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
+        if (_options[i].type == PROTO_VALUE_STRING && _options[i].value.string) {
+            free(_options[i].value.string);
+            _options[i].value.string = NULL;
         }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
     }
 
-    if (_options[OPTION_MQ_ID].value.string != DEFAULT_MQ_ID) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_MQ_ID].value.string) {
-            free(_options[OPTION_MQ_ID].value.string);
-            _options[OPTION_MQ_ID].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_MQ_SERVER].value.string != DEFAULT_BROKER_SERVER) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_MQ_SERVER].value.string) {
-            free(_options[OPTION_MQ_SERVER].value.string);
-            _options[OPTION_MQ_SERVER].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_MQ_USERNAME].value.string != DEFAULT_MQ_USERNAME) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_MQ_USERNAME].value.string) {
-            free(_options[OPTION_MQ_USERNAME].value.string);
-            _options[OPTION_MQ_USERNAME].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_MQ_PASSWORD].value.string != DEFAULT_MQ_PASSWORD) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_MQ_PASSWORD].value.string) {
-            free(_options[OPTION_MQ_PASSWORD].value.string);
-            _options[OPTION_MQ_PASSWORD].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_LIVE_URL].value.string != DEFAULT_LIVE_URL) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_LIVE_URL].value.string) {
-            free(_options[OPTION_LIVE_URL].value.string);
-            _options[OPTION_LIVE_URL].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_FTP_ADDRESS].value.string != DEFAULT_FTP_ADDRESS) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_FTP_ADDRESS].value.string) {
-            free(_options[OPTION_FTP_ADDRESS].value.string);
-            _options[OPTION_FTP_ADDRESS].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_FTP_USERNAME].value.string != DEFAULT_FTP_USERNAME) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_FTP_USERNAME].value.string) {
-            free(_options[OPTION_FTP_USERNAME].value.string);
-            _options[OPTION_FTP_USERNAME].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
-    if (_options[OPTION_FTP_PASSWORD].value.string != DEFAULT_FTP_PASSWORD) {
-        printf("%s(%d): need free\n", __FUNCTION__, __LINE__);
-        if (_options[OPTION_FTP_PASSWORD].value.string) {
-            free(_options[OPTION_FTP_PASSWORD].value.string);
-            _options[OPTION_FTP_PASSWORD].value.string = NULL;
-        }
-    } else {
-        printf("%s(%d): no need free\n", __FUNCTION__, __LINE__);
-    }
-
+    // dynamic memory
     sconf_load_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
 
-    // printf("mqtt:%s, %s, %s\n", _options[OPTION_MQ_SERVER].value.string, _options[OPTION_MQ_USERNAME].value.string, _options[OPTION_MQ_PASSWORD].value.string);
-    // printf("ftp:%s, %s, %s\n", _options[OPTION_FTP_ADDRESS].value.string, _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
+#if ENABLE_DEFAULT_PARAMS
+    // fill default string values
+    for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
+        if (_options[i].type == PROTO_VALUE_STRING && !_options[i].value.string) {
+            if (_default_string_values[i]) {
+                printf("auto fill default:%s\n", _default_string_values[i]);
+                _options[i].value.string = strdup(_default_string_values[i]);
+            }
+        }
+    }
+#endif
 
     for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
         switch (_options[i].type) {
@@ -234,25 +215,37 @@ static void on_option_changed(const char* path, void* priv) {
 }
 
 int option_init(void) {
+#if ENABLE_DEFAULT_PARAMS
     const char* serialno = elevator_serialno();  // support called without init
     // no need verfiy null, because serialno should point to inner static buffer
     if (!serialno || 0 == strlen(serialno)) {
         HR_LOGE("serial no should not be empty\n");
-        assert(0);
-        return -1;
+        _exit(0);
     }
 
     strncpy(DEFAULT_MQ_ID, serialno, sizeof(DEFAULT_MQ_ID));
     snprintf(DEFAULT_LIVE_URL, sizeof(DEFAULT_LIVE_URL), RTMP_URL_PREFIX "/%s", serialno);
+#endif
 
     load_option();
 
+    if (!_options[OPTION_MQ_SERVER].value.string ||
+        !_options[OPTION_MQ_ID].value.string ||
+        !_options[OPTION_MQ_USERNAME].value.string ||
+        !_options[OPTION_MQ_PASSWORD].value.string) {
+        HR_LOGE("no valid MQTT parameter, do crash!\n");
+        // exited with 0, parent will not restart
+        return -1;
+    }
+
+#if ENABLE_DEFAULT_PARAMS
     // verify config has been initialized
-    if (_options[OPTION_VERSION].value.number != _VERSION ) {
+    if (_options[OPTION_VERSION].value.number != _VERSION) {
         _options[OPTION_VERSION].value.number = _VERSION;
         HR_LOGD("option version changed, do update.\n");
         sconf_save_with_proto(HQLIFTD_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
     }
+#endif
 
     load_eguard_option();
 

@@ -74,8 +74,10 @@ static int hqliftd_main(int argc, char** argv) {
     action.sa_sigaction = _signal_action;
     sigaction(SIGTERM, &action, NULL);
 
-    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
-    option_init();
+    if ( 0 != option_init()) {
+        HR_LOGE("hqliftd no valid option config, exit normally, should not start again\n");
+        return -1;
+    }
 
     printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     serial = elevator_serialno();
@@ -106,7 +108,9 @@ static int hqliftd_main(int argc, char** argv) {
 
     printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     // block until connected
-    iot_init(uv_default_loop());
+    if (iot_init(uv_default_loop())){
+        _exit(-1);
+    }
 
     uv_async_init(uv_default_loop(), &_dummy_keep_loop, dummy_cb);
     printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
@@ -173,7 +177,7 @@ int main(int argc, char** argv) {
 
     HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
 
-    return hqliftd_main(argc, argv);
+    // return hqliftd_main(argc, argv);
     
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -226,6 +230,10 @@ int main(int argc, char** argv) {
 
         if (WIFEXITED(status)) {
             HR_LOGE("Service %d exited with code %d\n", pid, WEXITSTATUS(status));
+            if (0 == WEXITSTATUS(status) || 255 == WEXITSTATUS(status)) {
+                HR_LOGE("Service %d exited normally, do not auto restart!\n", pid, WEXITSTATUS(status));
+               _exit_request = 1;
+            }
         } else if (WIFSIGNALED(status)) {
             HR_LOGE("Service %d killed by signal %d\n", pid, WTERMSIG(status));
         } else {

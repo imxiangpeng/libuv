@@ -355,44 +355,6 @@ static int subscriber_elevatord_event() {
     return -1;
 }
 
-static const char* fault_to_string(enum elevator_exception fault) {
-    switch (fault) {
-        // 1. 困人
-        case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED:
-            return "kunren";
-        // 2. 开门走车
-        case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
-            return "kaimenzouche";
-        // 3. 非门区停车
-        case ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR:
-            return "feimenqutingche";
-        // 4. 冲顶
-        case ELEVATOR_EXCEPTION_RUN_OVER_TOP:
-            return "chongding";
-        // 5. 蹲底
-        case ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM:
-            return "dundi";
-        // 6. 超速
-        case ELEVATOR_EXCEPTION_OVERSPEED:
-            return "chaosu";
-        // 11. 反复开关门
-        case ELEVATOR_EXCEPTION_DOOR_REPEATED:
-            // ai model define type as door_moving
-            return "door_moving";  // "fanfukaiguanmen";
-        // 12. 关门异常
-        case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR:
-            // ai model define type as door_open
-            return "door_open";  // "guanmenyichang";
-        // 202. 电瓶车
-        case ELEVATOR_EXCEPTION_EBIKE:
-            return "ebike";
-        case ELEVATOR_EXCEPTION_NONE:
-        default:
-            return "";
-    }
-    return "";
-}
-
 enum {
     OE_ID,
     OE_PATH,

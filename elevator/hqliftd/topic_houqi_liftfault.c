@@ -68,6 +68,20 @@
 #define LIFTFAULT_FAULT_RESCURE_PENDING_MAX 3
 #endif
 
+#define DUMP_FAULT_QUEUE_EVENTS()                                                           \
+    do {                                                                                    \
+        struct lift_fault_event* e = NULL;                                                  \
+        HR_LOGD("%s(%d) queue begin:\n", __func__, __LINE__);                               \
+        hr_list_for_each_entry(e, &_lift_fault_message_queue, entry) {                      \
+            HR_LOGD("-> message: %p, type:0x%x -> %s, pending:%d, begin:%ld\n",             \
+                    e, e->type, fault_to_string(e->type), e->pending, e->fault_begin_time); \
+        }                                                                                   \
+        hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {                         \
+            HR_LOGD("-> idle: %p, type:0x%x -> %s, pending:%d, begin:%ld\n",                \
+                    e, e->type, fault_to_string(e->type), e->pending, e->fault_begin_time); \
+        }                                                                                   \
+        HR_LOGD("%s(%d) queue end!\n", __func__, __LINE__);                                 \
+    } while (0)
 
 // detect fault status:
 // 1. kunren (manual mode) should wait gpio to confirm
@@ -121,7 +135,6 @@ static struct fault_report_statistics {
 // date to record and reset report statistics
 static struct tm _fault_report_statistics_tm;
 
-static void dump_fault_queue(void);
 static void upload_fault_video(struct lift_fault_event* e);
 
 static int to_houqi_fault(enum elevator_exception fault) {
@@ -174,20 +187,14 @@ static int _on_publish(void** payload, int* len) {
     if (!root)
         return -1;
 
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
 
-    // pthread_mutex_lock(&_queue_lock);
     if (hr_list_empty(&_lift_fault_message_queue)) {
-        // pthread_mutex_unlock(&_queue_lock);
         cJSON_Delete(root);
         return -1;
     }
 
     e = hr_list_first_entry(&_lift_fault_message_queue, struct lift_fault_event, entry);
-    // take off from list
-    hr_list_del(&e->entry);
-
-    // pthread_mutex_unlock(&_queue_lock);
 
     uuid_generate(uuid);
 
@@ -235,19 +242,20 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(fault, "faultEndTime", tmp);
     cJSON_AddStringToObject(fault, "faultVideoUrl", "");
 
+    // take off from list
+    hr_list_del(&e->entry);
+
     // the fault have finished, release it
     if (e->fault_end_time == 0) {
         // we should keep it for finish event
-        // pthread_mutex_lock(&_queue_lock);
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
-        // pthread_mutex_unlock(&_queue_lock);
     } else {
         // now we can free event
         HR_INIT_LIST_HEAD(&e->entry);
         free(e);
     }
 
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
 
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         cJSON_Delete(root);
@@ -277,8 +285,6 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     (void)public_key;
     (void)device_name;
     _iot = iot;
-
-    // pthread_mutex_init(&_queue_lock, NULL);
 
     // init timer for sendvideo & sendsate command timeout
     memset((void*)&_rescure_btn_timer, 0, sizeof(_rescure_btn_timer));
@@ -314,46 +320,25 @@ static struct lift_fault_event* fault_event_alloc() {
 
     return e;
 }
-
+#if 0
 static void fault_event_free(struct lift_fault_event* e) {
     if (!e) {
         return;
     }
 
-    // pthread_mutex_lock(&_queue_lock);
     hr_list_del(&e->entry);
-    // pthread_mutex_unlock(&_queue_lock);
 
     HR_INIT_LIST_HEAD(&e->entry);
 
     free(e);
 }
+#endif
 
 // 考虑在这个函数中，将事件永久存储，应对重启或者断电情况
 // 在这里还是在 publish 之后呢，因为这里还没有发送，丢也就丢了
 static int publish_fault_event(struct lift_fault_event* e) {
-    // pthread_mutex_lock(&_queue_lock);
     hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
-    // pthread_mutex_unlock(&_queue_lock);
     return uviot_publish_async(_iot, &dm_topic_liftfault);
-}
-
-static void dump_fault_queue(void) {
-    struct lift_fault_event* e = NULL;
-    // we should lookup in idle list
-    // ignore when can not find
-
-    HR_LOGD("message queue begin:\n");
-    hr_list_for_each_entry(e, &_lift_fault_message_queue, entry) {
-        HR_LOGD("-> message: %p, type:0x%x, pending:%d, begin:%lld\n", e, e->type, e->pending, e->fault_begin_time);
-    }
-    HR_LOGD("message queue end!\n");
-
-    HR_LOGD("idle queue begin:\n");
-    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
-        HR_LOGD("-> idle: %p, type:0x%x, pending:%d, begin:%lld\n", e, e->type, e->pending, e->fault_begin_time);
-    }
-    HR_LOGD("idle queue end!\n");
 }
 
 // filter out timeout event and auto resolve it
@@ -363,15 +348,12 @@ static void _fault_event_alive_timeout_detect(uv_timer_t* handle) {
 
     int64_t now = get_realtime_ms();
     int64_t begin = 0;
-    HR_LOGD("%s(%d): in!\n", __FUNCTION__, __LINE__);
-    dump_fault_queue();
+
 begin:
-    // 1. when kunren fault is pending, we should detect rescure button
-    // pthread_mutex_lock(&_queue_lock);
 
     // can we stop timer? it maybe reenter idle from message queue
     if (hr_list_empty(&_lift_fault_idle_queue) && hr_list_empty(&_lift_fault_message_queue)) {
-        // pthread_mutex_unlock(&_queue_lock);
+        HR_LOGD("%s(%d): all queues are empty, stop timer!\n", __FUNCTION__, __LINE__);
         // timer should be stopped when both idle and message queues are empty
         uv_timer_stop(handle);
         return;
@@ -382,12 +364,10 @@ begin:
         begin = e->fault_begin_time;
         // timeout without confirmed
         if (now - begin >= LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT) {
-            HR_LOGD("%s(%d): fault:0x%X timeout pending:%d !\n", __FUNCTION__, __LINE__, e->type, e->pending);
+            HR_LOGD("%s(%d): fault:0x%X -> %s timeout pending:%d auto resolved!\n", __FUNCTION__, __LINE__, e->type, fault_to_string(e->type), e->pending);
 
             e->fault_end_time = get_realtime_ms();
 
-            HR_LOGD("%s(%d): fault:0x%X timeout auto resolved!\n", __FUNCTION__, __LINE__, e->type);
-            // pthread_mutex_unlock(&_queue_lock);
             // it's in same idle queue, directly call elevator_fault_resolved
             // elevator_fault_resolved will auto process pending event
             elevator_fault_resolved(e->type);
@@ -397,9 +377,6 @@ begin:
             goto begin;
         }
     }
-
-    HR_LOGD("%s(%d): out!\n", __FUNCTION__, __LINE__);
-    // pthread_mutex_unlock(&_queue_lock);
 }
 
 #if ENABLE_RESCURE_BTN
@@ -449,11 +426,7 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     pressed = _people_trapped_fault_wait_rescure_button();
 #endif
 
-    dump_fault_queue();
-    // 1. when kunren fault is pending, we should detect rescure button
-    // pthread_mutex_lock(&_queue_lock);
-
-    // 1.1 lookup pending kunren event
+    // 1. lookup pending kunren event
     hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
         if (f->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED && f->pending != 0) {
             e = f;
@@ -462,7 +435,6 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     }
 
     if (!e) {
-        // pthread_mutex_unlock(&_queue_lock);
         uv_timer_stop(&_rescure_btn_timer);
         return;
     }
@@ -470,7 +442,6 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     HR_LOGD("%s(%d) fault:%d, pending:%d, pressed:%d\n", __FUNCTION__, __LINE__, e->type, e->pending, pressed);
 
     if (pressed != 1) {
-        // pthread_mutex_unlock(&_queue_lock);
         return;
     }
     // 2. the event is pending
@@ -480,14 +451,12 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     // kunren event has been confirmed from rescure button, fire it
     if (e->pending >= LIFTFAULT_FAULT_RESCURE_PENDING_MAX) {
         e->pending = 0;
-        HR_LOGD("%s(%d) fault:%d, pending:%d, fire!!!\n", __FUNCTION__, __LINE__, e->type, e->pending);
+        HR_LOGD("%s(%d) fault:0x%x -> %s, pending:%d, fire!!!\n", __FUNCTION__, __LINE__, e->type, fault_to_string(e->type), e->pending);
+        // delete from idle and queue into message
         hr_list_del(&e->entry);
-        // pthread_mutex_unlock(&_queue_lock);
         publish_fault_event(e);
         return;
     }
-
-    // pthread_mutex_unlock(&_queue_lock);
 }
 int elevator_fault_occurred(enum elevator_exception fault) {
     struct lift_fault_event* e = NULL;
@@ -499,9 +468,9 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
 
-    HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
+    HR_LOGD("%s(%d): fault:0x%X -> %s\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
 
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
 
     if (_fault_report_statistics_tm.tm_year != tm.tm_year ||
         _fault_report_statistics_tm.tm_mon != tm.tm_mon ||
@@ -525,26 +494,23 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     }
 
     if (!s) {
-        HR_LOGD("%s(%d): not support fault:0x%X\n", __FUNCTION__, __LINE__, fault);
+        HR_LOGD("%s(%d): statistics not support fault:0x%X -> %s\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
         return -1;
     }
 
     // not limit kunren & ebike
     if (ELEVATOR_EXCEPTION_PEOPLE_TRAPPED != fault && ELEVATOR_EXCEPTION_EBIKE != fault) {
         if (s->report_count >= _options[OPTION_FAULT_REPORT_LIMIT_PER_DAY].value.number) {
-            HR_LOGD("%s(%d): fault:0x%X, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
+            HR_LOGD("%s(%d): fault:0x%X -> %s, reach report limit count:%d\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), s->report_count);
             return -1;
         }
     }
-
-    // pthread_mutex_lock(&_queue_lock);
 
     if (!hr_list_empty(&_lift_fault_message_queue)) {
         struct lift_fault_event* f = NULL;
         hr_list_for_each_entry(f, &_lift_fault_message_queue, entry) {
             if (f->type == fault) {
-                HR_LOGE("%s(%d): fault:0x%X is occurring and ready to report, do not report again\n", __FUNCTION__, __LINE__, fault);
-                // pthread_mutex_unlock(&_queue_lock);
+                HR_LOGE("%s(%d): fault:0x%X -> %s is occurring and ready to report, do not report again\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
                 return -1;
             }
         }
@@ -554,15 +520,11 @@ int elevator_fault_occurred(enum elevator_exception fault) {
         struct lift_fault_event* f = NULL;
         hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
             if (f->type == fault) {
-                HR_LOGE("%s(%d): fault:0x%X is occurring, do not report again\n", __FUNCTION__, __LINE__, fault);
-
-                // pthread_mutex_unlock(&_queue_lock);
+                HR_LOGE("%s(%d): fault:0x%X -> %s is occurring, do not report again\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
                 return -1;
             }
         }
     }
-
-    // pthread_mutex_unlock(&_queue_lock);
 
     // mxp, 20250702, do not report & generate fault video when fault is disabled
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
@@ -576,7 +538,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     // no save to persist storage
     s->report_count++;
-    HR_LOGD("%s(%d): fault:0x%X, count:%d\n", __FUNCTION__, __LINE__, fault, s->report_count);
+    HR_LOGD("%s(%d): fault:0x%X -> %s, count:%d\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), s->report_count);
     e->type = fault;
 
     e->fault_begin_time = get_realtime_ms();
@@ -585,7 +547,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     // mxp, 20250822, kunren fault should be confirmed by rescure button in manual mode
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-        HR_LOGD("%s(%d): fault:0x%X, rescure mode:%d\n", __FUNCTION__, __LINE__, fault, _options[OPTION_RESCURE_MODE].value.number);
+        HR_LOGD("%s(%d): fault:0x%X -> %s, rescure mode:%ld\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), _options[OPTION_RESCURE_MODE].value.number);
         e->pending = _options[OPTION_RESCURE_MODE].value.number == RESCURE_MODE_AUTO ? 0 : 1;
     }
     // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
@@ -597,9 +559,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     if (e->pending == 0) {
         publish_fault_event(e);
     } else {
-        // pthread_mutex_lock(&_queue_lock);
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
-        // pthread_mutex_unlock(&_queue_lock);
 
         // only support ELEVATOR_EXCEPTION_PEOPLE_TRAPPED
         if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
@@ -615,7 +575,7 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     // mxp, 20250707, broadcast fault event to system
     uelevator_send_fault_event(fault, 1);
 
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
     return 0;
 }
 
@@ -626,9 +586,8 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     // we should lookup in idle list
     // ignore when can not find
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
-    // pthread_mutex_lock(&_queue_lock);
 
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
     // drop event in message queue
     hr_list_for_each_entry(f, &_lift_fault_message_queue, entry) {
         if (f->type == fault) {
@@ -642,18 +601,15 @@ int elevator_fault_resolved(enum elevator_exception fault) {
         // take off from idle queue
         hr_list_del(&e->entry);
 
-        // pthread_mutex_unlock(&_queue_lock);
-
         // we should drop pending event
         HR_LOGD("%s(%d): fault:0x%X in message queue, drop it\n", __FUNCTION__, __LINE__, fault);
         HR_INIT_LIST_HEAD(&e->entry);
         free(e);
-        dump_fault_queue();
+        DUMP_FAULT_QUEUE_EVENTS();
         return 0;
     }
 
     if (hr_list_empty(&_lift_fault_idle_queue)) {
-        // pthread_mutex_unlock(&_queue_lock);
         HR_LOGD("%s(%d): fault queue empty fault:0x%X\n", __FUNCTION__, __LINE__, fault);
         return -1;
     }
@@ -668,7 +624,6 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     }
 
     if (!e) {
-        // pthread_mutex_unlock(&_queue_lock);
         HR_LOGD("%s(%d): not found fault:0x%X\n", __FUNCTION__, __LINE__, fault);
         return -1;
     }
@@ -677,10 +632,9 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     hr_list_del(&e->entry);
 
     HR_LOGD("take off from idle queue ...\n");
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
 
     e->fault_end_time = get_realtime_ms();
-    // pthread_mutex_unlock(&_queue_lock);
 
     // we should drop pending event
     if (e->pending != 0) {
@@ -705,9 +659,9 @@ int elevator_fault_resolved(enum elevator_exception fault) {
         upload_fault_video(e);
     }
 
-    HR_LOGD("add to message queue again ...\n");
+    HR_LOGD("add to publish message queue again ...\n");
     publish_fault_event(e);
-    dump_fault_queue();
+    DUMP_FAULT_QUEUE_EVENTS();
     return 0;
 }
 
@@ -718,17 +672,13 @@ int elevator_fault_review(int* type, uint64_t* occurred_ms) {
         return -1;
     }
 
-    // pthread_mutex_lock(&_queue_lock);
     if (hr_list_empty(&_lift_fault_idle_queue)) {
-        // pthread_mutex_unlock(&_queue_lock);
         return 0;
     }
 
     e = hr_list_first_entry(&_lift_fault_idle_queue, struct lift_fault_event, entry);
     *type = to_houqi_fault(e->type);
     *occurred_ms = e->fault_begin_time;
-
-    // pthread_mutex_unlock(&_queue_lock);
 
     return 0;
 }
@@ -751,6 +701,11 @@ static void upload_fault_video(struct lift_fault_event* e) {
     char name[64] = {0};
 
     if (!e) {
+        return;
+    }
+
+    if (!_options[OPTION_FTP_ADDRESS].value.string) {
+        HR_LOGE("%s(%d): no valid upload address\n", __func__, __LINE__);
         return;
     }
 
@@ -855,8 +810,15 @@ static void upload_fault_video(struct lift_fault_event* e) {
             NULL,
         };
 
-        setenv("FTP_USERNAME", _options[OPTION_FTP_USERNAME].value.string, 1);
-        setenv("FTP_PASSWORD", _options[OPTION_FTP_PASSWORD].value.string, 1);
+        if (_options[OPTION_FTP_USERNAME].value.string) {
+            setenv("FTP_USERNAME", _options[OPTION_FTP_USERNAME].value.string, 1);
+        } else {
+            setenv("FTP_USERNAME", "anonymous", 1);
+        }
+        if (_options[OPTION_FTP_PASSWORD].value.string) {
+            setenv("FTP_PASSWORD", _options[OPTION_FTP_PASSWORD].value.string, 1);
+        }
+
         for (size_t i = 0; i < sizeof(argv) / sizeof(argv[0]); i++) {
             printf("%ld --> %s\n", i, argv[i]);
         }

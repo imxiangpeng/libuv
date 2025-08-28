@@ -269,6 +269,10 @@ static int _on_command_message(void* payload, int len) {
         char end_str[64] = {0};
         char url[LINE_MAX] = {0};
 
+        if (!_options[OPTION_LIVE_URL].value.string) {
+            cJSON_Delete(root);
+            return -1;
+        }
         // 2024-04-06 15:57:20
         start_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "startTime"));
         end_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "endTime"));
@@ -641,6 +645,10 @@ static int do_upload(const char* local_path, const char* remote_url) {
         return -1;
     }
 
+    if (!_options[OPTION_FTP_USERNAME].value.string || !_options[OPTION_FTP_PASSWORD].value.string) {
+        return -1;
+    }
+
     fp = fopen(local_path, "rb");
     if (!fp) {
         return -1;
@@ -725,6 +733,11 @@ static void* background_upload_thread_routin(void* args) {
         }
         close(fd);
         fd = -1;
+        
+        if (!_options[OPTION_FTP_ADDRESS].value.string) {
+            continue;
+        }
+
         struct tm* tm = gmtime((const time_t*)&r.timestamp);
         if (!tm) {
             continue;
