@@ -17,6 +17,7 @@
 /// publish every 10s
 #include "cjson/cJSON.h"
 #include "hr_log.h"
+#include "option.h"
 #include "time_utils.h"
 #include "uviot.h"
 
@@ -215,13 +216,13 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "cpu", tmp);
     snprintf(tmp, sizeof(tmp), "%d", percent);
     cJSON_AddStringToObject(root, "diskUsage", tmp);
-    snprintf(tmp, sizeof(tmp), "%"PRId64, avail);
+    snprintf(tmp, sizeof(tmp), "%" PRId64, avail);
     cJSON_AddStringToObject(root, "diskLeftSpace", tmp);
-    snprintf(tmp, sizeof(tmp), "%"PRId64, total);
+    snprintf(tmp, sizeof(tmp), "%" PRId64, total);
     cJSON_AddStringToObject(root, "diskTotalSpace", tmp);
     //
     cJSON_AddNumberToObject(root, "timeStamp", get_realtime_ms());
-    cJSON_AddStringToObject(root, "ipAddr", uviot_get_connection_ipv4_address(_iot));	
+    cJSON_AddStringToObject(root, "ipAddr", uviot_get_connection_ipv4_address(_iot));
 
     *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -234,7 +235,7 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static struct uviot_topic dm_topic_heartbeat = {
+static struct uviot_topic _topic_heartbeat = {
     .name = EVENT_HEARTBEAT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_HEARTBEAT_TOPIC_NAME,
     .period = 10 * 1000,
@@ -246,7 +247,18 @@ int topic_houqi_heartbeat_init(struct uviot* iot, const char* public_key, const 
     (void)public_key;
     (void)device_name;
     _iot = iot;
-    uviot_topic_register(iot, &dm_topic_heartbeat);
+
+#if ENABLE_TOPIC_CUSTOM
+    // if (!_options[OPTION_MQ_TOPIC_PUB_HEARTBEAT].value.string) {
+    //     HR_LOGE("invalid heartbeat topic ...\n");
+    //    _exit(-1);
+    //}
+    if (_options[OPTION_MQ_TOPIC_PUB_HEARTBEAT].value.string) {
+        snprintf(_topic_heartbeat.topic, sizeof(_topic_heartbeat.topic), "%s", _options[OPTION_MQ_TOPIC_PUB_HEARTBEAT].value.string);
+    }
+#endif
+
+    uviot_topic_register(iot, &_topic_heartbeat);
 
     return 0;
 }

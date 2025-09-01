@@ -51,7 +51,7 @@
 // mxp, 20250609, do not send video without stop
 // houqi's sim is data limited about 85G
 // houqi platform calls the sendvideo command approximately every 10 seconds.
-#define SENDVIDEO_COMMAND_TIMEOUT (60 * 1000)  // 1min
+#define SENDVIDEO_COMMAND_TIMEOUT (60 * 1000)  // 1min, use _options[OPTION_LIVE_TIMEOUT].value.number * 1000
 #define SENDSTATE_COMMAND_TIMEOUT (60 * 1000)  // 1min
 
 static uv_timer_t _sendvideo_timer;
@@ -125,11 +125,11 @@ static void _sendstate_command_timeout(uv_timer_t* handle) {
 
 // mxp, 20250822, we parse /etc/ipc/config.json manually
 // do not call ipc-property
-static int _detect_ipc_livertmp_property(int *active, char** url) {
+static int _detect_ipc_livertmp_property(int* active, char** url) {
     ssize_t len = 0;
-    char *data = NULL;
+    char* data = NULL;
     cJSON *root = NULL, *ipc = NULL, *livertmp = NULL;
-    const char* location = NULL, *enabled = NULL;
+    const char *location = NULL, *enabled = NULL;
 
     if (!active || !url) {
         return -1;
@@ -152,7 +152,7 @@ static int _detect_ipc_livertmp_property(int *active, char** url) {
     // it's safe when ipc is null
     livertmp = cJSON_GetObjectItem(ipc, "livertmp");
 
-    if (!ipc|| !livertmp) {
+    if (!ipc || !livertmp) {
         cJSON_Delete(root);
         return -1;
     }
@@ -211,8 +211,15 @@ static int _on_command_message(void* payload, int len) {
     if (0 == strcasecmp("Sendvideo", type)) {
         // todo
         int active = 0;
-        char *url = NULL;
+        char* url = NULL;
         int ret = -1;
+
+        int live_timeout_msec = _options[OPTION_LIVE_TIMEOUT].value.number * 1000;
+
+        if (live_timeout_msec < 10 * 1000) {
+            live_timeout_msec = SENDVIDEO_COMMAND_TIMEOUT;
+        }
+
         cJSON_Delete(root);
 
         if (!_options[OPTION_LIVE_URL].value.string) {
@@ -228,8 +235,8 @@ static int _on_command_message(void* payload, int len) {
 
         if (ret == 0) {
             if (active != 1 || !url ||
-                    !_options[OPTION_LIVE_URL].value.string ||
-                    0 != strcmp(url, _options[OPTION_LIVE_URL].value.string)) {
+                !_options[OPTION_LIVE_URL].value.string ||
+                0 != strcmp(url, _options[OPTION_LIVE_URL].value.string)) {
                 HR_LOGE("active:%d, url:%s\n", active, url ? url : "");
                 ret = -1;
             }
@@ -255,7 +262,7 @@ static int _on_command_message(void* payload, int len) {
 
         uv_timer_stop(&_sendvideo_timer);
         // stop video after SENDVIDEO_COMMAND_TIMEOUT ms
-        uv_timer_start(&_sendvideo_timer, _sendvideo_command_timeout, SENDVIDEO_COMMAND_TIMEOUT, 0);
+        uv_timer_start(&_sendvideo_timer, _sendvideo_command_timeout, live_timeout_msec, 0);
         return 0;
     }
 
@@ -393,6 +400,41 @@ static int _on_command_message(void* payload, int len) {
         return 0;
     }
 
+    // this is our self command not houqi's feature
+    if (0 == strcasecmp("secureTunnel", type)) {
+        const char* svc_act = NULL;
+        // {"action":"start", "code":"123456", "port":10022}
+        const char* action = cJSON_GetStringValue(cJSON_GetObjectItem(root, "action"));
+        const char* code = cJSON_GetStringValue(cJSON_GetObjectItem(root, "code"));
+        if (!action || !code) {
+            cJSON_Delete(root);
+            return -1;
+        }
+
+        // now we do not verify totp code
+        if (0 == strcmp("start", action)) {
+            svc_act = "start";
+        } else if (0 == strcmp("stop", action)) {
+            svc_act = "stop";
+        } else if (0 == strcmp("restart", action)) {
+            svc_act = "restart";
+        }
+
+        cJSON_Delete(root);
+
+        if (!svc_act) {
+            return -1;
+        }
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/etc/init.d/ssh_tunnel", "secure_tunnel", svc_act, NULL);
+            _exit(127);
+        }
+        return 0;
+    }
+
+    cJSON_Delete(root);
     return 0;
 }
 
@@ -471,7 +513,7 @@ static int _on_command_upload_record_response_publish(void** payload, int* len) 
 
     return 0;
 }
-struct uviot_topic topic_command = {
+static struct uviot_topic _topic_command = {
     .name = "Command",
     .topic = {0},
     .type = TOPIC_TYPE_SUBSCRIBE,
@@ -490,7 +532,7 @@ struct uviot_topic topic_command = {
 //    ]
 //}
 
-struct uviot_topic topic_command_response = {
+static struct uviot_topic _topic_command_response = {
     .name = "Command/Response",
     .topic = {0},
     .type = TOPIC_TYPE_PUBLISH,
@@ -503,7 +545,16 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     (void)device_name;
 
     pthread_attr_t attr;
+
     const char* serialno = elevator_serialno();  //"244200000E480001"; //elevator_deviceid();
+
+#if ENABLE_TOPIC_CUSTOM
+    // if (!_options[OPTION_MQ_TOPIC_SUB_COMMAND].value.string ||
+    //    !_options[OPTION_MQ_TOPIC_SUB_COMMAND_RESPONSE].value.string) {
+    //    HR_LOGE("invalid topic ...\n");
+    //    _exit(-1);
+    // }
+#endif
 
     _iot = iot;
 
@@ -523,11 +574,21 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
     uv_timer_init(uv_default_loop(), &_sendvideo_timer);
     uv_timer_init(uv_default_loop(), &_sendstate_timer);
 
-    snprintf(topic_command.topic, sizeof(topic_command.topic), "/API/V1/Down/%s/Command", serialno);
-    uviot_topic_register(iot, &topic_command);
+    snprintf(_topic_command.topic, sizeof(_topic_command.topic), "/API/V1/Down/%s/Command", serialno);
+#if ENABLE_TOPIC_CUSTOM
+    if (_options[OPTION_MQ_TOPIC_SUB_COMMAND].value.string) {
+        snprintf(_topic_command.topic, sizeof(_topic_command.topic), "%s", _options[OPTION_MQ_TOPIC_SUB_COMMAND].value.string);
+    }
+#endif
+    uviot_topic_register(iot, &_topic_command);
 
-    snprintf(topic_command_response.topic, sizeof(topic_command_response.topic), "/API/V1/Down/%s/Command/Response", serialno);
-    uviot_topic_register(iot, &topic_command_response);
+    snprintf(_topic_command_response.topic, sizeof(_topic_command_response.topic), "/API/V1/Down/%s/Command/Response", serialno);
+#if ENABLE_TOPIC_CUSTOM
+    if (_options[OPTION_MQ_TOPIC_PUB_COMMAND_RESPONSE].value.string) {
+        snprintf(_topic_command_response.topic, sizeof(_topic_command_response.topic), "%s", _options[OPTION_MQ_TOPIC_PUB_COMMAND_RESPONSE].value.string);
+    }
+#endif
+    uviot_topic_register(iot, &_topic_command_response);
 
     return 0;
 }
@@ -539,7 +600,7 @@ int topic_houqi_command_deinit(void) {
 }
 
 static int publish_upload_record_response() {
-    return uviot_publish_async(_iot, &topic_command_response);
+    return uviot_publish_async(_iot, &_topic_command_response);
 }
 
 static int compare_record_by_timestamp(const void* a, const void* b) {
@@ -733,7 +794,7 @@ static void* background_upload_thread_routin(void* args) {
         }
         close(fd);
         fd = -1;
-        
+
         if (!_options[OPTION_FTP_ADDRESS].value.string) {
             continue;
         }

@@ -13,6 +13,7 @@ FIND_LIBRARY(curl_library NAMES curl)
 FIND_LIBRARY(libgpiod_library NAMES gpiod)
 
 option(ENABLE_RESCURE_BTN "Enable Rescure Button feature" OFF)
+option(ENABLE_TOPIC_CUSTOM "Enable MQTT Topic custom feature" ON)
 
 string(TIMESTAMP BUILD_TIMESTAMP "%Y-%m-%d %H:%M:%S")
 
@@ -42,6 +43,7 @@ TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE LOG_TAG="hqliftd")
 # define config file when compile
 #TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE HQLIFTD_CONFIG_PATH="config/hqliftd/hqliftd.conf")
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE FAULT_HISTORICAL="config/hqliftd/historical.bin")
 #TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ELEVATORD_CONFIG_PATH="config/elevatord/elevatord.conf")
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE EGUARD_CONFIG_PATH="/etc/eguard/eguard.conf")
 
@@ -53,6 +55,10 @@ TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT
 if(ENABLE_RESCURE_BTN)
 TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ENABLE_RESCURE_BTN=1)
 TARGET_LINK_LIBRARIES(hqliftd ${libgpiod_library} pthread)
+endif()
+
+if(ENABLE_TOPIC_CUSTOM)
+TARGET_COMPILE_DEFINITIONS(hqliftd PRIVATE ENABLE_TOPIC_CUSTOM=1)
 endif()
 
 # only on my pc

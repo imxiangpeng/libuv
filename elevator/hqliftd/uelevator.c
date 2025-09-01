@@ -63,7 +63,6 @@ static struct elevator_status _status = {.door_state = ELEVATOR_DOOR_CLOSE};
 
 static struct elevator_historical _historical;
 
-static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
 extern void topic_houqi_liftruninfo_post(void);
 
 static int _uelevator_send_fault_event(enum elevator_exception e, int status);
@@ -174,14 +173,12 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         HR_LOGD("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed,_options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
         printf("%s(%d): speed  %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed,_options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
         if (_status.speed > _options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal) {
-            if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
-                _elevator_exception |= ELEVATOR_EXCEPTION_OVERSPEED;
+            if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_OVERSPEED)) {
                 statemachine_post_fault(ELEVATOR_EXCEPTION_OVERSPEED, 1);
                 HR_LOGD("%s(%d): speed too high %f > %f .............\n", __FUNCTION__, __LINE__, _status.speed, _options[OPTION_SPEED_LIMIT_THRESHOLD].value.decimal);
             }
         } else {
-            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_OVERSPEED)) {
-                _elevator_exception &= ~ELEVATOR_EXCEPTION_OVERSPEED;
+            if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_OVERSPEED)) {
                 statemachine_post_fault(ELEVATOR_EXCEPTION_OVERSPEED, 0);
                 HR_LOGD("%s(%d): !!! speed resume .............\n", __FUNCTION__, __LINE__);
                 printf("%s(%d): !!! speed resume .............\n", __FUNCTION__, __LINE__);
@@ -198,17 +195,15 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         if (fabs(_status.accel) > 5) {
             if (_status.accel < 0) {
                 // chongding
-                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
-                    _elevator_exception |= ELEVATOR_EXCEPTION_RUN_OVER_TOP;
+                if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
                     HR_LOGD("%s(%d): fault over top .....\n", __FUNCTION__, __LINE__);
                     statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_TOP, 1);
                 }
             } else {
                 // dundi
-                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
-                    _elevator_exception |= ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM;
+                if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
                     HR_LOGD("%s(%d): fault over bottom .....\n", __FUNCTION__, __LINE__);
-                    statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM, 0);
+                    statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM, 1);
                 }
             }
         }
@@ -230,14 +225,12 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
             statemachine_post(SM_EVENT_RUNNING);
 #if OVER_TOP_BOTTOM_DETECT_ENABLED
             // run again, resume chongding & dundi
-            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
-                _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_OVER_TOP;
+            if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_OVER_TOP)) {
                 HR_LOGD("%s(%d): !!! fault chongding resume.............\n", __FUNCTION__, __LINE__);
-                statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_TOP, 1);
+                statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_TOP, 0);
             }
 
-            if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
-                _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM;
+            if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM)) {
                 HR_LOGD("%s(%d): !!! fault dundi resume.............\n", __FUNCTION__, __LINE__);
                 statemachine_post_fault(ELEVATOR_EXCEPTION_RUN_OVER_BOTTOM, 0);
             }
@@ -316,18 +309,16 @@ static int elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus_o
         if (_eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal > 0) {
             if (offset0 > _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal && offset1 > _eguard_options[OPTION_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD].value.decimal) {
                 if (confidence == 100) {
-                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
+                    if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
                         // mxp, 20250715, periodic realtime reporting:
                         // the final state may not have been updated yet, so we force an update here
                         _status.speed = 0;
-                        _elevator_exception |= ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR;
                         statemachine_post_fault(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR, 1);
                         HR_LOGD("%s(%d): !!! fault not stopped at floor occurred.............\n", __FUNCTION__, __LINE__);
                     }
                 }
             } else {
-                if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
-                    _elevator_exception &= ~ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR;
+                if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR)) {
                     statemachine_post_fault(ELEVATOR_EXCEPTION_STOPPED_NOT_AT_DOOR, 0);
                     HR_LOGD("%s(%d): !!! fault not stopped at floor resume.............\n", __FUNCTION__, __LINE__);
                 }
@@ -470,14 +461,12 @@ static void ubus_event_handler(struct ubus_context* ctx,
 
             if (blobmsg_get_u32(tb[0]) == 1) {
                 HR_LOGD("receive ebike fire event!\n");
-                if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_EBIKE)) {
-                    _elevator_exception |= ELEVATOR_EXCEPTION_EBIKE;
+                if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_EBIKE)) {
                     statemachine_post_fault(ELEVATOR_EXCEPTION_EBIKE, 1);
                 }
             } else {
                 HR_LOGD("receive ebike cancel event!\n");
-                if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_EBIKE)) {
-                    _elevator_exception &= ~ELEVATOR_EXCEPTION_EBIKE;
+                if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_EBIKE)) {
                     statemachine_post_fault(ELEVATOR_EXCEPTION_EBIKE, 0);
                 }
             }
@@ -524,14 +513,12 @@ static void ubus_event_handler(struct ubus_context* ctx,
 
             if (status == 1) {
                 HR_LOGD("receive %s fire event!\n", type);
-                if (0 == (_elevator_exception & fault)) {
-                    _elevator_exception |= fault;
+                if (0 == elevator_fault_is_active(fault)) {
                     statemachine_post_fault(fault, 1);
                 }
             } else {
                 HR_LOGD("receive %s cancel event!\n", type);
-                if (0 != (_elevator_exception & fault)) {
-                    _elevator_exception &= ~fault;
+                if (0 != elevator_fault_is_active(fault)) {
                     statemachine_post_fault(fault, 0);
                 }
             }
@@ -588,14 +575,12 @@ static void ubus_event_handler(struct ubus_context* ctx,
 
             if (status == 1) {
                 HR_LOGD("simulate %s fire event!\n", type);
-                if (0 == (_elevator_exception & fault)) {
-                    _elevator_exception |= fault;
+                if (0 == elevator_fault_is_active(fault)) {
                     statemachine_post_fault(fault, 1);
                 }
             } else {
                 HR_LOGD("simulate %s cancel event!\n", type);
-                if (0 != (_elevator_exception & fault)) {
-                    _elevator_exception &= ~fault;
+                if (0 != elevator_fault_is_active(fault)) {
                     statemachine_post_fault(fault, 0);
                 }
             }

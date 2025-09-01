@@ -10,9 +10,9 @@
 #include "cjson/cJSON.h"
 #include "elevator.h"
 #include "hr_log.h"
+#include "option.h"
 #include "uelevator.h"
 #include "uviot.h"
-#include "option.h"
 
 #define EVENT_RUNINFO_TOPIC_NAME "LiftRunInfo"
 static struct uviot* _iot = NULL;
@@ -28,7 +28,6 @@ static int _on_publish(void** payload, int* len) {
     struct elevator_historical* his = NULL;
 
     memset((void*)&st, 0, sizeof(st));
-
 
     if (!payload || !len)
         return -1;
@@ -50,11 +49,11 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "type", EVENT_RUNINFO_TOPIC_NAME);
     // cJSON_AddStringToObject(root, "macAddr", uviot_get_connection_mac_address(_iot));
     // houqi's macAddr is serialno, length must > 12
-	cJSON_AddStringToObject(root, "macAddr", elevator_serialno()); // elevator_mac
+    cJSON_AddStringToObject(root, "macAddr", elevator_serialno());  // elevator_mac
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
 
     cJSON_AddNumberToObject(root, "runningMileageTotal", round(his->distance * 10) / 10);
-	// The documentation describes the unit as seconds, but the actual system uses milliseconds.
+    // The documentation describes the unit as seconds, but the actual system uses milliseconds.
     cJSON_AddNumberToObject(root, "runningTimeTotal", his->timestamp_end - his->timestamp_begin);
 
     cJSON_AddNumberToObject(root, "mannedNum", st.passenger_count);
@@ -123,6 +122,16 @@ int topic_houqi_liftruninfo_init(struct uviot* iot, const char* public_key, cons
     (void)public_key;
     (void)device_name;
     _iot = iot;
+
+#if ENABLE_TOPIC_CUSTOM
+    // if (!_options[OPTION_MQ_TOPIC_PUB_LIFTRUNINFO].value.string) {
+    //    HR_LOGE("invalid liftruninfo topic ...\n");
+    //    _exit(-1);
+    // }
+    if (_options[OPTION_MQ_TOPIC_PUB_LIFTRUNINFO].value.string) {
+        snprintf(_topic_liftruninfo.topic, sizeof(_topic_liftruninfo.topic), "%s", _options[OPTION_MQ_TOPIC_PUB_LIFTRUNINFO].value.string);
+    }
+#endif
     uviot_topic_register(iot, &_topic_liftruninfo);
 
     return 0;

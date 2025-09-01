@@ -174,11 +174,11 @@ int main(int argc, char** argv) {
     const char* elevator_no = NULL;
 
     struct sigaction action;
+	
+    return hqliftd_main(argc, argv);
 
     HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
 
-    // return hqliftd_main(argc, argv);
-    
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
         if (WIFEXITED(status)) {
             HR_LOGE("Service %d exited with code %d\n", pid, WEXITSTATUS(status));
             if (0 == WEXITSTATUS(status) || 255 == WEXITSTATUS(status)) {
-                HR_LOGE("Service %d exited normally, do not auto restart!\n", pid, WEXITSTATUS(status));
+                HR_LOGE("Service %d exited(%d) normally, do not auto restart!\n", pid, WEXITSTATUS(status));
                _exit_request = 1;
             }
         } else if (WIFSIGNALED(status)) {

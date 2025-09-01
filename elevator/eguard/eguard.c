@@ -476,6 +476,10 @@ static void load_option() {
     for (size_t i = 0; i < sizeof(_alarm_sounds) / sizeof(_alarm_sounds[0]); i++) {
         _alarm_sounds[i].count = 0;
         _alarm_sounds[i].limit = _eguard_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number;
+        // dtof no limited
+        if (_alarm_sounds[i].alarm == ALARM_DTOF) {
+            _alarm_sounds[i].limit = -1;            
+        }
     }
 
     // ebike also have it's self settings

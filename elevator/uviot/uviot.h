@@ -34,7 +34,7 @@ struct uviot {
 
 struct uviot_topic {
     char name[128];
-    char topic[256];
+    char topic[512];
     int period;
     int auto_publish; // auto publish when connected
     int qos;

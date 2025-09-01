@@ -233,7 +233,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
         hr_list_for_each_entry(p, &iot->topic_head, entry) {
             HR_LOGD("%s(%d): topic %s...\n", __FUNCTION__, __LINE__, p->self->topic);
             if (p->self->type == TOPIC_TYPE_SUBSCRIBE) {
-                int ret = mosquitto_subscribe(mosq, &p->mid, p->self->topic, 0);
+                int ret = mosquitto_subscribe(mosq, &p->mid, p->self->topic, p->self->qos);
                 HR_LOGD("%s(%d): connected, auto subscribe:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, ret);
             } else {
                 // public topics

@@ -78,7 +78,8 @@ static struct sconf_proto _elevatord_options[] = {
     [OPTION_EGUARD_ALARM_INTERVAL] = {"EGUARD_ALARM_INTERVAL", PROTO_VALUE_NUMBER, {.number = 3000}},  // 3s
     [OPTION_EGUARD_ALARM_REPEAT_COUNT] = {"EGUARD_ALARM_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = 3}},
     [OPTION_EGUARD_ALARM_EBIKE_REPEAT_COUNT] = {"EGUARD_ALARM_EBIKE_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = INT64_MIN}},  // not set, use global
-    [OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT] = {"EGUARD_ALARM_KUNREN_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = INT64_MIN}},
+    // mxp, 20250826, default kunren count is 0, and not use default global alarm repeat count
+    [OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT] = {"EGUARD_ALARM_KUNREN_REPEAT_COUNT", PROTO_VALUE_NUMBER, {.number = 0}},
     [OPTION_EGUARD_DTOF_SWITCH] = {"EGUARD_DTOF_SWITCH", PROTO_VALUE_NUMBER, {.number = 1}},
     [OPTION_EGUARD_DTOF_OCCLUSION_DISTANCE] = {"EGUARD_DTOF_OCCLUSION_DISTANCE", PROTO_VALUE_NUMBER, {.number = 100}},  // 100mm
     [OPTION_EGUARD_KUNREN_DETECT_ENABLED] = {"EGUARD_KUNREN_DETECT_ENABLED", PROTO_VALUE_NUMBER, {.number = 1}},
@@ -276,7 +277,7 @@ int elevator_property_set_eguard_alarm_interval(struct property* self, struct pr
 
     // do not allow too small
     if (value->val.number < 1000) {
-        HR_LOGD("invalid eguard_alarm_interval:%d < 1000ms\n", value->val.number);
+        HR_LOGD("invalid eguard_alarm_interval:%ld < 1000ms\n", value->val.number);
         return -1;
     }
 
@@ -309,7 +310,7 @@ int elevator_property_set_eguard_alarm_repeat_count(struct property* self, struc
     }
 
     if (value->val.number < -1) {
-        HR_LOGE("invalid eguard_alarm_repeat_count:%d < -1, accept: -1/0/>0\n", value->val.number);
+        HR_LOGE("invalid eguard_alarm_repeat_count:%ld < -1, accept: -1/0/>0\n", value->val.number);
         return -1;
     }
 
@@ -348,7 +349,7 @@ int elevator_property_set_eguard_alarm_ebike_repeat_count(struct property* self,
     }
 
     if (value->val.number < -1) {
-        HR_LOGE("invalid eguard_alarm_ebike_repeat_count:%d < -1, accept: -1/0/>0\n", value->val.number);
+        HR_LOGE("invalid eguard_alarm_ebike_repeat_count:%ld < -1, accept: -1/0/>0\n", value->val.number);
         return -1;
     }
 
@@ -373,11 +374,11 @@ int elevator_property_get_eguard_alarm_kunren_repeat_count(struct property* self
     sconf_load_with_proto(EGUARD_CONFIG_PATH, &_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT], 1);
 
     // not set, use global
-    if (_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number == INT64_MIN) {
-        property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number);
-    } else {
+    // if (_elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number == INT64_MIN) {
+    //    property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_REPEAT_COUNT].value.number);
+    // } else {
         property_value_set_number(&self->value, _elevatord_options[OPTION_EGUARD_ALARM_KUNREN_REPEAT_COUNT].value.number);
-    }
+    // }
 
     return 0;
 }
@@ -388,7 +389,7 @@ int elevator_property_set_eguard_alarm_kunren_repeat_count(struct property* self
     }
 
     if (value->val.number < -1) {
-        HR_LOGE("invalid eguard_alarm_kunren_repeat_count:%d < -1, accept: -1/0/>0\n", value->val.number);
+        HR_LOGE("invalid eguard_alarm_kunren_repeat_count:%ld < -1, accept: -1/0/>0\n", value->val.number);
         return -1;
     }
 
@@ -445,7 +446,7 @@ int elevator_property_set_eguard_dtof_occlusion_distance(struct property* self, 
     }
 
     if (value->val.number < 0) {
-        HR_LOGE("invalid eguard_dtof_occlusion_distance:%d < 0\n", value->val.number);
+        HR_LOGE("invalid eguard_dtof_occlusion_distance:%ld < 0\n", value->val.number);
         return -1;
     }
 
@@ -506,7 +507,7 @@ int elevator_property_set_eguard_kunren_detect_timeout(struct property* self, st
 
     // kunren detect should > 30s, default 90s
     if (value->val.number < 30000) {
-        HR_LOGE("invalid eguard_kunren_detect_timeout:%d < 30s\n", value->val.number);
+        HR_LOGE("invalid eguard_kunren_detect_timeout:%ld < 30s\n", value->val.number);
         return -1;
     }
 

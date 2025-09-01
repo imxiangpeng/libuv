@@ -151,4 +151,5 @@ int elevator_fault_resolved(enum elevator_exception fault);
 
 int elevator_fault_review(int *type, uint64_t *occurred_ms);
 
+int elevator_fault_is_active(enum elevator_exception fault);
 #endif

@@ -12,11 +12,7 @@
 #include "elevator.h"
 #include "hr_log.h"
 
-#define ENABLE_DEFAULT_PARAMS 0
-
-// mxp, 20250817, when stored VERSION not match this, we should update option to storage
-// you should increase _VERSION when you add or modify _options
-static const int _VERSION = 1;
+#define ENABLE_DEFAULT_PARAMS 1
 
 #define DEFAULT_BROKER_PORT 1883     // 8883 //1883
 #define DEFAULT_BROKER_ALIVETIME 60  // 300 //60                       // 60s
@@ -25,6 +21,9 @@ static const int _VERSION = 1;
 #define LIFTFAULT_REPORT_LIMIT_PER_DAY 3
 
 #if ENABLE_DEFAULT_PARAMS
+// mxp, 20250817, when stored VERSION not match this, we should update option to storage
+// you should increase _VERSION when you add or modify _options
+static const int _VERSION = 1;
 
 #define RTMP_URL_PREFIX "rtmp://srs.hqszjs.com:1935/live"
 
@@ -52,7 +51,7 @@ const char* _default_string_values[_OPTION_MAX] = {
     [OPTION_FTP_PASSWORD] = DEFAULT_FTP_PASSWORD,
 };
 #endif
-#if 0 // ENABLE_DEFAULT_PARAMS
+#if 0  // ENABLE_DEFAULT_PARAMS
 
 struct sconf_proto _options[_OPTION_MAX] = {
     [OPTION_VERSION] = {"VERSION", PROTO_VALUE_NUMBER, {.number = 0}},
@@ -100,7 +99,15 @@ struct sconf_proto _options[_OPTION_MAX] = {
     [OPTION_MQ_USERNAME] = {"MQ_USERNAME", PROTO_VALUE_STRING, {.string = NULL}},
     [OPTION_MQ_PASSWORD] = {"MQ_PASSWORD", PROTO_VALUE_STRING, {.string = NULL}},
 
+    [OPTION_MQ_TOPIC_SUB_COMMAND] = {"MQ_TOPIC_SUB_COMMAND", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_TOPIC_PUB_COMMAND_RESPONSE] = {"MQ_TOPIC_PUB_COMMAND_RESPONSE", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_TOPIC_PUB_HEARTBEAT] = {"MQ_TOPIC_PUB_HEARTBEAT", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_TOPIC_PUB_LIFTSTATE] = {"MQ_TOPIC_PUB_LIFTSTATE", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_TOPIC_PUB_LIFTFAULT] = {"MQ_TOPIC_PUB_LIFTFAULT", PROTO_VALUE_STRING, {.string = NULL}},
+    [OPTION_MQ_TOPIC_PUB_LIFTRUNINFO] = {"MQ_TOPIC_PUB_LIFTRUNINFO", PROTO_VALUE_STRING, {.string = NULL}},
+
     // rtmp
+    [OPTION_LIVE_TIMEOUT] = {"LIVE_TIMEOUT", PROTO_VALUE_NUMBER, {.number = 60}},  // 60s
     [OPTION_LIVE_URL] = {"LIVE_URL", PROTO_VALUE_STRING, {.string = NULL}},
 
     // FTP
@@ -166,7 +173,11 @@ static void load_option() {
                 HR_LOGD("_option -> %s:%f\n", _options[i].name, _options[i].value.decimal);
                 break;
             case PROTO_VALUE_STRING:
-                HR_LOGD("_option -> %s:%s\n", _options[i].name, _options[i].value.string ? _options[i].value.string : "");
+                if (0 && i == OPTION_MQ_PASSWORD) {
+                    HR_LOGD("_option -> %s:%s\n", _options[i].name, "******");
+                } else {
+                    HR_LOGD("_option -> %s:%s\n", _options[i].name, _options[i].value.string ? _options[i].value.string : "");
+                }
                 break;
         }
     }
@@ -232,7 +243,14 @@ int option_init(void) {
     if (!_options[OPTION_MQ_SERVER].value.string ||
         !_options[OPTION_MQ_ID].value.string ||
         !_options[OPTION_MQ_USERNAME].value.string ||
-        !_options[OPTION_MQ_PASSWORD].value.string) {
+        !_options[OPTION_MQ_PASSWORD].value.string /*||
+        !_options[OPTION_MQ_TOPIC_SUB_COMMAND].value.string ||
+        !_options[OPTION_MQ_TOPIC_PUB_COMMAND_RESPONSE].value.string ||
+        !_options[OPTION_MQ_TOPIC_PUB_HEARTBEAT].value.string ||
+        !_options[OPTION_MQ_TOPIC_PUB_LIFTSTATE].value.string ||
+        !_options[OPTION_MQ_TOPIC_PUB_LIFTFAULT].value.string ||
+        !_options[OPTION_MQ_TOPIC_PUB_LIFTRUNINFO].value.string*/
+    ) {
         HR_LOGE("no valid MQTT parameter, do crash!\n");
         // exited with 0, parent will not restart
         return -1;

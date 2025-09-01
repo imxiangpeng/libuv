@@ -247,7 +247,7 @@ int main(int argc, const char** argv) {
                 const char* passwd = getenv("FTP_PASSWORD");
                 snprintf(cmd, sizeof(cmd),
                          "curl -s --retry 5 --retry-delay 5 --retry-max-time 60 --ftp-create-dirs -T %s/%s %s -u '%s:%s'",
-                         IPC_MEDIA_RECORD_DIR, r->name, url, user, passwd);
+                         IPC_MEDIA_RECORD_DIR, r->name, url, user ? user : "anonymous", passwd ? passwd : "");
 
                 system(cmd);
 

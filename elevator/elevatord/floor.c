@@ -431,7 +431,7 @@ static int floor_binary_predict_id(double height) {
     int left = 0;
     int right = _building.floor_nums - 1;
 
-    if (_building.floor_nums <= 0) {
+    if (_building.floor_nums <= 0 || !_building.model) {
         return -1;
     }
 
@@ -752,6 +752,29 @@ int floor_enter_calibration_with_callback(int base_floor, int floors_below_base,
     _floor_calibration_cb = cb;
     return 0;
 }
+
+int floor_cancel_calibration() {
+
+    if (_floor_calibration != 1) {
+        HR_LOGE("it's not in floor calibration...\n");
+        return -1;
+    }
+
+    // _floor_calibration_cb = NULL; // not reset
+    _floor_calibration = 0;
+    _floor_calibration_index = 0;
+
+    if (_building.model) {
+        free(_building.model);
+        _building.model = NULL;
+    }
+
+    _building.floor_nums = 0;
+    _building.base_floor_num = 0;
+
+    return 0;
+}
+
 
 // verify data format and write to persist floor model
 // reload at last!

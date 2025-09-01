@@ -763,6 +763,30 @@ static void* _accelerometer_thread_routin(void* args) {
         // mxp, 20250613, 我们还是放开这个处理流程，这个影响可能也比较小，
         // 但是如果我们长时间静止，气压又有波动会导致我们不去更新 baseline 气压，昨天做到日志显示开始运行时偏差了 3Pa 0.275M
         // 然后运行 93.781M 停靠 32 楼，后续静止，应为气压继续偏差，直接被判定为了 33 楼
+        // 
+// 在楼层标定结束的时候，我们会将楼层调整到最高楼层，下面逻辑可能会有错误，不正确，但是下次循环会更正过来
+// 逻辑总不是那么完善
+// 08-21 15:13:48.218  1744  1810 elevatord: id:0, name:-1, height:2.771000, height_base:-2.771000
+// 08-21 15:13:48.218  1744  1810 elevatord: ========================= Floor Model Begin =========================
+// 08-21 15:13:48.218  1744  1810 elevatord: id:0, name:-1, height:2.771000, height_base:-2.771000, pressure:97643.600000
+// 08-21 15:13:48.218  1744  1810 elevatord: id:1, name:1, height:6.107000, height_base:0.000000, pressure:97613.300000
+// 08-21 15:13:48.218  1744  1810 elevatord: id:2, name:2, height:2.929000, height_base:6.107000, pressure:97548.510000
+// 08-21 15:13:48.218  1744  1810 elevatord: id:3, name:3, height:2.996000, height_base:9.036000, pressure:97516.730000
+// 08-21 15:13:48.218  1744  1810 elevatord: id:4, name:4, height:2.968000, height_base:12.032000, pressure:97485.100000
+// 08-21 15:13:48.218  1744  1810 elevatord: id:5, name:5, height:2.968000, height_base:15.000000, pressure:97454.460000
+// 08-21 15:13:48.218  1744  1810 elevatord: ========================= Floor Model End =========================
+// 08-21 15:13:48.219  1744  1810 elevatord: motion_calibrate_at_floor(1095): calibrate at floor 5 -> height: 15.000000 success
+// 08-21 15:13:48.219  1744  1810 elevatord: motion_calibrate_at_floor(1096): calibrate at floor 5 -> height: 15.000000 success, baseline num:5, baseline pressure:97454.460000
+// 08-21 15:13:48.219  1744  1810 elevatord: running --> stopped, direction:1, distance:2.968000
+// 08-21 15:13:48.219  1744  1810 elevatord: {"distance":2.968000,"direction":1,"timestamp_begin":1755760423034,"timestamp_end":1755760428209,"floor_begin":-1,"floor_end":-1,"offset0":0.000000,"offset1":0.000000,"confidence":0,"accels":[0.370000,0.470000,0.490000,0.480000,0.490000,0.500000,0.510000,0.450000,0.300000,0.220000,0.170000,0.000000,-0.040000,-0.150000,-0.240000,-0.320000,-0.390000,-0.430000,-0.450000,-0.480000,-0.470000,-0.450000,-0.380000,-0.260000,-0.190000,-0.160000],"speeds":[0.100000,0.180000,0.280000,0.380000,0.470000,0.580000,0.680000,0.780000,0.850000,0.900000,0.940000,0.960000,0.960000,0.940000,0.900000,0.850000,0.780000,0.690000,0.600000,0.510000,0.410000,0.320000,0.230000,0.170000,0.130000,0.090000],"jitter_freqs":[56.250000,56.250000,56.250000,56.250000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000],"jitter_accels":[0.060000,0.060000,0.060000,0.060000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000]}
+// 08-21 15:13:48.219  1744  1810 elevatord: Warning floor num changed (5->-1) when stationary! Fixed it!
+// 08-21 15:13:48.223  1749  1785 hqliftd : historical: distance:2.968000, direction:1, timestamp:1755760423034 -> 1755760428209(5175), floor: -1 -> -1
+// 08-21 15:13:48.224  1749  1785 hqliftd : floor:-1->-1, confidence:0, offset0:0.000000, offset1:0.000000, door zone threshold:0.000000, _historical.distance:2.968000
+// 08-21 15:13:48.223  1749  1749 hqliftd : state machine message: 2(door opened when stopped) received event 0(stopped), exception:2
+// 08-21 15:13:48.224  1749  1749 hqliftd : _statemachine_message_handle(221): current state:2(door opened when stopped), not support event:0(stopped)
+// 08-21 15:13:48.226  1749  1749 hqliftd : publish: {"type":"LiftRunInfo","macAddr":"LC202508B001000019","elevatorNo":"GD500103000176","runningMileageTotal":3,"runningTimeTotal":5175,"mannedNum":0,"inNum":0,"outNum":0,"runningDirection":1,"runBeginTimeStamp":1755760423034,"runEndTimeStamp":1755760428209,"temperature":42.4,"lightVariationAmplitude":255,"runBeginFloor":-1,"runEndFloor":-1,"runSpeed":[0.1,0.18,0.28,0.38,0.47,0.58,0.68,0.78,0.85,0.9,0.94,0.96,0.96,0.94,0.9,0.85,0.78,0.69,0.6,0.51,0.41,0.32,0.23,0.17,0.13,0.09],"jitterFrequency":[56.3,56.3,56.3,56.3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"jitterAcceleration":[0.06,0.06,0.06,0.06,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"acceleration":[0.37,0.47,0.49,0.48,0.49,0.5,0.51,0.45,0.3,0.22,0.17,0,-0.04,-0.15,-0.24,-0.32,-0.39,-0.43,-0.45,-0.48,-0.47,-0.45,-0.38,-0.26,-0.19,-0.16]}
+// 08-21 15:13:50.210  1744  1810 elevatord: !!!!!!!! now stopped after 2 seconds
+// 08-21 15:13:50.210  1744  1810 elevatord: predict floor:5, height:15.000000, delta:0.000000, accel:0.000000, velocity:0.000000
 #if 1
         if (_accelerometer_motion.state == STOPPED) {
             // mxp, 20250630, always use stopped floor num as real floor when stopped

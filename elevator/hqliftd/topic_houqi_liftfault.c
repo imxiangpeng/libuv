@@ -1,5 +1,6 @@
 // mxp, 20250522, implement houqi topic: /API/V1/Up/LiftFault
 
+#define _GNU_SOURCE
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
@@ -7,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
@@ -14,6 +16,7 @@
 
 #include "cjson/cJSON.h"
 #include "elevator.h"
+#include "file_util.h"
 #include "hr_list.h"
 #include "hr_log.h"
 #include "option.h"
@@ -132,10 +135,19 @@ static struct fault_report_statistics {
     {.exception = ELEVATOR_EXCEPTION_EBIKE, 0},
 };
 
+
+static uint32_t _exception_indicator = ELEVATOR_EXCEPTION_NONE;
+
 // date to record and reset report statistics
 static struct tm _fault_report_statistics_tm;
 
+static struct uviot_topic _topic_liftfault;
+
 static void upload_fault_video(struct lift_fault_event* e);
+
+static void _fault_event_alive_timeout_detect(uv_timer_t* handle);
+static void _store_fault_event(void);
+static void _restore_fault_event(void);
 
 static int to_houqi_fault(enum elevator_exception fault) {
     switch (fault) {
@@ -255,7 +267,15 @@ static int _on_publish(void** payload, int* len) {
         free(e);
     }
 
+    _store_fault_event();
+
     DUMP_FAULT_QUEUE_EVENTS();
+
+    // mxp, 20250828, uv_async maybe union multi operations
+    // we should schedule again when message queue not empty
+    if (!hr_list_empty(&_lift_fault_message_queue)) {
+        uviot_publish_async(_iot, &_topic_liftfault);
+    }
 
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         cJSON_Delete(root);
@@ -272,11 +292,11 @@ static int _on_publish(void** payload, int* len) {
     return 0;
 }
 
-static struct uviot_topic dm_topic_liftfault = {
+static struct uviot_topic _topic_liftfault = {
     .name = EVENT_FAULT_TOPIC_NAME,
     .topic = "/API/V1/Up/" EVENT_FAULT_TOPIC_NAME,
     .period = 0,
-    .qos = 1,  // houqi not support Qos2
+    .qos = 1,  // HQ not support QoS 2
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_publish,
 };
@@ -286,13 +306,30 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     (void)device_name;
     _iot = iot;
 
+#if ENABLE_TOPIC_CUSTOM
+    // if (!_options[OPTION_MQ_TOPIC_PUB_LIFTFAULT].value.string) {
+    //    HR_LOGE("invalid liftfault topic ...\n");
+    //    _exit(-1);
+    //}
+    if (_options[OPTION_MQ_TOPIC_PUB_LIFTFAULT].value.string) {
+        snprintf(_topic_liftfault.topic, sizeof(_topic_liftfault.topic), "%s", _options[OPTION_MQ_TOPIC_PUB_LIFTFAULT].value.string);
+    }
+#endif
+
+    _restore_fault_event();
+
     // init timer for sendvideo & sendsate command timeout
     memset((void*)&_rescure_btn_timer, 0, sizeof(_rescure_btn_timer));
     memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
     uv_timer_init(uv_default_loop(), &_rescure_btn_timer);
     uv_timer_init(uv_default_loop(), &_alive_timer);
 
-    uviot_topic_register(iot, &dm_topic_liftfault);
+    // auto start alive timer when there is any idle which maybe resumed
+    if (!hr_list_empty(&_lift_fault_idle_queue)) {
+        uv_timer_start(&_alive_timer, _fault_event_alive_timeout_detect, LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT, LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT);
+    }
+
+    uviot_topic_register(iot, &_topic_liftfault);
     return 0;
 }
 
@@ -338,7 +375,7 @@ static void fault_event_free(struct lift_fault_event* e) {
 // 在这里还是在 publish 之后呢，因为这里还没有发送，丢也就丢了
 static int publish_fault_event(struct lift_fault_event* e) {
     hr_list_add_tail(&e->entry, &_lift_fault_message_queue);
-    return uviot_publish_async(_iot, &dm_topic_liftfault);
+    return uviot_publish_async(_iot, &_topic_liftfault);
 }
 
 // filter out timeout event and auto resolve it
@@ -470,6 +507,8 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     HR_LOGD("%s(%d): fault:0x%X -> %s\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
 
+    _exception_indicator |= fault;
+
     DUMP_FAULT_QUEUE_EVENTS();
 
     if (_fault_report_statistics_tm.tm_year != tm.tm_year ||
@@ -587,6 +626,8 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     // ignore when can not find
     HR_LOGD("%s(%d): fault:0x%X\n", __FUNCTION__, __LINE__, fault);
 
+    _exception_indicator &= ~fault;
+
     DUMP_FAULT_QUEUE_EVENTS();
     // drop event in message queue
     hr_list_for_each_entry(f, &_lift_fault_message_queue, entry) {
@@ -665,6 +706,10 @@ int elevator_fault_resolved(enum elevator_exception fault) {
     return 0;
 }
 
+int elevator_fault_is_active(enum elevator_exception fault) {
+    return _exception_indicator & fault;
+}
+
 int elevator_fault_review(int* type, uint64_t* occurred_ms) {
     struct lift_fault_event* e = NULL;
 
@@ -701,6 +746,11 @@ static void upload_fault_video(struct lift_fault_event* e) {
     char name[64] = {0};
 
     if (!e) {
+        return;
+    }
+
+    if (0 == _options[OPTION_FAULT_VIDEO_UPLOAD_SWITCH].value.number) {
+        HR_LOGE("fault video upload function is disabled!\n");
         return;
     }
 
@@ -833,4 +883,131 @@ static void upload_fault_video(struct lift_fault_event* e) {
     }
 
     HR_LOGD("this is parent process ....child:%d\n", pid);
+}
+
+// we should store unresolved faults(idle queue)
+// only care events which dequeue from message and queue idle
+// so we not track pending in idle queue before it enter message
+//  _store_fault_event only when event occurred and published
+// store idle queue using binary format
+// |size(uint64)|struct lift_fault_event|...|
+// but you should reinit list
+static void _store_fault_event(void) {
+    size_t size = 0;
+    int fd = -1;
+
+    char* tmp = NULL;
+    int tmp_len = 0;
+    char* last_slash = NULL;
+
+    const char* TMPFILE_TEMPLATE = "tmp_XXXXXX";
+
+    struct lift_fault_event* e = NULL;
+
+    if (hr_list_empty(&_lift_fault_idle_queue)) {
+        unlink(FAULT_HISTORICAL);
+        sync();
+        return;
+    }
+
+    tmp_len = strlen(FAULT_HISTORICAL) + strlen(TMPFILE_TEMPLATE) + 1;  // + '\0'
+
+    tmp = (char*)calloc(1, tmp_len);  // hardcode 8(.XXXXXX + \0)
+    if (!tmp) {
+        return;
+    }
+
+    snprintf(tmp, tmp_len, "%s%s", FAULT_HISTORICAL, TMPFILE_TEMPLATE);
+    fd = mkostemp(tmp, O_RDWR | O_TRUNC | O_CREAT);
+    if (fd < 0) {
+        free(tmp);
+        return;
+    }
+
+    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP);
+
+    // skip size
+    lseek(fd, sizeof(size), SEEK_SET);
+
+    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
+        if (e->pending != 0) {
+            HR_LOGD("skip pending event\n");
+            continue;
+        }
+        size++;
+        futil_write_fd(fd, (char*)e, sizeof(*e));
+    }
+
+    lseek(fd, 0, SEEK_SET);
+    printf("length :%ld\n", size);
+    futil_write_fd(fd, (char*)&size, sizeof(size));
+
+    fdatasync(fd);
+    close(fd);
+
+    rename(tmp, FAULT_HISTORICAL);
+
+    last_slash = strrchr(tmp, '/');
+
+    if (!last_slash) {
+        strcpy(tmp, ".");
+    } else {
+        *(last_slash + 1) = '\0';
+    }
+
+    printf("parent directory:%s\n", tmp);
+    fd = open(tmp, O_RDONLY | O_DIRECTORY);
+    if (fd != -1) {
+        fsync(fd);
+        close(fd);
+    }
+    
+    free(tmp);
+}
+static void _restore_fault_event(void) {
+
+    struct tm tm;
+    char tmp[256] = {0};
+
+    size_t size  = 0;
+
+    char* data = NULL;
+    ssize_t len = futil_read(FAULT_HISTORICAL, &data);
+    if (len <= 0 || !data) {
+        return;
+    }
+
+    // do not unlink historical file until publish
+
+    size = *(size_t*)data;
+
+    printf("size :%ld\n", size);
+
+    if(len - sizeof(size_t) != size * sizeof(struct lift_fault_event)) {
+        // invalid drop
+        unlink(FAULT_HISTORICAL);
+        sync();
+        return;
+    }
+
+    for (size_t i = 0; i < size; i++) {
+        struct lift_fault_event* s = (struct lift_fault_event*)(data + sizeof(size));
+        struct lift_fault_event* e = fault_event_alloc();
+        if (e) {
+            e->type = (s + i)->type;
+            e->fault_begin_time = (s + i)->fault_begin_time;
+            e->fault_end_time = (s + i)->fault_end_time;
+            e->pending = (s + i)->pending;
+
+            time_t t = e->fault_begin_time / 1000;
+            (void)localtime_r(&t, &tm);
+            /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
+
+            HR_LOGD("resume event: 0x%x -> %s, begin:%s\n", e->type, fault_to_string(e->type), tmp);
+            printf("resume event: 0x%x -> %s, begin:%s\n", e->type, fault_to_string(e->type), tmp);
+            _exception_indicator |= e->type;
+            hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
+        }
+    }
+    free(data);
 }

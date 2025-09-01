@@ -40,8 +40,6 @@ static uv_timer_t _timer;
 // 2.
 //
 
-static uint32_t _elevator_exception = ELEVATOR_EXCEPTION_NONE;
-
 static const char* state_str(enum state_machine_state state) {
     switch (state) {
         case SM_ELEVATOR_UNINIT:
@@ -86,9 +84,8 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
     printf("%s(%d): come in door not opened after stopped...\n", __FUNCTION__, __LINE__);
     HR_LOGD("%s(%d): come in door not opened after stopped..., door:%d, passenger:%d\n", __FUNCTION__, __LINE__, st.door_state, st.passenger_count);
 
-    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
+    if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
         if (st.passenger_count > 0) {
-            _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
             HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
 
             // kunren maybe disabled
@@ -110,9 +107,8 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
 
     uelevator_get_status(&st);
 
-    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
+    if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
         if (st.passenger_count > 0) {
-            _elevator_exception |= ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
             HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
 
             // kunren maybe disabled
@@ -162,17 +158,15 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
         return;
     }
 
-    HR_LOGD("state machine message: %d(%s) received event %d(%s), exception:%d\n", _state, state_str(_state), event, event_str(event), _elevator_exception);
+    HR_LOGD("state machine message: %d(%s) received event %d(%s)\n", _state, state_str(_state), event, event_str(event));
 
     // finished trapped event when door opened in any case
     if (SM_EVENT_DOOR_OPENED == event) {
-        if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
-            _elevator_exception &= ~ELEVATOR_EXCEPTION_PEOPLE_TRAPPED;
+        if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
             elevator_fault_resolved(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
         }
     } else if (SM_EVENT_DOOR_CLOSED == event) {
-        if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-            _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+        if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
             elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
         }
     }
@@ -224,8 +218,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     uv_timer_start(&_timer, _detect_someone_inside_when_long_stopped, _eguard_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number, 0);
                     break;
                 case SM_EVENT_RUNNING:
-                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-                        _elevator_exception |= ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                    if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
                         elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
                     }
                     printf("%s(%d): Exception: door is opened when running !\n", __FUNCTION__, __LINE__);
@@ -269,8 +262,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     break;
                 case SM_EVENT_DOOR_OPENED:
                     printf("%s(%d): Exception door is opened while running\n", __FUNCTION__, __LINE__);
-                    if (0 == (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-                        _elevator_exception |= ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                    if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
                         elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
                     }
 
@@ -278,8 +270,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     break;
                 case SM_EVENT_DOOR_CLOSED:
                     // ignore
-                    if (0 != (_elevator_exception & ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-                        _elevator_exception &= ~ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED;
+                    if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
                         elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
                     }
 

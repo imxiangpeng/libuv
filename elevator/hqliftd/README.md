@@ -11,9 +11,16 @@
     - `MQ_KEEPALIVE=60`
     - `MQ_USERNAME=inspur`
     - `MQ_PASSWORD=inspur88*`
+    - `MQ_TOPIC_SUB_COMMAND` 订阅命令主题 `/API/V1/Down/LC4005CB4E215D2A2/Command`
+    - `MQ_TOPIC_PUB_COMMAND_RESPONSE` 命令响应主题 `/API/V1/Down/LC4005CB4E215D2A2/Command/Response`
+    - `MQ_TOPIC_PUB_HEARTBEAT` 心跳主题 `/API/V1/Up/HeartBeat`
+    - `MQ_TOPIC_PUB_LIFTSTATE` 运行状态主题 `/API/V1/Up/LiftState`
+    - `MQ_TOPIC_PUB_LIFTFAULT` 故障上报主题 `/API/V1/Up/LiftFault`
+    - `MQ_TOPIC_PUB_LIFTRUNINFO` 运行记录上报主题 `/API/V1/Up/LiftRunInfo`
     - `REALTIME_REPORT_PERIOD_MS=1000`
     - `SPEED_LIMIT_THREHOLD=2.8`
     - `LIVE_URL=rtmp://srs.hqszjs.com:1935/live/device_serialno`
+    - `LIVE_TIMEOUT` 直播命令有效时长（秒）60
     - `FTP_ADDRESS=`
     - `FTP_USERNAME=`
     - `FTP_PASSWORD=`
@@ -26,6 +33,9 @@
     - `RUNINFO_REPORT_SWITCH` 运行数据上报开关
     - `LIFTFAULT_VIDEO_UPLOAD_SWITCH` 故障视频上报开关，备用
        困人视频在上传的时候因为要将多个视频进行合成，而我们系统经常误判困人事件，有时出现十几个小时的困人，例如 `GD500112000062` 在 20250716 的时候产生了 4G 多的视频 ftp://inspur@ftp.hqszjs.com:2100/event_files/GD500112000062/20250716_075937.mp4
+    - `RESCURE_MODE` 救援模式，默认手动模式 2， 手动模式下困人事件不会主动上报，仅在用户按下救援按钮情况下才会上报。自动模式 1，检测到困人事件后就会立马上报。另外所有事件（困人与其他）都会有一个超时机制，操作 2 小时 30 分没有结束的，自动上报结束事件。
+      注意，目前没有独立的设置，是从困人设置模式中电话拨打方式那里同步过来的。
+    
 
 # 救援按键
 

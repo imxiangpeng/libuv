@@ -1,8 +1,13 @@
 // mxp, 20250520, smart/simple conf utils
+// mxp, 20250829, support '=' in value
+// only skip whitespace at the beginning, trailing whitespace is not handled
 // support:
 // KEY=VALUE
-// KEY VALUE
-// KEY = VALUE
+//    --> VALUE
+// KEY=VAL UE
+//    --> VAL UE
+// KEY=VAL=UE
+//    --> VAL=UE
 
 #define _GNU_SOURCE
 
@@ -170,7 +175,6 @@ static void fsync_parent_dir(const char* file) {
     free(tmp);
 }
 
-
 static void _sconf_init(void) {
     pthread_attr_t attr;
 
@@ -323,7 +327,7 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
 
     // no need call unlink
     if (rename(tmp, path) != 0) {
-       unlink(tmp);
+        unlink(tmp);
     }
     fsync_parent_dir(path);
     free(tmp);
@@ -332,23 +336,31 @@ int sconf_save_int64(const char* path, const char** fields, int64_t* result, siz
 
 static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, size_t size) {
     char* p = line;
-    char* save_ptr;
+    char* v = NULL;
+    char* eq = NULL;
     char* endptr;
     int idx = -1;
     if (!line || !proto) {
         return -1;
     }
 
-    while (*line && isspace((unsigned char)*line))
-        ++line;
+    while (*p && isspace((unsigned char)*p))
+        ++p;
 
-    if (*line == '#' || *line == '\0') {
+    if (*p == '#' || *p == '\0') {
         return 0;
     }
 
-    p = strtok_r(line, " =", &save_ptr);
-    if (!p) {
-        return -1;
+    eq = strchr(p, '=');
+    if (!eq) {
+        return -1;  // invalid!
+    }
+
+    *eq = '\0';
+    v = eq + 1;
+
+    if (*v == '\0') {
+        return 0;
     }
 
     for (size_t i = 0; i < size; i++) {
@@ -363,27 +375,18 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
         return 0;
     }
 
-    p = strtok_r(NULL, " =", &save_ptr);
-    if (!p) {
-        // do not return error which cause losing all left data
-        if (PROTO_VALUE_STRING == proto[idx].type) {
-            proto[idx].value.string = strdup("");
-        }
-        return 0;
-    }
-
     switch (proto[idx].type) {
         case PROTO_VALUE_NUMBER: {
-            int64_t val = strtoll(p, &endptr, 10);
-            if (p == endptr || val > INT64_MAX) {
+            int64_t val = strtoll(v, &endptr, 10);
+            if (v == endptr || val > INT64_MAX) {
                 return -1;
             }
             proto[idx].value.number = val;
             return 0;
         }
         case PROTO_VALUE_DECIMAL: {
-            double val = strtod(p, &endptr);
-            if (p == endptr || errno == ERANGE) {
+            double val = strtod(v, &endptr);
+            if (v == endptr || errno == ERANGE) {
                 return -1;
             }
             proto[idx].value.decimal = val;
@@ -398,7 +401,7 @@ static int parse_conf_line_with_proto(char* line, struct sconf_proto* proto, siz
                 proto[idx].value.string = NULL;
             }*/
 
-            proto[idx].value.string = strdup(p);
+            proto[idx].value.string = strdup(v);
             return 0;
         default:
             return -1;

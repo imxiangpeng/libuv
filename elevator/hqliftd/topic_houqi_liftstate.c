@@ -16,9 +16,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "cjson/cJSON.h"
 #include "elevator.h"
+#include "hr_log.h"
 #include "option.h"
 #include "uelevator.h"
 #include "uviot.h"
@@ -63,7 +65,7 @@ static int _on_publish(void** payload, int* len) {
 
     // mxp, 20250609, add threshold, because ekf maybe generate invalid speed when stationary
     if (st.speed <= 0.1) {
-        _running_direction = ELEVATOR_DIR_STATIONARY;
+        _running_direction = 3;
     }
 
     cJSON* root = cJSON_CreateObject();
@@ -131,6 +133,17 @@ int topic_houqi_liftstate_init(struct uviot* iot, const char* public_key, const 
     (void)public_key;
     (void)device_name;
     _iot = iot;
+
+#if ENABLE_TOPIC_CUSTOM
+    // if (!_options[OPTION_MQ_TOPIC_PUB_LIFTSTATE].value.string) {
+    //     HR_LOGE("invalid liftruninfo topic ...\n");
+    //     _exit(-1);
+    // }
+
+    if (_options[OPTION_MQ_TOPIC_PUB_LIFTSTATE].value.string) {
+        snprintf(_topic_liftstate.topic, sizeof(_topic_liftstate.topic), "%s", _options[OPTION_MQ_TOPIC_PUB_LIFTSTATE].value.string);
+    }
+#endif
 
     _topic_liftstate.period = _options[OPTION_REALTIME_REPORT_PERIOD_MS].value.number;
 
