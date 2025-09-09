@@ -47,6 +47,7 @@ int property_value_set_string_ext(struct property_value*, const char*, int preal
 enum {
     PROPERTY_SERIALNO = 0,
     PROPERTY_ELEVATOR_ID,
+    PROPERTY_MODEL,
     PROPERTY_BUILD_TIMESTAMP,
     PROPERTY_SW_VERSION,
     PROPERTY_BIAS_ACCEL_X,

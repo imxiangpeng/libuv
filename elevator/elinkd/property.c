@@ -85,6 +85,7 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     // system property_value
     [PROPERTY_SERIALNO] = {"serialno", E_STRING, system_property_serial, NULL, {}, 1 /* report when startup*/},
     [PROPERTY_ELEVATOR_ID] = {"elevator_id", E_STRING, elevator_property_get_elevator_id, elevator_property_set_elevator_id, {}, 1 /* report when startup*/},
+    [PROPERTY_MODEL] = {"model", E_STRING, NULL, NULL, {.type = E_STRING, .val.string = "LC400", .preallocated = 1}, 1 /* report when startup*/},
     [PROPERTY_BUILD_TIMESTAMP] = {"build_timestamp", E_STRING, NULL, NULL, {.type = E_STRING, .val.string = BUILD_TIMESTAMP, .preallocated = 1}, 1 /* report when startup*/},
     [PROPERTY_SW_VERSION] = {"sw_version", E_STRING, system_property_sw_version, NULL, {}, 1 /* report when startup*/},
     // elevator property_value
