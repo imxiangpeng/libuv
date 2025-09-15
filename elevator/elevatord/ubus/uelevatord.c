@@ -481,7 +481,12 @@ static void _observer_on_status(struct motion_status* st) {
             blobmsg_add_double(&_realtime_b, "accel", st->accel);
             blobmsg_add_double(&_realtime_b, "velocity", st->velocity);
             blobmsg_add_double(&_realtime_b, "distance", st->distance);
-            blobmsg_add_u32(&_realtime_b, "direction", _running_direction);
+            // _running_direction is entire travel's direction not realtime direction
+            int direction = st->velocity > 0 ? DIRECTION_UP : DIRECTION_DOWN;
+            if (fabs(st->velocity) < 0.1) {
+                direction = DIRECTION_NONE;
+            }
+            blobmsg_add_u32(&_realtime_b, "direction", direction);
             blobmsg_add_u32(&_realtime_b, "floor", (uint32_t)st->floor);
             blobmsg_add_double(&_realtime_b, "jitter_freq", st->jitter_frequency);
             blobmsg_add_double(&_realtime_b, "jitter_accel", st->jitter_accel);
