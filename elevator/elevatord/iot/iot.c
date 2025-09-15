@@ -27,6 +27,7 @@ static struct uviot* _iot = NULL;
 
 // aliyun register devices
 static const char* aliyun_devices[] = {
+    "LC123456789",
     "5CB4E215D2A2",
     "5CB4E215D2A3",
     "5CB4E215D2A4",
