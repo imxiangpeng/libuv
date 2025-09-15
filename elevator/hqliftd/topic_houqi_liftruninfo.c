@@ -60,7 +60,7 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddNumberToObject(root, "inNum", 0 /*dm_lift_passenger_count_in()*/);
     cJSON_AddNumberToObject(root, "outNum", 0 /*dm_lift_passenger_count_out()*/);
 
-    cJSON_AddNumberToObject(root, "runningDirection", his->direction);
+    cJSON_AddNumberToObject(root, "runningDirection", his->direction == ELEVATOR_DIR_STATIONARY ? 3 : his->direction);
 
     cJSON_AddNumberToObject(root, "runBeginTimeStamp", his->timestamp_begin);
     cJSON_AddNumberToObject(root, "runEndTimeStamp", his->timestamp_end);
