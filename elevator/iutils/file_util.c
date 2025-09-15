@@ -1,4 +1,5 @@
 // mxp, 20250415, file utils
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -95,4 +96,42 @@ ssize_t futil_write(const char* path, void *data, size_t count) {
     close(fd);
 
     return result;
+}
+
+// copy & modified from toolbox's rm.c
+int futil_unlink(const char* name) {
+    struct stat st;
+    DIR* dir;
+    struct dirent* de;
+
+    if (!name) return -1;
+
+    /* is it a file or directory? */
+    if (lstat(name, &st) < 0)
+        return (errno == ENOENT) ? 0 : -1;
+
+    /* a file, so unlink it */
+    if (!S_ISDIR(st.st_mode))
+        return unlink(name);
+
+    /* a directory, so open handle */
+    dir = opendir(name);
+    if (dir == NULL)
+        return -1;
+
+    /* recurse over components */
+    while ((de = readdir(dir)) != NULL) {
+        char dn[PATH_MAX] = {0};
+        if (!strcmp(de->d_name, "..") || !strcmp(de->d_name, "."))
+            continue;
+        sprintf(dn, "%s/%s", name, de->d_name);
+        futil_unlink(dn);
+    }
+
+    /* close directory handle */
+    if (closedir(dir) < 0)
+        return -1;
+
+    /* delete target directory */
+    return rmdir(name);
 }
