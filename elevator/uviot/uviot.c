@@ -26,9 +26,15 @@
 #include "hr_list.h"
 #include "hr_log.h"
 
+// now reconnect api not using async, it maybe blocked much time
+// we should period reconnect, not too quick
+#define UVIOT_RECONNECT_DELAY (5000)
+// max stash 32 items, must be power of 2
+#define STASH_MESSAGE_CAPABILITY (1 << 5)  // 2^5
+
 // 感觉不能主动调用 disconnect， 必须先停止 pool 然后再调用 disconnect
 
-#define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT) /*| UV_WRITABLE*/
+#define DEFAULT_POLL_EVENTS (UV_READABLE | UV_DISCONNECT | UV_WRITABLE)
 
 struct uviot_impl {
     struct uviot self;
@@ -39,6 +45,8 @@ struct uviot_impl {
     uv_loop_t* loop;
     uv_timer_t timer;
     uv_poll_t poll;
+    uv_work_t conn_req;
+    int connect_method;  // 0: use connect, 1: can use reconnect
 
     int refs;  // uv handle reference nums
 
@@ -60,14 +68,23 @@ struct uviot__topic {
     uv_timer_t* timer;
     uv_async_t* async;
 
+    // the quality of important messages must be guaranteed.
+    // only stash message you send using uviot_publish_async and qos > 0
+    struct {
+        unsigned int head;
+        unsigned int tail;
+        unsigned int caps;  // buffer max size
+        const char** data;
+    } stash;  // pending messages
+
     int refs;
 };
 
 static int mosquitto_lib_refs = 0;
 
 static void uviot_impl_loop_misc_timer_cb(uv_timer_t* handle);
-static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle);
 static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events);
+static void uviot_impl_connect_timer_cb(uv_timer_t* handle);
 
 static void uviot__close_uv_dynamic_handle(uv_handle_t* handle);
 
@@ -92,7 +109,8 @@ static int uviot_mosquitto_publish(struct uviot_impl* iot, int* mid, const char*
         }
 
         uv_timer_stop(&iot->timer);
-        uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 0, 1000);
+        // uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 0, 1000);
+        uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
     }
 #endif
     return rc;
@@ -122,6 +140,54 @@ static void _topic_period_timer_cb(uv_timer_t* handle) {
     }
 }
 
+static int iot__topic_stash_push(struct uviot__topic* t, const char* data) {
+    int id = 0;
+    if (!t || !t->self || !data)
+        return -1;
+
+    if (!t->stash.data) {
+        // init pending message
+        t->stash.caps = STASH_MESSAGE_CAPABILITY;
+        // memory will be release when deinit
+        t->stash.data = (const char**)calloc(t->stash.caps, sizeof(const char*));
+        if (!t->stash.data) {
+            t->stash.caps = 0;
+            return -1;
+        }
+    }
+    // always put new data overwrite
+    id = t->stash.head & (t->stash.caps - 1);
+
+    printf("id: %d (%d - %d)-> %s\n", id, t->stash.head, t->stash.tail, data);
+    // free old data
+    if (t->stash.data[id]) {
+        free((void*)t->stash.data[id]);
+        t->stash.tail++;  // tail should be moved
+    }
+    t->stash.data[id] = data;
+    t->stash.head++;
+
+    return 0;
+}
+#if 0
+static int iot__topic_stash_pop(struct uviot__topic* t, const char** data) {
+    int id = 0;
+    if (!t || !t->self || !t->stash.data || !data)
+        return -1;
+
+    // no pending message
+    if (t->stash.head - t->stash.tail == 0) {
+        return -1;
+    }
+    // always put new data overwrite
+    id = t->stash.tail & (t->stash.caps - 1);
+
+    *data = t->stash.data[id];
+    t->stash.tail++;
+
+    return 0;
+}
+#endif
 static void iot__topic_timer_start(struct uviot__topic* t) {
     if (!t || !t->self)
         return;
@@ -144,10 +210,11 @@ static void iot__topic_async_cb(uv_async_t* handle) {
 
     t = (struct uviot__topic*)handle->data;
 
+    // always call on_publish, message maybe stashed when no connect
     // maybe not connected
-    if (mosquitto_socket(t->iot->mosq) == -1) {
-        return;
-    }
+    // if (mosquitto_socket(t->iot->mosq) == -1) {
+    //    return;
+    // }
 
     // public topics
     void* payload = NULL;
@@ -157,8 +224,16 @@ static void iot__topic_async_cb(uv_async_t* handle) {
         int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
                                          len, (const void*)payload,
                                          t->self->qos, false);
+        printf("publish :%d -> %s\n", rc, (char*)payload);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d, errno:%d\n", rc, errno);
+            if (t->self->qos > 0) {
+                HR_LOGE("failed, try stash the message\n");
+                // after success, payload will be release later
+                if (0 == iot__topic_stash_push(t, payload)) {
+                    return;
+                }
+            }
         }
         free(payload);
     }
@@ -252,6 +327,26 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
                         free(payload);
                     }
                 }
+
+                // our stash message is send before mosquitto message
+                if (p->stash.data) {
+                    while (p->stash.tail < p->stash.head) {
+                        int id = p->stash.tail & (p->stash.caps - 1);
+                        if (p->stash.data[id]) {
+                            int rc = uviot_mosquitto_publish(iot, &p->mid, p->self->topic,
+                                                             strlen(p->stash.data[id]), (const void*)p->stash.data[id],
+                                                             p->self->qos, false);
+                            HR_LOGD("%s(%d): auto publish stash message:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, rc);
+                            if (rc != MOSQ_ERR_SUCCESS) {
+                                HR_LOGD("%s(%d): ignore failed stash message:%s -> (%d)\n", __FUNCTION__, __LINE__, p->self->topic, rc);
+                            }
+
+                            free((void*)p->stash.data[id]);
+                        }
+                        p->stash.tail++;
+                    }
+                }
+
 #if 0  // move to uviot_impl_run
        // create topic timer delay when it's connected
                 if (p->self->type == TOPIC_TYPE_PUBLISH && p->self->period > 0 && !p->timer) {
@@ -296,8 +391,7 @@ static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
 
     if (iot->auto_reconnect) {
         // stop & start reconnect timer callback
-        uv_timer_stop(&iot->timer);
-        uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
+        uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
     }
 }
 
@@ -370,79 +464,32 @@ static void _on_publish(struct mosquitto* mosq, void* userdata, int mid) {
 
 static void uviot_impl_loop_misc_timer_cb(uv_timer_t* handle) {
     struct uviot_impl* iot = (struct uviot_impl*)handle->data;
-
-    // check is connected?
+    // check i connected?
     mosquitto_loop_misc(iot->mosq);
 }
 
-static void uviot_impl_reconnect_timer_cb(uv_timer_t* handle) {
+static void uviot_impl_do_connnect_work(uv_work_t* req) {
     int rc = 0;
     struct uviot_impl* iot = NULL;
     struct mosquitto* mosq = NULL;
 
-    if (!handle || !handle->data)
+    if (!req || !req->data)
         return;
 
-    iot = (struct uviot_impl*)handle->data;
-
+    iot = (struct uviot_impl*)req->data;
     mosq = iot->mosq;
+    HR_LOGD("%s(%d): connect:%s:%d, alive time:%d\n", __FUNCTION__, __LINE__, iot->self.server, iot->self.port, iot->self.alive_time);
 
-    if (!mosq)
-        return;
-
-    rc = mosquitto_reconnect /*_async*/ (mosq);
-    if (rc != MOSQ_ERR_SUCCESS) {
-        HR_LOGD("%s(%d): failed reconnect failed:%d\n", __FUNCTION__, __LINE__, rc);
-        if (rc == MOSQ_ERR_EAI) {
-            res_init();
-        }
-        return;
+    // mosquitto_[re]connect_async maybe also blocked when dns resolver
+    // we should do it in background thread not in uv main loop
+    if (iot->connect_method == 0) {
+        rc = mosquitto_connect_async(mosq, iot->self.server, iot->self.port, iot->self.alive_time);
+    } else {
+        rc = mosquitto_reconnect_async(mosq);
     }
-
-    iot->sock = mosquitto_socket(mosq);
-    if (iot->sock == -1) {
-        return;
-    }
-
-    // using uv_poll_init update socket
-    // any memory leak ?
-    uv_poll_init(iot->poll.loop, &iot->poll, iot->sock);
-    iot->poll.data = iot;
-    iot->pevents = DEFAULT_POLL_EVENTS;
-    uv_poll_start(&iot->poll, iot->pevents, uviot_impl_loop_poll_cb);
-    iot->refs++;
-
-    uv_timer_stop(handle);
-    uv_timer_start(&iot->timer, uviot_impl_loop_misc_timer_cb, 1000, 1000);
-}
-
-static void uviot_impl_connect_retry_timer_cb(uv_timer_t* handle) {
-    int rc = -1;
-    struct uviot* self = NULL;
-    struct uviot_impl* iot = NULL;
-    struct mosquitto* mosq = NULL;
-
-    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
-    if (!handle || !handle->data)
-        return;
-
-    iot = (struct uviot_impl*)handle->data;
-    self = &iot->self;
-
-    mosq = iot->mosq;
-
-    if (!mosq)
-        return;
-
-    HR_LOGD("%s(%d): connect:%s:%d, alive time:%d\n", __FUNCTION__, __LINE__, self->server, self->port, self->alive_time);
-    // 我们发现我电脑 apt 安装的 mosquitto 使用异步连接阿里 iot 的时候总是连接不上,但是 sync 接口测试正常
-    // 后来使用自己编译的 mosquitto 测试正常
-    // rc = mosquitto_connect_bind_async(iot->mosq, _plat.conf.broker.server, _plat.conf.broker.port,
-    //_plat.alive_time, NULL);
-
-    rc = mosquitto_connect(iot->mosq, self->server, self->port, self->alive_time);
+    HR_LOGD("%s(%d): connect:%s:%d, alive time:%d, failed:%d\n", __FUNCTION__, __LINE__, iot->self.server, iot->self.port, iot->self.alive_time, rc);
     if (rc != MOSQ_ERR_SUCCESS) {
-        HR_LOGD("%s(%d): connect:%s:%d, alive time:%d, failed:%d\n", __FUNCTION__, __LINE__, self->server, self->port, self->alive_time, rc);
+        HR_LOGD("%s(%d): connect:%s:%d, alive time:%d, failed:%d\n", __FUNCTION__, __LINE__, iot->self.server, iot->self.port, iot->self.alive_time, rc);
         if (rc == MOSQ_ERR_EAI) {
             res_init();
         }
@@ -450,7 +497,55 @@ static void uviot_impl_connect_retry_timer_cb(uv_timer_t* handle) {
     }
 
     iot->sock = mosquitto_socket(iot->mosq);
+#if 0
+    if (iot->sock != -1) {
+        int opt;
+        /* Set non-blocking */
+        opt = fcntl(iot->sock, F_GETFL, 0);
 
+        if (opt == -1 || fcntl(iot->sock, F_SETFL, opt | O_NONBLOCK) == -1) {
+            /* If either fcntl fails, don't want to allow this client to connect. */
+            iot->sock = -1;
+            return;
+        } else {
+            printf("non block success\n");
+        }
+    }
+#endif
+}
+
+static void uviot_impl_after_connect_work(uv_work_t* req, int status) {
+    struct uviot* self = NULL;
+    struct uviot_impl* iot = NULL;
+    struct mosquitto* mosq = NULL;
+
+    if (!req || !req->data) {
+        return;
+    }
+
+    iot = (struct uviot_impl*)req->data;
+    self = &iot->self;
+    mosq = iot->mosq;
+
+    iot->refs--;
+	
+    if (status == UV_ECANCELED) {
+        printf("it's canceled\n");
+        return;
+    }
+
+
+    if (iot->sock == -1) {
+        HR_LOGD("%s(%d): connect failed, schedule timer again...\n", __FUNCTION__, __LINE__);
+        uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
+        return;
+    }
+
+    if (iot->connect_method == 0) {
+        // next connect will use reconnect
+        iot->connect_method = 1;
+    }
+    HR_LOGD("%s(%d): connected ...\n", __FUNCTION__, __LINE__);
     // using uv_poll_init update socket
     // any memory leak ?
     uv_poll_init(iot->loop, &iot->poll, iot->sock);
@@ -459,13 +554,39 @@ static void uviot_impl_connect_retry_timer_cb(uv_timer_t* handle) {
     uv_poll_start(&iot->poll, iot->pevents, uviot_impl_loop_poll_cb);
     iot->refs++;
 
-    // uv_timer_init(iot->loop, &iot->timer);
-    // iot->timer.data = iot;
     // switch to misc timer
     uv_timer_start(&iot->timer, uviot_impl_loop_misc_timer_cb, self->alive_time * 1000, self->alive_time * 1000);
+}
 
-    // struct iot hold two uv handle: poll & timer
-    // now refs should == 2
+static void uviot_impl_connect_timer_cb(uv_timer_t* handle) {
+    struct uviot_impl* iot = NULL;
+    struct mosquitto* mosq = NULL;
+
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
+    if (!handle || !handle->data)
+        return;
+
+    iot = (struct uviot_impl*)handle->data;
+
+    mosq = iot->mosq;
+
+    if (!mosq)
+        return;
+
+    // make sure it's closed
+    if (uv_has_ref((uv_handle_t*)&iot->poll)) {
+        if (!uv_is_closing((uv_handle_t*)&iot->poll)) {
+            uv_poll_stop(&iot->poll);
+            uv_close((uv_handle_t*)&iot->poll, uviot__close_uv_dynamic_handle);
+        }
+    }
+
+    iot->sock = -1;
+    iot->conn_req.data = iot;
+
+    iot->refs--;
+    uv_queue_work(iot->loop, &iot->conn_req, uviot_impl_do_connnect_work, uviot_impl_after_connect_work);
+    HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }
 
 static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
@@ -475,6 +596,7 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     if (!handle || !handle->data)
         return;
 
+    printf("%s(%d): ....status:%d, events:%d\n", __FUNCTION__, __LINE__, status, events);
     iot = (struct uviot_impl*)handle->data;
 
     mosq = iot->mosq;
@@ -485,38 +607,18 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     // mxp, 20250623, reconnect when socket is broken
     if (status == UV_EBADF) {
         HR_LOGE("EBADF poll %d status: %d, events:0x%X\n", iot->sock, status, events);
+        // no trigger on_disconnect
         if (!uv_is_closing((uv_handle_t*)handle)) {
             uv_poll_stop(handle);
             uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
         }
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback
-            uv_timer_stop(&iot->timer);
-            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 2000, 1000);
+            uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
         }
 
         return;
     }
-
-#if 1
-    if (events & UV_DISCONNECT) {
-        HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
-        // stop current poll, we should reconnect and using new socket
-        if (!uv_is_closing((uv_handle_t*)handle)) {
-            uv_poll_stop(handle);
-            uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
-        }
-
-        if (iot->auto_reconnect) {
-            // stop & start reconnect timer callback
-            uv_timer_stop(&iot->timer);
-            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
-        }
-
-        return;
-    }
-#endif
-
 
     if (events & UV_READABLE) {
         mosquitto_loop_read(mosq, 1);
@@ -548,12 +650,30 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
         }
         if (iot->auto_reconnect) {
             // stop & start reconnect timer callback
-            uv_timer_stop(&iot->timer);
-            uv_timer_start(&iot->timer, uviot_impl_reconnect_timer_cb, 1000, 1000);
+            uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
         }
 
         return;
     }
+
+#if 1
+    if (events & UV_DISCONNECT) {
+        HR_LOGD("%s(%d): come in disconnect.......\n", __FUNCTION__, __LINE__);
+        // stop current poll, we should reconnect and using new socket
+        if (!uv_is_closing((uv_handle_t*)handle)) {
+            uv_poll_stop(handle);
+            uv_close((uv_handle_t*)handle, uviot__close_uv_dynamic_handle);
+        }
+
+        if (iot->auto_reconnect) {
+            // stop & start reconnect timer callback
+            uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, UVIOT_RECONNECT_DELAY, 0);
+        }
+
+        return;
+    }
+#endif
+
     if (pevents != iot->pevents) {
         iot->pevents = pevents;
         uv_poll_start(&iot->poll, pevents, uviot_impl_loop_poll_cb);
@@ -614,6 +734,20 @@ static void iot__topic_free(struct uviot__topic* t) {
     hr_list_del(&t->entry);
 
     HR_INIT_LIST_HEAD(&t->entry);
+
+    // release stash pending message
+    if (t->stash.data) {
+        while (t->stash.tail < t->stash.head) {
+            int id = t->stash.tail & (t->stash.caps - 1);
+            if (t->stash.data[id]) {
+                free((void*)t->stash.data[id]);
+            }
+            t->stash.tail++;
+        }
+
+        free(t->stash.data);
+        t->stash.data = NULL;
+    }
 
     HR_LOGD("%s(%d): free :%p -> %s (%d)\n", __FUNCTION__, __LINE__, t, t->self->name, t->refs);
     if (t->timer != NULL) {
@@ -694,6 +828,10 @@ int uviot_release(struct uviot* self) {
     mosquitto_disconnect(iot->mosq);
 
     loop = iot->poll.loop;
+
+    HR_LOGE("%s(%d): iot:%p uviot_impl:%p, refs:%d\n", __FUNCTION__, __LINE__, &iot->self, iot, iot->refs);
+    uv_cancel((uv_req_t*)&iot->conn_req);
+    HR_LOGE("%s(%d): iot:%p uviot_impl:%p, refs:%d\n", __FUNCTION__, __LINE__, &iot->self, iot, iot->refs);
     // we must verify, because iot->poll maybe close in running
     if (uv_has_ref((uv_handle_t*)&iot->poll) /*iot->poll.type != UV_UNKNOWN_HANDLE*/) {
         if (!uv_is_closing((const uv_handle_t*)&iot->poll)) {
@@ -790,7 +928,8 @@ int uviot_prepare(struct uviot* self) {
 
     mosquitto_username_pw_set(iot->mosq, self->username, self->password);
 
-    uv_timer_start(&iot->timer, uviot_impl_connect_retry_timer_cb, 0, 1000);
+    // run immediately after loop started
+    uv_timer_start(&iot->timer, uviot_impl_connect_timer_cb, 0, 0);
     return 0;
 }
 
