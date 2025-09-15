@@ -226,7 +226,7 @@ static int _on_publish(void** payload, int* len) {
     cJSON_AddStringToObject(root, "uuid", uuid_str);
     cJSON_AddStringToObject(root, "elevatorNo", elevator_deviceid());
     cJSON_AddNumberToObject(root, "currentSpeed", st.speed);
-    cJSON_AddNumberToObject(root, "runningDirection", st.direction);
+    cJSON_AddNumberToObject(root, "runningDirection", st.direction == ELEVATOR_DIR_STATIONARY ? 3 : st.direction);
     cJSON_AddNumberToObject(root, "doorStatus", st.door_state);
     cJSON_AddNumberToObject(root, "personInLift", st.passenger_count);
     cJSON_AddNumberToObject(root, "currentFloor", st.current_floor);
@@ -854,6 +854,7 @@ static void upload_fault_video(struct lift_fault_event* e) {
     if (pid == 0) {  // child
         char* argv[] = {
             "/usr/bin/estreamer",
+            "-s", // use persist task, which will continue even power off or reboot
             begin_str,
             end_str,
             url,
@@ -871,6 +872,14 @@ static void upload_fault_video(struct lift_fault_event* e) {
 
         for (size_t i = 0; i < sizeof(argv) / sizeof(argv[0]); i++) {
             printf("%ld --> %s\n", i, argv[i]);
+            printf("%ld --> %s\n", i, argv[i]);
+        }
+
+        // adjust child process's adj
+        FILE *fp = fopen("/proc/self/oom_score_adj", "w");
+        if (fp) {
+            fwrite("0", 1, 1, fp);
+            fclose(fp);
         }
 
         if (execvp(argv[0], argv) < 0) {
