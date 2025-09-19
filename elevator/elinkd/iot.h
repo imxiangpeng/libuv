@@ -5,7 +5,7 @@ struct topic {
     char name[128];
     char topic[256];
     int period;
-    int auto_publish; // auto publish when connected
+    int auto_publish;  // auto publish when connected
     int qos;
     enum topic_type {
         TOPIC_TYPE_PUBLISH = 0,
@@ -15,9 +15,9 @@ struct topic {
     // on stop
     union {
         // called with message on subscribed topic
-        int (*on_message)(void *payload, int len);
+        int (*on_message)(void* payload, int len);
         // called before publish topic
-        int (*on_publish)(void **payload, int *len);
+        int (*on_publish)(void** payload, int* len);
     } callback;
 };
 
@@ -29,4 +29,5 @@ int iot_topic_register(const struct topic* topic);
 
 int iot_topic_publish_async(const struct topic* topic);
 
+int iot_topic_publish(const struct topic* topic, const char* payload, const int len);
 #endif

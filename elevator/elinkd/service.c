@@ -177,7 +177,6 @@ static int _SetAlarmSound(cJSON* params) {
 
     return 0;
 }
-
 struct svc_action svc_action_tbl[] = {
     {"StartAutoFloorCalibration", _StartAutoFloorCalibration},
     {"CalibrateAtFloorManually", _CalibrateAtFloorManually},

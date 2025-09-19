@@ -85,6 +85,11 @@ static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
     // public topics
     void* payload = NULL;
     int len = 0;
+
+    if (!topic->self->callback.on_publish) {
+        return;
+    }
+
     topic->self->callback.on_publish(&payload, &len);
     if (payload != NULL && len > 0) {
         int rc = mosquitto_publish(_priv.mosq, &topic->mid, topic->self->topic,
@@ -163,6 +168,9 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
             void* payload = NULL;
             int len = 0;
             if (p->self->auto_publish != 0) {
+                if (!p->self->callback.on_publish) {
+                    continue;
+                }
                 p->self->callback.on_publish(&payload, &len);
                 if (payload != NULL && len > 0) {
                     int rc = mosquitto_publish(mosq, &p->mid, p->self->topic,
@@ -292,7 +300,6 @@ int iot_init() {
     snprintf(username, sizeof(username), "%s&%s", name, product_key);
     // "clientId" + {ClientId}+ "deviceName" + {deviceName }+ "productKey" + {productKey }+ "timestamp" + {timestamp}
     asprintf(&iot_content, "clientId%sdeviceName%sproductKey%stimestamp%lld", client_id, name, product_key, msec);
-
     printf("username:%s\n", username);
     printf("%s(%d): ....hmac_secret:%s\nn", __FUNCTION__, __LINE__, hmac_secret);
     HMAC(EVP_sha256(), hmac_secret, strlen(hmac_secret), (unsigned char*)iot_content, strlen(iot_content), result, &len);
@@ -412,4 +419,34 @@ int iot_topic_publish_async(const struct topic* topic) {
     }
 
     return 0;
+}
+// please called in iot thread
+int iot_topic_publish(const struct topic* topic, const char* payload, const int len) {
+    (void)topic;
+    struct iot__topic* p = NULL;
+
+    if (!topic || !payload) return -1;
+
+    if (topic->type != TOPIC_TYPE_PUBLISH) {
+        HR_LOGE("%s(%d): topic is not publish: %s\n", __FUNCTION__, __LINE__, topic->name);
+        return -1;
+    }
+    list_for_each_entry(p, &_priv.topic_head, entry) {
+        // ignore publish response message
+        if (p->self->type != TOPIC_TYPE_PUBLISH) {
+            continue;
+        }
+
+        if (p->self == topic) {
+            int rc = mosquitto_publish(_priv.mosq, &p->mid, p->self->topic,
+                                       len, (const void*)payload,
+                                       p->self->qos, false);
+            if (rc != MOSQ_ERR_SUCCESS) {
+                HR_LOGE("publish failed :%d\n", rc);
+            }
+
+            return 0;
+        }
+    }
+    return -1;
 }

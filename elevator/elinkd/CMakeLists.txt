@@ -56,6 +56,7 @@ TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
 
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE IPC_MEDIA_RECORD_DIR="/media/mmcblk0p1")
 
 # only on my pc
 target_include_directories(elinkd PUBLIC /opt/3rdparty/include)
