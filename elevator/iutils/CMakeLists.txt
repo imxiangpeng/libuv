@@ -15,6 +15,13 @@ set(SOURCES file_util.c
     time_utils.c)
 
 ADD_LIBRARY(iutils STATIC ${SOURCES})
+
+TARGET_COMPILE_DEFINITIONS(iutils PRIVATE HRLOG_CONFIG_PATH="config/elog.conf")
+
 target_include_directories(iutils PUBLIC .)
 
 target_compile_options(iutils PRIVATE -fvisibility=hidden)
+
+if(HRLOG_OUTPUT_FILE)
+TARGET_COMPILE_DEFINITIONS(iutils PRIVATE USE_HRLOG_PROTO_FILE=1)
+endif()

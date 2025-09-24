@@ -27,12 +27,14 @@ set(SOURCES main
     topic_property
     topic_service
     topic_event
+    topic_download
     property
     service
     system
     elevator
     ../iutils/hr_log
     ../iutils/file_util
+    ../iutils/hr_buffer
     ../iutils/sconf
     ../platform/platform_amlogic)
 
@@ -40,7 +42,7 @@ ADD_EXECUTABLE(elinkd ${SOURCES})
 
 TARGET_COMPILE_OPTIONS(elinkd PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 
-TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd" HRLOG_OUTPUT_FILE=0)
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE LOG_TAG="elinkd" ENABLE_HRLOG_PROTO_FILE=1)
 # define config file when compile
 #TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="/etc/elinkd/elinkd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELINKD_CONFIG_PATH="elinkd.conf")
@@ -52,6 +54,9 @@ TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE EGUARD_CONFIG_PATH="/etc/eguard/eguard
 
 #TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="/etc/hqliftd/hqliftd.conf")
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HQLIFTD_CONFIG_PATH="hqliftd.conf")
+#TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELOG_CONFIG_PATH="/etc/elog.conf")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE ELOG_CONFIG_PATH="config/elog.conf")
+TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE HRLOG_CONFIG_PATH="config/elog.conf")
 
 
 TARGET_COMPILE_DEFINITIONS(elinkd PRIVATE BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")

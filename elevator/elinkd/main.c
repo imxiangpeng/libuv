@@ -32,8 +32,7 @@ int main(int argc, char** argv) {
     (void)argv;
     struct sigaction action;
 
-    printf("elinkd %s\n", BUILD_TIMESTAMP);
-
+            return elinkd_main(argc, argv);
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_SIGINFO | SA_RESTART;

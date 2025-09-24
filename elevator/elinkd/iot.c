@@ -23,7 +23,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-#if 1  // aliyun
+#if 0  // aliyun
 #define BROKER_DEFAULT_SERVER "a1z1g0btxvW.iot-as-mqtt.cn-shanghai.aliyuncs.com"
 #define BROKER_DEFAULT_PORT 1883  // 1883     // 8883 //1883
 

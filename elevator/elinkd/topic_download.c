@@ -1,11 +1,12 @@
 
 #define _GNU_SOURCE
-#define _XOPEN_SOURCE 600
+// #define _XOPEN_SOURCE 600
+#include "topic_download.h"
+
 #include <cjson/cJSON.h>
 #include <curl/curl.h>
 #include <dirent.h>
 #include <fcntl.h>
-#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,10 +22,11 @@
 #include "iot.h"
 #include "service.h"
 #include "topic.h"
-#include "topic_service.h"
 
+#undef IPC_MEDIA_RECORD_DIR
 #ifndef IPC_MEDIA_RECORD_DIR
-#define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
+// #define IPC_MEDIA_RECORD_DIR "/media/mmcblk0p1"
+#define IPC_MEDIA_RECORD_DIR "media"
 #endif
 
 // 2025-05-26_18-22-00.mp4
@@ -32,7 +34,7 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-#define SVC_METHOD_PREFIX "thing.service.
+#define SVC_METHOD_PREFIX "thing.service."
 
 struct record {
     /*uint64_t*/ time_t timestamp;  // utc use timegm not mktime
@@ -100,7 +102,7 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end, struct hrbuf
         }
 
         if ((ptr = strstr(entry->d_name, ".mp4"))) {
-            int duration = MEDIA_RECORD_DURATION;
+            int duration = 0;
             // memset((void*)name, 0, sizeof(name));
             // strncpy(name, entry->d_name, ptr - entry->d_name);
             uint64_t ts = media_record_date_format_string_to_seconds(entry->d_name);
@@ -108,7 +110,7 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end, struct hrbuf
                 continue;
             }
 
-            if (sscanf(entry->d_name, "%*d-%*d-%*d_%*d-%*d-%*d_%d", &duration) != 1) {
+            if (sscanf(entry->d_name, "%*d-%*d-%*d_%*d-%*d-%*d_%d", &duration) != 1 || duration == 0) {
                 continue;
             }
 
@@ -123,7 +125,7 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end, struct hrbuf
 
                 char path[512] = {0};
                 snprintf(path, sizeof(path), "%s/%s", IPC_MEDIA_RECORD_DIR, entry->d_name);
-                printf("elink record path:%s\n", path);
+                // printf("elink record path:%s\n", path);
                 if (0 == lstat(path, &sb)) {
                     media.size = sb.st_size;
                     printf("elink record path:%s -> %ld\n", path, media.size);
@@ -173,19 +175,19 @@ static int traverse_media_record_list(uint64_t begin, uint64_t end, struct hrbuf
 static int do_upload(const char* local_path, const char* remote_url) {
     CURL* curl = NULL;
     CURLcode res;
-    struct curl_slist *headers = NULL;
+    struct curl_slist* headers = NULL;
     FILE* fp = NULL;
 
     if (!local_path || !remote_url) {
         return -1;
     }
 
+    printf("%s(%d): local:%s, remote:%s\n", __func__, __LINE__, local_path, remote_url);
     fp = fopen(local_path, "rb");
     if (!fp) {
         return -1;
     }
 
-    
     fseek(fp, 0, SEEK_END);
     long filesize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
@@ -196,15 +198,12 @@ static int do_upload(const char* local_path, const char* remote_url) {
         return -1;
     }
 
-    // snprintf(userpwd, sizeof(userpwd), "%s:%s", _options[OPTION_FTP_USERNAME].value.string, _options[OPTION_FTP_PASSWORD].value.string);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_URL, remote_url);
     curl_easy_setopt(curl, CURLOPT_READDATA, fp);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)filesize);
     headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);   
-    // curl_easy_setopt(curl, CURLOPT_FTP_CREATE_MISSING_DIRS, CURLFTP_CREATE_DIR_RETRY);
-    // curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
     res = curl_easy_perform(curl);
@@ -214,7 +213,6 @@ static int do_upload(const char* local_path, const char* remote_url) {
         HR_LOGD("Upload successful: %s -> %s\n", local_path, remote_url);
     }
 
-
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     fclose(fp);
@@ -222,7 +220,6 @@ static int do_upload(const char* local_path, const char* remote_url) {
 }
 static void* background_upload_thread_routin(void* args) {
     (void)args;
-    char name[256] = {0};
 
     if (_pipe_fd[0] == -1) {
         _upload_tid = -1;
@@ -230,25 +227,20 @@ static void* background_upload_thread_routin(void* args) {
     }
 
     while (1) {
-        char* remote_url = NULL;
         char* local_path = NULL;
         size_t len = -1;
-        struct stat st;
-        int fd = -1;
-        struct record r;
-        char *ptr = NULL;
+        char* ptr = NULL;
+
         ssize_t n = read(_pipe_fd[0], &len, sizeof(len));
         if (n <= 0) {
             continue;
         }
 
-        printf("%s(%d): receive request id:%lu\n", __FUNCTION__, __LINE__, id);
-
         ptr = (char*)calloc(len, 1);
         if (!ptr) {
             size_t i = 0;
             char c;
-            while(i++ < len) {
+            while (i++ < len) {
                 read(_pipe_fd[0], &c, 1);
             }
             continue;
@@ -260,24 +252,21 @@ static void* background_upload_thread_routin(void* args) {
 
         const char* post_url = ptr;
         const char* file_name = ptr + strlen(post_url) + 1;
-        
+
         printf("file name:%s, post url:%s\n", file_name, post_url);
 
-        asprintf(&local_path, IPC_MEDIA_RECORD_DIR "/%s", r.name);
+        asprintf(&local_path, IPC_MEDIA_RECORD_DIR "/%s", file_name);
 
         if (!local_path) {
             free(ptr);
             continue;
         }
 
-        printf("local path:%s\n", local_path);
-
-
-        // upload video to ftp
-
+        // upload video to server
         do_upload(local_path, post_url);
 
         free(local_path);
+        free(ptr);
     }
 
     _upload_tid = -1;
@@ -329,7 +318,6 @@ static int _GetVideoRecordFileList(cJSON* params) {
 
     cJSON* param = cJSON_AddArrayToObject(root, "params");
 
-    printf("count:%d\n", count);
     for (int i = 0; i < count; i++) {
         struct tm tm;
         time_t t;
@@ -344,12 +332,12 @@ static int _GetVideoRecordFileList(cJSON* params) {
         cJSON_AddStringToObject(ele, "file_name", r->name);
         cJSON_AddNumberToObject(ele, "file_size", r->size);
         t = r->timestamp;
-        (void)localtime_r(&t, &tm);
+        (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
         /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
         cJSON_AddStringToObject(ele, "start_time", tmp);
         memset((void*)tmp, 0, sizeof(tmp));
-        t += 3600 * 24;
-        (void)localtime_r(&t, &tm);
+        t += r->duration;
+        (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
         /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
         cJSON_AddStringToObject(ele, "end_time", tmp);
         cJSON_AddItemToArray(param, ele);
@@ -387,23 +375,46 @@ static int _UploadVideoRecordFile(cJSON* params) {
     }
 
     // size + string + \0 + string + \0
-    int len = sizeof(int) + strlen(post_url) + 1 + strlen(file_name) + 1;
+    int len = sizeof(size_t) + strlen(post_url) + 1 + strlen(file_name) + 1;
     char* b = (char*)calloc(len, 1);
     if (!b) {
-        // memory will be freed in parent
+        // json memory will be freed in parent
         return -1;
     }
 
     char* ptr = b;
-    *(int*)ptr = strlen(post_url);
-    ptr = ptr + sizeof(int);
+
+    *(size_t*)ptr = len;
+
+    printf("post url:%s, filename:%s, length:%ld\n", post_url, file_name, *(size_t*)ptr);
+    ptr += sizeof(size_t);
     strcpy(ptr, post_url);
     ptr += strlen(post_url);
     ptr++;
     strcpy(ptr, file_name);
 
+    if (_pipe_fd[0] == -1) {
+        if (0 != pipe(_pipe_fd)) {
+            free(b);
+            return -1;
+        }
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
+    }
+
+    if (_pipe_fd[1] == -1) {
+        free(b);
+        printf("pipe invalid can not upload ...\n");
+        return -1;
+    }
+
     // upload record in background;
     write(_pipe_fd[1], (void*)b, len);
+
+    free(b);
 
     return 0;
 }
@@ -422,7 +433,6 @@ static int _on_download_message(void* payload, int len) {
     int skip_length = 0;
 
     if (!payload || len == 0) {
-        HR_LOGE("%s(%d): invalid method ...\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -477,24 +487,17 @@ int topic_download_init(const char* public_key, const char* device_name) {
         return -1;
     }
 
-    pipe(_pipe_fd);
-
-    pthread_attr_init(&attr);
-
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
-
     // subscribe
-    struct topic* t = (struct topic*)calloc(1, sizeof(struct topic) * svc_action_tbl_size);
+    struct topic* t = (struct topic*)calloc(1, sizeof(struct topic) * (sizeof(_download_action_tbl) / sizeof(_download_action_tbl[0])));
     if (!t) {
         return -1;
     }
 
     for (size_t i = 0; i < sizeof(_download_action_tbl) / sizeof(_download_action_tbl[0]); i++) {
-        if (!svc_action_tbl[i].name) {
+        if (!_download_action_tbl[i].name) {
             continue;
         }
-        snprintf(t[i].name, sizeof(t[i].name), "service/%s", svc_action_tbl[i].name);
+        snprintf(t[i].name, sizeof(t[i].name), "service/%s", _download_action_tbl[i].name);
         snprintf(t[i].topic, sizeof(t[i].topic), "/sys/%s/%s/thing/%s", public_key, device_name, t[i].name);
 
         t[i].type = TOPIC_TYPE_SUBSCRIBE,
@@ -503,7 +506,6 @@ int topic_download_init(const char* public_key, const char* device_name) {
     }
 
     // publish event
-    snprintf(_record_report_event.name, sizeof(_record_report_event.name), "service/%s", _record_report_event.name);
     snprintf(_record_report_event.topic, sizeof(_record_report_event.topic), "/sys/%s/%s/thing/%s", public_key, device_name, _record_report_event.name);
     iot_topic_register(&_record_report_event);
 

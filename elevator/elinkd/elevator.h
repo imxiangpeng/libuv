@@ -57,6 +57,12 @@ int elevator_property_set_eguard_door_zone_stopped_threshold(struct property* se
 int elevator_property_get_eguard_door_control_enabled(struct property* self);
 int elevator_property_set_eguard_door_control_enabled(struct property* self, struct property_value* value);
 
+int elevator_property_get_elog_proto(struct property* self);
+int elevator_property_set_elog_proto(struct property* self, struct property_value* value);
+
+int elevator_property_get_elog_tags(struct property* self);
+int elevator_property_set_elog_tags(struct property* self, struct property_value* value);
+
 void elevator_ubus_event_handler(struct ubus_context* ctx,
                                struct ubus_event_handler* ev,
                                const char* type,

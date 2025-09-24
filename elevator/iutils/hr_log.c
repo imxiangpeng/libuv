@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "file_util.h"
+#include "sconf.h"
 
 #define LOG_BUF_SIZE LINE_MAX  // 1024 * 2
 
@@ -39,12 +40,35 @@
 #define RSYSLOG_SERVER "192.168.58.100"
 #define RSYSLOG_PORT "514"
 
-#ifndef HRLOG_OUTPUT_FILE
-#define HRLOG_OUTPUT_FILE 1
+#ifndef HRLOG_CONFIG_PATH
+#define HRLOG_CONFIG_PATH "/etc/hrlog.conf"
 #endif
 
-// static hr_log_type _type = HR_LOG_TYPE_SYSLOG;
+enum {
+  HRLOG_PROTO_PRINTF = 0,
+  HRLOG_PROTO_FILE,
+  HRLOG_PROTO_SYSLOG,
+  HRLOG_PROTO_RSYSLOG,
+};
+
 static char _hostname[256] = {0};
+
+// using static memory, do not dynamic allocate
+// per tag name is limited in 16
+// 32 * 16
+#define TAGS_SIZE 32
+#define TAGS_LENGTH 16
+static char _tags_filter[TAGS_SIZE][TAGS_LENGTH] = {{0}};
+
+enum {
+    OPTION_PROTO = 0,
+    OPTION_TAGS,
+    _OPTION_MAX,
+};
+static struct sconf_proto _options[_OPTION_MAX] = {
+    {"PROTO", PROTO_VALUE_NUMBER, {.number = HRLOG_PROTO_RSYSLOG}},
+    {"TAGS", PROTO_VALUE_STRING, {.string = NULL}},
+};
 
 static pthread_once_t persist_once_control = PTHREAD_ONCE_INIT;
 
@@ -53,7 +77,6 @@ static struct rsock {
     struct addrinfo* res;
 } _rsyslog = {-1, NULL};
 
-#if HRLOG_OUTPUT_FILE
 static FILE* persist_fp = NULL;
 
 // static pthread_mutex_t persist_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -63,6 +86,10 @@ static void init_persist_output() {
 
     char path[256] = "./hrlog-";
     char* ptr = path + strlen(path);
+
+    if (persist_fp) {
+        return;
+    }
 
     FILE* f = fopen("/proc/self/comm", "r");
     if (f) {
@@ -89,7 +116,84 @@ static void init_persist_output() {
 
     setbuf(persist_fp, NULL);
 }
+
+// not dynamic update, maybe broken with multi threads, othersize you should use lock
+static void _option_init(void) {
+    for (size_t i = 0; i < sizeof(_options) / sizeof(_options[0]); i++) {
+        if (_options[i].type == PROTO_VALUE_STRING && _options[i].value.string) {
+            free(_options[i].value.string);
+            _options[i].value.string = NULL;
+        }
+    }
+    sconf_load_with_proto(HRLOG_CONFIG_PATH, _options, sizeof(_options) / sizeof(_options[0]));
+
+#if USE_HRLOG_PROTO_FILE
+    _options[OPTION_PROTO].value.number = HRLOG_PROTO_FILE;
 #endif
+
+    // close rsyslog
+    if (HRLOG_PROTO_RSYSLOG != _options[OPTION_PROTO].value.number) {
+        
+    }
+    printf("proto: %ld\n", _options[OPTION_PROTO].value.number);
+    if (_options[OPTION_TAGS].value.string) {
+        char* token = NULL;
+        char* save_ptr = NULL;
+        int i = 0;
+        memset((void*)&_tags_filter, 0, sizeof(_tags_filter));
+        for (token = strtok_r(_options[OPTION_TAGS].value.string, ",", &save_ptr);
+             token;
+             token = strtok_r(NULL, ",", &save_ptr)) {
+            if (i > TAGS_SIZE - 1) {
+                break;
+            }
+            strncpy(_tags_filter[i], token, TAGS_LENGTH - 1);
+            i++;
+        }
+        // now we can free _options[OPTION_TAGS].value.string
+        free(_options[OPTION_TAGS].value.string);
+        _options[OPTION_TAGS].value.string = NULL;
+    }
+
+    for (int i = 0; i < TAGS_SIZE; i++) {
+        if (_tags_filter[i][0] == '\0') {
+            break;
+        }
+        printf("%d -> %s\n", i, _tags_filter[i]);
+    }
+}
+
+static void on_option_changed(const char* path, void* priv) {
+    (void)priv;
+    if (!path)
+        return;
+    // printf("path:%s, %s\n", path, HRLOG_CONFIG_PATH);
+    if (0 == strcmp(HRLOG_CONFIG_PATH, path)) {
+        _option_init();
+
+        // persist output maybe not enabled
+        if (_options[OPTION_PROTO].value.number == HRLOG_PROTO_FILE) {
+            if (!persist_fp) {
+                init_persist_output();
+            }
+        }
+    }
+}
+// 1-> allowed
+// 0-> no
+static int is_allowed(const char* tag) {
+    if (!tag) return 0;
+
+    for (int i = 0; i < TAGS_SIZE; i++) {
+        if (_tags_filter[i][0] == '\0') {
+            break;
+        }
+        if (0 == strcasecmp(tag, _tags_filter[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static void _init(void) {
     // openlog(NULL, LOG_PID, LOG_USER);
@@ -112,9 +216,14 @@ static void _init(void) {
     if (strlen(_hostname) == 0) {
         gethostname(_hostname, sizeof(_hostname));
     }
-#if HRLOG_OUTPUT_FILE
-    init_persist_output();
-#endif
+
+    _option_init();
+
+    sconf_register_observer(HRLOG_CONFIG_PATH, on_option_changed, NULL);
+
+    if (_options[OPTION_PROTO].value.number == HRLOG_PROTO_FILE) {
+        init_persist_output();
+    }
 }
 
 static int rsyslog(const char* message) {
@@ -173,10 +282,10 @@ static int rsyslog(const char* message) {
         //     case ECONNRESET:
         //     case ENOTCONN:
         //     case EPIPE:
-                 close(_rsyslog.sock);
-                 _rsyslog.sock = -1;
-                 freeaddrinfo(_rsyslog.res);
-                 _rsyslog.res = NULL;
+        close(_rsyslog.sock);
+        _rsyslog.sock = -1;
+        freeaddrinfo(_rsyslog.res);
+        _rsyslog.res = NULL;
         // }
     }
 
@@ -193,6 +302,13 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     size_t available = LOG_BUF_SIZE;
     struct tm tm;
     struct timespec ts;
+
+    pthread_once(&persist_once_control, _init);
+
+    if (!is_allowed(tag)) {
+        printf("not allow:%s\n", tag);
+        return 0;
+    }
 
     clock_gettime(CLOCK_REALTIME, &ts);
     (void)localtime_r(&ts.tv_sec, &tm);
@@ -236,21 +352,21 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     }
     va_end(ap);
 
-    pthread_once(&persist_once_control, _init);
-
-#if HRLOG_OUTPUT_FILE
-    // syslog(LOG_SYSLOG, "%s", buf);
-    if (persist_fp) {
-        fprintf(persist_fp, "%s", buf);
-    } else {
-        syslog(LOG_SYSLOG, "%s", buf);
+    switch (_options[OPTION_PROTO].value.number) {
+        case HRLOG_PROTO_FILE:
+            if (persist_fp) {
+                fprintf(persist_fp, "%s", buf);
+            }
+            break;
+        case HRLOG_PROTO_SYSLOG:
+            syslog(LOG_SYSLOG, "%s", buf);
+            break;
+        case HRLOG_PROTO_RSYSLOG:
+            rsyslog(buf);
+            break;
+        default:
+            printf("%s", buf);
+            break;
     }
-    printf("%s", buf);
-#else
-    // rsyslog(buf);
-    printf("%s", buf);
-    // syslog(LOG_SYSLOG, "%s", buf);
-#endif
-
     return 0;
 }

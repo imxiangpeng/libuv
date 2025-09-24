@@ -117,6 +117,8 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     [PROPERTY_EGUARD_KUNREN_DETECT_TIMEOUT] = {"eguard_kunren_detect_timeout", E_NUMBER, elevator_property_get_eguard_kunren_detect_timeout, elevator_property_set_eguard_kunren_detect_timeout, {}, 1},
     [PROPERTY_EGUARD_DOOR_ZONE_STOPPED_THRESHOLD] = {"eguard_door_zone_stopped_threshold", E_DECIMAL, elevator_property_get_eguard_door_zone_stopped_threshold, elevator_property_set_eguard_door_zone_stopped_threshold, {}, 1},
     [PROPERTY_EGUARD_DOOR_CONTROL_ENABLED] = {"eguard_door_control_enabled", E_NUMBER, elevator_property_get_eguard_door_control_enabled, elevator_property_set_eguard_door_control_enabled, {}, 1},
+    [PROPERTY_ELOG_PROTO] = {"elog_proto", E_NUMBER, elevator_property_get_elog_proto, elevator_property_set_elog_proto, {}, 0},
+    [PROPERTY_ELOG_TAGS] = {"elog_tags", E_STRING, elevator_property_get_elog_tags, elevator_property_set_elog_tags, {}, 0},
     // camera property_value
 };
 

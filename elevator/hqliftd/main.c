@@ -174,10 +174,10 @@ int main(int argc, char** argv) {
     const char* elevator_no = NULL;
 
     struct sigaction action;
-	
+
     return hqliftd_main(argc, argv);
 
-    HR_LOGD("hqliftd %s\n", HQLIFTD_BUILD_TIMESTAMP);
+    // do not call hrlog in parent process
 
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);

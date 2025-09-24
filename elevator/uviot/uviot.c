@@ -528,7 +528,7 @@ static void uviot_impl_after_connect_work(uv_work_t* req, int status) {
     mosq = iot->mosq;
 
     iot->refs--;
-	
+
     if (status == UV_ECANCELED) {
         printf("it's canceled\n");
         return;
@@ -584,7 +584,7 @@ static void uviot_impl_connect_timer_cb(uv_timer_t* handle) {
     iot->sock = -1;
     iot->conn_req.data = iot;
 
-    iot->refs--;
+    iot->refs++;
     uv_queue_work(iot->loop, &iot->conn_req, uviot_impl_do_connnect_work, uviot_impl_after_connect_work);
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }

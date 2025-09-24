@@ -40,7 +40,6 @@ ssize_t futil_read(const char *path, char **buf) {
         close(fd);
         return -1;
     }
-    memset((void *)data, 0, sb.st_size);
 
     ptr = data;
 
@@ -49,6 +48,7 @@ ssize_t futil_read(const char *path, char **buf) {
         ssize_t n = TEMP_FAILURE_RETRY(read(fd, ptr, remaining));
         if (n <= 0) {
             free(data);
+            close(fd);
             return -1;
         }
         ptr += n;

@@ -295,7 +295,7 @@ int main(int argc, char** argv) {
 
     struct sigaction action;
 
-    HR_LOGD("elevatord %s\n", ELEVATORD_BUILD_TIMESTAMP);
+    // do not call hrlog in parent process
 
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
             return elevatord_main(argc, argv);
         }
 
-        HR_LOGD("elevatord main started:%d\n", pid);
+        // HR_LOGD("elevatord main started:%d\n", pid);
 
         waitpid(pid, &status, 0);
 
