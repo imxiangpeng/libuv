@@ -6,7 +6,7 @@
 // mxp, 20250604, update media record file name, format: 2025-05-26_18-22-00_duration.mp4
 
 #define _GNU_SOURCE
-#define _XOPEN_SOURCE 600
+// #define _XOPEN_SOURCE 600
 
 #include <cjson/cJSON.h>
 #include <curl/curl.h>

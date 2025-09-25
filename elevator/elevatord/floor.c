@@ -1,6 +1,6 @@
 
 #define _GNU_SOURCE
-#define _XOPEN_SOURCE 600
+// #define _XOPEN_SOURCE 600
 
 #include "floor.h"
 
