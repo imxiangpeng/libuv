@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,7 @@
 #include "file_util.h"
 #include "hr_buffer.h"
 #include "hr_log.h"
+#include "misc.h"
 #include "option.h"
 #include "uviot.h"
 
@@ -69,11 +71,22 @@ struct record {
 
 static pthread_t _upload_tid = -1;
 
+static pid_t _playback_pid = -1;
+
 extern void topic_houqi_liftstate_report_enable(int on);
 
 static int publish_upload_record_response();
 static int traverse_media_record_list(uint64_t begin, uint64_t end);
 static void* background_upload_thread_routin(void* args);
+
+// do not block
+static void _playback_process_action(pid_t pid, int status) {
+    (void) status;
+    // HR_LOGD("%s(%d): child :%d exited with :%d\n", __func__, __LINE__, pid, status);
+    if (_playback_pid == pid) {
+        _playback_pid = -1;
+    }
+}
 
 // do not care timezone, so we can convert again
 static time_t command_date_format_string_to_seconds(const char* date) {
@@ -270,7 +283,7 @@ static int _on_command_message(void* payload, int len) {
     if (0 == strcasecmp("videoPlayBack", type)) {
         struct tm tm;
         time_t timestamp_begin = 0, timestamp_end = 0;
-        char *start_time = NULL, *end_time = NULL;
+        char *start_time = NULL, *end_time = NULL, *user_id = NULL;
 
         char begin_str[64] = {0};
         char end_str[64] = {0};
@@ -283,8 +296,9 @@ static int _on_command_message(void* payload, int len) {
         // 2024-04-06 15:57:20
         start_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "startTime"));
         end_time = cJSON_GetStringValue(cJSON_GetObjectItem(root, "endTime"));
+        user_id = cJSON_GetStringValue(cJSON_GetObjectItem(root, "userID"));
 
-        if (!start_time || !end_time) {
+        if (!start_time || !end_time|| !user_id) {
             cJSON_Delete(root);
             return -1;
         }
@@ -303,14 +317,25 @@ static int _on_command_message(void* payload, int len) {
         strftime(end_str, sizeof(end_str), "%Y%m%d%H%M%S", &tm);
 
         // snprintf(url, sizeof(url), COMMAND_RTMP_URL_PREFIX "%s", elevator_serialno());
-        snprintf(url, sizeof(url), "%s", _options[OPTION_LIVE_URL].value.string);
+        // playback url is live_url_${userID}
+        snprintf(url, sizeof(url), "%s_%s", _options[OPTION_LIVE_URL].value.string, user_id);
 
         // todo
         cJSON_Delete(root);
 
-        // stop live video
-        // system("ipc-property set /ipc/livertmp/enabled false");
-        _stop_livertmp();
+        // no need stop live rtmp playback using seperated url
+
+        if (_playback_pid != -1) {
+            HR_LOGD("playback(%d) is active, kill it's group\n", _playback_pid);
+            // estreamer using it's seperated process group
+            // we can not use SIGTERM estreamer can not receive
+            kill(-_playback_pid, SIGKILL);  // SIGTERM
+            int max = 100;
+            while( _playback_pid != -1 && max-- > 0) {
+                usleep(1000 * 20);
+            }
+            HR_LOGD("now previous playback:%d, max:%d\n", _playback_pid, max);
+        }
 
         pid_t pid = fork();
 
@@ -342,6 +367,8 @@ static int _on_command_message(void* payload, int len) {
             exit(127);
         }
 
+        _playback_pid = pid;
+        HR_LOGD("timeshift video playback task: %d\n", _playback_pid);
         return 0;
     }
 
@@ -590,6 +617,7 @@ int topic_houqi_command_init(struct uviot* iot, const char* public_key, const ch
 #endif
     uviot_topic_register(iot, &_topic_command_response);
 
+    misc_register_child_action(_playback_process_action);
     return 0;
 }
 

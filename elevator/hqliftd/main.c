@@ -9,9 +9,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <uv.h>
+
 #include "elevator.h"
 #include "hr_log.h"
 #include "iot.h"
+#include "misc.h"
 #include "option.h"
 #include "state_machine.h"
 #include "uelevator.h"
@@ -22,6 +24,12 @@ static uv_async_t _dummy_keep_loop;
 
 static void dummy_cb(uv_async_t* handle) {
     (void)handle;
+    pid_t pid = -1;
+    int status = 0;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("pid:%d, status:%d\n", pid, status);
+        misc_child_exited(pid, status);
+    }
 }
 
 /* Fully close a loop */
@@ -51,12 +59,28 @@ static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
     HR_LOGD("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
     printf("%s(%d): ........signum:%d\n", __FUNCTION__, __LINE__, signum);
 
+    // process term early
     if (SIGTERM == signum) {
         uv_stop(uv_default_loop());
         uv_async_send(&_dummy_keep_loop);
         uv_close((uv_handle_t*)&_dummy_keep_loop, NULL);
     }
+
+    // now only support SIGCHLD
+    if (SIGCHLD == signum) {
+        pid_t pid = -1;
+        int status = 0;
+        // int block = 0;
+        // while ((pid = waitpid(-1, &status, block ? 0 : WNOHANG)) == -1 && errno == EINTR);
+
+        // uv_async_send(&_dummy_keep_loop);
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            printf("hqliftd: -> pid:%d, status:%d\n", pid, status);
+            misc_child_exited(pid, status);
+        }
+    }
 }
+
 static int hqliftd_main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -73,8 +97,9 @@ static int hqliftd_main(int argc, char** argv) {
     sigemptyset(&action.sa_mask);
     action.sa_sigaction = _signal_action;
     sigaction(SIGTERM, &action, NULL);
+    sigaction(SIGCHLD, &action, NULL);
 
-    if ( 0 != option_init()) {
+    if (0 != option_init()) {
         HR_LOGE("hqliftd no valid option config, exit normally, should not start again\n");
         return -1;
     }
@@ -108,7 +133,7 @@ static int hqliftd_main(int argc, char** argv) {
 
     printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
     // block until connected
-    if (iot_init(uv_default_loop())){
+    if (iot_init(uv_default_loop())) {
         _exit(-1);
     }
 
@@ -184,7 +209,7 @@ int main(int argc, char** argv) {
     action.sa_flags = SA_SIGINFO | SA_RESTART;
     action.sa_sigaction = _daemon_signal_action;
     sigaction(SIGTERM, &action, NULL);
-    sigaction(SIGINT, &action, NULL);
+    // sigaction(SIGINT, &action, NULL);
     sigaction(SIGCHLD, &action, NULL);
 
     signal(SIGUSR1, SIG_IGN);
@@ -232,7 +257,7 @@ int main(int argc, char** argv) {
             HR_LOGE("Service %d exited with code %d\n", pid, WEXITSTATUS(status));
             if (0 == WEXITSTATUS(status) || 255 == WEXITSTATUS(status)) {
                 HR_LOGE("Service %d exited(%d) normally, do not auto restart!\n", pid, WEXITSTATUS(status));
-               _exit_request = 1;
+                _exit_request = 1;
             }
         } else if (WIFSIGNALED(status)) {
             HR_LOGE("Service %d killed by signal %d\n", pid, WTERMSIG(status));

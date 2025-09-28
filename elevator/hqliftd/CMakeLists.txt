@@ -23,6 +23,7 @@ INCLUDE_DIRECTORIES(.)
 INCLUDE_DIRECTORIES(include)
 
 set(SOURCES main
+    misc
     option
     iot
     iot_topic

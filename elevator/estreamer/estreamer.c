@@ -51,6 +51,7 @@ enum task_state {
 };
 
 static char _task_path[512] = {0};
+static int _exit_request = 0;
 
 static time_t media_record_date_format_string_to_seconds(const char* date) {
     struct tm tm;
@@ -347,6 +348,29 @@ static int do_cmd(const char* cmd) {
     return 0;
 }
 
+static void _signal_action(int signum, siginfo_t* siginfo, void* sigcontext) {
+    (void)siginfo;
+    (void)sigcontext;
+
+    HR_LOGD("%s(%d): ....estreamer....signum:%d\n", __FUNCTION__, __LINE__, signum);
+    printf("%s(%d): ...estreamer.....signum:%d\n", __FUNCTION__, __LINE__, signum);
+
+    if (SIGTERM == signum) {
+        _exit_request = 1;
+        release_task();
+        kill(getpgrp(), SIGKILL);
+    }
+}
+// mxp, 20250926 本来计划通过捕获信号来正常释放资源，
+// 但是我们发现当 estreamer 设置了 setpgid(0, 0) 变成独立进程组之后，
+// kill -15 pid 就失效了，无法捕获，但是可以收到 SIGKILL
+// 所以，我们在 hqliftd 中目前只能通过 SIGKILL 来结束未完成的事项
+// 那么出现了一个问题，如果用户两次请求同一个回放，那么在前面回放尚未结束时，
+// 我们会将其 KILL， 因为 estreamer 捕获不到，所以无法清理资源，
+// 导致其工作的目录还存在，按我们之前的逻辑下次再请求相同资源的时候，会直接释放
+// 现在我们简单修改以下，支持参数 -b 表示开机启动，我们仅在开机启动的时候来清理
+// 这里非永久任务
+
 // 为了支持断电保存和断点续传，我们将任务保存到独立的文件夹里面，
 // 每个文件夹对应一个任务，文件夹采用 _ 连接起始时间戳来命名
 // 具体任务信息以文件形式保存在文件夹内部。
@@ -403,24 +427,57 @@ int main(int argc, const char** argv) {
     (void)argc;
     (void)argv;
 
+    pid_t pid = -1;
+    int status = 0;
+    struct sigaction action;
+    int boot = 0;
     int persist = 0;
     char cmd[LINE_MAX] = {0};
     struct stat sb;
 
     int state = TASK_STATE_INITIALIZE;
 
+    printf("%s(%d): ........\n", __FUNCTION__, __LINE__);
+
+    memset(&action, 0, sizeof(action));
+    sigemptyset(&action.sa_mask);
+    action.sa_sigaction = _signal_action;
+
+    sigset_t set;
+    sigemptyset(&set);
+    sigprocmask(SIG_SETMASK, &set, NULL);
+
+    action.sa_flags = SA_SIGINFO;
+    sigaction(SIGTERM, &action, NULL);
+
     if (argc < 3) {
         return -1;
     }
 
+    // save
     if (0 == strcmp(argv[1], "-s")) {
         persist = 1;
         argv++;
         argc--;
     }
 
+    // boot up
+    if (0 == strcmp(argv[1], "-b")) {
+        boot = 1;
+        argv++;
+        argc--;
+    }
+
     for (int i = 0; i < argc; i++) {
         printf("%d: %s\n", i, argv[i]);
+    }
+
+    // redirect null to input
+    int null_fd = open("/dev/null", O_RDONLY);
+    if (null_fd > 0) {
+        dup2(null_fd, 0);
+        close(null_fd);
+        // fcntl(0, F_SETFD, fcntl(0, F_GETFD) | ~FD_CLOEXEC);
     }
 
     // kill all children process
@@ -466,6 +523,9 @@ int main(int argc, const char** argv) {
     snprintf(_task_path, sizeof(_task_path), ESTREAMER_TASK_DIR /*IPC_MEDIA_RECORD_DIR*/ "/%s_%s", begin, end);
     // check task already exists ?
     if (-1 == lstat(_task_path, &sb)) {
+        if (boot == 1) {
+            return -1;
+        }
         // create new task
         if (errno == ENOENT) {
             if (url[0] == '\0') {
@@ -508,7 +568,7 @@ int main(int argc, const char** argv) {
 
         printf("persist:%d, state:%d, cmd:%s\n", persist, state, cmd);
         // if rtmp live destory task
-        if (persist == 0) {
+        if (persist == 0 && boot == 1) {
             printf("no need process none persist task, delete it\n");
             release_task();
             return 0;
@@ -567,7 +627,7 @@ int main(int argc, const char** argv) {
                              "curl -C - -s --retry 5 --retry-delay 5 --retry-max-time 60 --ftp-create-dirs -T %s/%s %s -u '%s:%s'",
                              IPC_MEDIA_RECORD_DIR, r->name, url, user ? user : "anonymous", passwd ? passwd : "");
                 } else if (0 == strncmp(url, "rtmp://", strlen("rtmp://"))) {
-                    snprintf(cmd, sizeof(cmd), "ffmpeg -loglevel quiet -y -re -safe 0 -i %s/%s -c copy -f flv %s", IPC_MEDIA_RECORD_DIR, r->name, url);
+                    snprintf(cmd, sizeof(cmd), "ffmpeg -d -loglevel quiet -y -re -safe 0 -i %s/%s -c copy -f flv %s", IPC_MEDIA_RECORD_DIR, r->name, url);
                 }
 
                 write_task_node_string("cmd", cmd);
@@ -609,7 +669,7 @@ int main(int argc, const char** argv) {
 
         // it's live directly upstream
         if (0 == strncmp(url, "rtmp://", strlen("rtmp://"))) {
-            snprintf(cmd, sizeof(cmd), "ffmpeg -loglevel quiet -y -re -f concat -safe 0 -i concat.txt -c copy -f flv %s", url);
+            snprintf(cmd, sizeof(cmd), "ffmpeg -d -loglevel quiet -y -re -f concat -safe 0 -i concat.txt -c copy -f flv %s", url);
             write_task_node_string("cmd", cmd);
             state = TASK_STATE_UPLOAD;
             write_task_node("state", state);
@@ -666,7 +726,7 @@ state_upload:
 
         while (retries-- > 0) {
             int ret = do_cmd(cmd);
-            printf("upload do cmd ret:%d, cmd: %s\n", ret, "***"/*cmd*/);
+            printf("upload do cmd ret:%d, cmd: %s\n", ret, "***" /*cmd*/);
             if (ret == 0) {
                 break;
             }
@@ -684,6 +744,10 @@ state_upload:
     }
 
 release:
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("estreamer child pid:%d, status:%d\n", pid, status);
+    }
+
     printf("release task\n");
     release_task();
 
