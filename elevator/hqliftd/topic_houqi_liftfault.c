@@ -36,6 +36,15 @@
 #define LIFTFAULT_REPORT_EBIKE_VIDEO_DURATION 60
 #define LIFTFAULT_REPORT_FAULT_VIDEO_MARGIN_SECONDS 120
 
+// mxp, 20250928, 延迟发送故障事件
+// 因为识别以及算法等问题可能存在一些误报，我们计划允许一些容错，
+// 在指定时间窗口内发生并且结束了，我们就不上报这些事件
+// 以开门走车为例，我们发现加速度识别停止可能存在缓慢情况，
+// 导致出现，电梯已经停止了，但是加速度速度还不为 0 的情况
+// 在 elevatord 中我们通过气压强制对加速度归零，但是也有 2s 窗口
+// 所以，这里我们倾向于采用时间窗口确认机制来规避一些问题
+#define USE_LIFTFAULT_CONFIRM_TIME 5000  // pending 5s before send fault
+
 // 困人事件处理流程：
 // 1. 在 RESCURE_MODE_AUTO 模式，elevator_fault_occurred 被调用的时候
 //    直接向平台发送困人事件，并且在结束的时候发送视频到 FTP
@@ -58,8 +67,11 @@
 #define LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT (1000 * 60 * 150)  // 150min
 #endif
 
+// 后来修改也用这个定时器来监控 pending 事件（非困人事件）
+// 当时间超过 USE_LIFTFAULT_CONFIRM_TIME 的时候自动派发，
+// 在此时间内结束的事件不会派发
 #ifndef LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT
-#define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000 * 60)  // detect every min
+#define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000 /** 60*/)  // detect every min
 #endif
 
 #ifndef LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT
@@ -134,7 +146,6 @@ static struct fault_report_statistics {
     {.exception = ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR, 0},
     {.exception = ELEVATOR_EXCEPTION_EBIKE, 0},
 };
-
 
 static uint32_t _exception_indicator = ELEVATOR_EXCEPTION_NONE;
 
@@ -321,6 +332,7 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     // init timer for sendvideo & sendsate command timeout
     memset((void*)&_rescure_btn_timer, 0, sizeof(_rescure_btn_timer));
     memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
+
     uv_timer_init(uv_default_loop(), &_rescure_btn_timer);
     uv_timer_init(uv_default_loop(), &_alive_timer);
 
@@ -381,7 +393,7 @@ static int publish_fault_event(struct lift_fault_event* e) {
 // filter out timeout event and auto resolve it
 static void _fault_event_alive_timeout_detect(uv_timer_t* handle) {
     (void)handle;
-    struct lift_fault_event* e = NULL;
+    struct lift_fault_event *e = NULL, *n = NULL;
 
     int64_t now = get_realtime_ms();
     int64_t begin = 0;
@@ -397,8 +409,26 @@ begin:
     }
 
     // 1.1 lookup kunren event
-    hr_list_for_each_entry(e, &_lift_fault_idle_queue, entry) {
+    hr_list_for_each_entry_safe(e, n, &_lift_fault_idle_queue, entry) {
         begin = e->fault_begin_time;
+
+        HR_LOGD("%s(%d): fault:0x%X -> %s timeout pending:%d elapse:%ld!\n", __FUNCTION__, __LINE__, e->type, fault_to_string(e->type), e->pending, now - begin);
+
+#if USE_LIFTFAULT_CONFIRM_TIME
+        if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+            if (e->pending != 0) {
+                // timeout auto confirm the event send it
+                if (now - begin >= USE_LIFTFAULT_CONFIRM_TIME) {
+                    e->pending = 0;
+
+                    hr_list_del(&e->entry);
+                    publish_fault_event(e);
+                    upload_fault_video(e); // no trapped
+                    continue;
+                }
+            }
+        }
+#endif
         // timeout without confirmed
         if (now - begin >= LIFTFAULT_FAULT_AUTO_RESOLVED_TIMEOUT) {
             HR_LOGD("%s(%d): fault:0x%X -> %s timeout pending:%d auto resolved!\n", __FUNCTION__, __LINE__, e->type, fault_to_string(e->type), e->pending);
@@ -582,20 +612,33 @@ int elevator_fault_occurred(enum elevator_exception fault) {
 
     e->fault_begin_time = get_realtime_ms();
 
+#if USE_LIFTFAULT_CONFIRM_TIME
+    e->pending = 1;
+#else
     e->pending = 0;
+#endif
 
     // mxp, 20250822, kunren fault should be confirmed by rescure button in manual mode
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         HR_LOGD("%s(%d): fault:0x%X -> %s, rescure mode:%ld\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), _options[OPTION_RESCURE_MODE].value.number);
         e->pending = _options[OPTION_RESCURE_MODE].value.number == RESCURE_MODE_AUTO ? 0 : 1;
     }
+
+    //// only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
+    //// filter it in upload_fault_video
+    //if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+    //    upload_fault_video(e);
+    //}
+
+    if (e->pending == 0) {
+#if USE_LIFTFAULT_CONFIRM_TIME
     // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
     // filter it in upload_fault_video
     if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
         upload_fault_video(e);
     }
 
-    if (e->pending == 0) {
+#endif
         publish_fault_event(e);
     } else {
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
@@ -700,7 +743,6 @@ int elevator_fault_resolved(enum elevator_exception fault) {
         upload_fault_video(e);
     }
 
-    HR_LOGD("add to publish message queue again ...\n");
     publish_fault_event(e);
     DUMP_FAULT_QUEUE_EVENTS();
     return 0;
@@ -854,7 +896,7 @@ static void upload_fault_video(struct lift_fault_event* e) {
     if (pid == 0) {  // child
         char* argv[] = {
             "/usr/bin/estreamer",
-            "-s", // use persist task, which will continue even power off or reboot
+            "-s",  // use persist task, which will continue even power off or reboot
             begin_str,
             end_str,
             url,
@@ -876,7 +918,7 @@ static void upload_fault_video(struct lift_fault_event* e) {
         }
 
         // adjust child process's adj
-        FILE *fp = fopen("/proc/self/oom_score_adj", "w");
+        FILE* fp = fopen("/proc/self/oom_score_adj", "w");
         if (fp) {
             fwrite("0", 1, 1, fp);
             fclose(fp);
@@ -970,15 +1012,14 @@ static void _store_fault_event(void) {
         fsync(fd);
         close(fd);
     }
-    
+
     free(tmp);
 }
 static void _restore_fault_event(void) {
-
     struct tm tm;
     char tmp[256] = {0};
 
-    size_t size  = 0;
+    size_t size = 0;
 
     char* data = NULL;
     ssize_t len = futil_read(FAULT_HISTORICAL, &data);
@@ -992,7 +1033,7 @@ static void _restore_fault_event(void) {
 
     printf("size :%ld\n", size);
 
-    if(len - sizeof(size_t) != size * sizeof(struct lift_fault_event)) {
+    if (len - sizeof(size_t) != size * sizeof(struct lift_fault_event)) {
         // invalid drop
         unlink(FAULT_HISTORICAL);
         sync();
