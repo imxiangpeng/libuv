@@ -198,7 +198,8 @@ static int do_upload(const char* local_path, const char* remote_url) {
         return -1;
     }
 
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L); // CURLOPT_POST
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST"); // use upload & force post
     curl_easy_setopt(curl, CURLOPT_URL, remote_url);
     curl_easy_setopt(curl, CURLOPT_READDATA, fp);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)filesize);
@@ -218,6 +219,7 @@ static int do_upload(const char* local_path, const char* remote_url) {
     fclose(fp);
     return -res;
 }
+
 static void* background_upload_thread_routin(void* args) {
     (void)args;
 
