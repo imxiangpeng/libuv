@@ -60,6 +60,9 @@ int elevator_property_set_eguard_door_control_enabled(struct property* self, str
 int elevator_property_get_elog_proto(struct property* self);
 int elevator_property_set_elog_proto(struct property* self, struct property_value* value);
 
+int elevator_property_get_elog_priority(struct property* self);
+int elevator_property_set_elog_priority(struct property* self, struct property_value* value);
+
 int elevator_property_get_elog_tags(struct property* self);
 int elevator_property_set_elog_tags(struct property* self, struct property_value* value);
 

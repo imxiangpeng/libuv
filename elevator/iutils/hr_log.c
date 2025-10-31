@@ -62,11 +62,13 @@ static char _tags_filter[TAGS_SIZE][TAGS_LENGTH] = {{0}};
 
 enum {
     OPTION_PROTO = 0,
+    OPTION_PRIORITY,
     OPTION_TAGS,
     _OPTION_MAX,
 };
 static struct sconf_proto _options[_OPTION_MAX] = {
     {"PROTO", PROTO_VALUE_NUMBER, {.number = HRLOG_PROTO_RSYSLOG}},
+    {"PRIORITY", PROTO_VALUE_NUMBER, {.number = HR_LOG_WARN}},
     {"TAGS", PROTO_VALUE_STRING, {.string = NULL}},
 };
 
@@ -135,7 +137,7 @@ static void _option_init(void) {
     if (HRLOG_PROTO_RSYSLOG != _options[OPTION_PROTO].value.number) {
         
     }
-    printf("proto: %ld\n", _options[OPTION_PROTO].value.number);
+    // printf("proto: %ld\n", _options[OPTION_PROTO].value.number);
     if (_options[OPTION_TAGS].value.string) {
         char* token = NULL;
         char* save_ptr = NULL;
@@ -305,8 +307,12 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
 
     pthread_once(&persist_once_control, _init);
 
+    if (prio < _options[OPTION_PRIORITY].value.number) {
+        return 0;
+    }
+
     if (!is_allowed(tag)) {
-        printf("not allow:%s\n", tag);
+        // printf("not allow:%s\n", tag);
         return 0;
     }
 

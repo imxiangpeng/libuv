@@ -31,6 +31,7 @@ typedef enum {
 typedef enum {
   HR_LOG_VERBOSE = 0,
   HR_LOG_DEBUG,
+  HR_LOG_INFO,
   HR_LOG_WARN,
   HR_LOG_ERROR
 } hr_log_priority;
@@ -50,6 +51,7 @@ int _hr_log_printf(int prio, const char* tag, const char *fmt, ...);
 #define HR_LOGD(...) ((void)0)
 #endif
 
+#define HR_LOGI(...) ((void)HR_LOG(INFO, LOG_TAG, __VA_ARGS__))
 #define HR_LOGW(...) ((void)HR_LOG(WARN, LOG_TAG, __VA_ARGS__))
 #define HR_LOGE(...) ((void)HR_LOG(ERROR, LOG_TAG, __VA_ARGS__))
 
