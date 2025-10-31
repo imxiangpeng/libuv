@@ -573,10 +573,15 @@ static void ubus_event_handler(struct ubus_context* ctx,
                 return;
             }
 
-            if (status == 1) {
+            // add kunren trigger, which detected in other mode,
+            // we should report directly
+            // status: 0 - resolve fault
+            //         1 - auto report, event maybe pending
+            //         2 - force report immediately
+            if (status != 0) {
                 HR_LOGD("simulate %s fire event!\n", type);
                 if (0 == elevator_fault_is_active(fault)) {
-                    statemachine_post_fault(fault, 1);
+                    statemachine_post_fault(fault, status);
                 }
             } else {
                 HR_LOGD("simulate %s cancel event!\n", type);

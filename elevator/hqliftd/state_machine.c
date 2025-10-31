@@ -4,6 +4,8 @@
 // door not closed before running
 // not it's verify simple !
 // there is a lot of work to be done
+// mxp, 20251031, zupt may leading stopped state slow
+// which causing kaimenzouche, we should auto resolve it when stopped
 
 #include "state_machine.h"
 
@@ -94,7 +96,7 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
                 return;
             }
 
-            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED, 0);
         }
     }
 }
@@ -117,7 +119,7 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
                 return;
             }
 
-            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
+            elevator_fault_occurred(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED, 0);
         }
     }
 
@@ -151,7 +153,9 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
         HR_LOGD("post fault event: fault:%d, status:%d\n", fault, status);
 
         if (status == 1) {
-            elevator_fault_occurred(fault);
+            elevator_fault_occurred(fault, 0);
+        } else if (status == 2) { // should report without pending
+            elevator_fault_occurred(fault, 1);
         } else {
             elevator_fault_resolved(fault);
         }
@@ -165,7 +169,9 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
         if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
             elevator_fault_resolved(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
         }
-    } else if (SM_EVENT_DOOR_CLOSED == event) {
+    } else if (SM_EVENT_DOOR_CLOSED == event || SM_EVENT_STOPPED == event) {
+        // 1. door close auto resolved
+        // 2. resolve when stopped, fixed kaimen zouche causing from zupt slow
         if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
             elevator_fault_resolved(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
         }
@@ -219,7 +225,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     break;
                 case SM_EVENT_RUNNING:
                     if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED, 0);
                     }
                     printf("%s(%d): Exception: door is opened when running !\n", __FUNCTION__, __LINE__);
                     HR_LOGE("%s(%d): Exception: door is opened when running !\n", __FUNCTION__, __LINE__);
@@ -261,9 +267,10 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     uv_timer_start(&_timer, _wait_door_opened_after_stopped_cb, _eguard_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number, 0);
                     break;
                 case SM_EVENT_DOOR_OPENED:
+                    // 我们实际运行存在速度 zupt 归零慢的情况，如果这里直接抛，很容易出现误报开门走车的情况（运行中开门了）
                     printf("%s(%d): Exception door is opened while running\n", __FUNCTION__, __LINE__);
                     if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED)) {
-                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED);
+                        elevator_fault_occurred(ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED, 0);
                     }
 
                     HR_LOGD("%s(%d): !!! fire event: door opened while running ...\n", __FUNCTION__, __LINE__);

@@ -71,7 +71,7 @@
 // 当时间超过 USE_LIFTFAULT_CONFIRM_TIME 的时候自动派发，
 // 在此时间内结束的事件不会派发
 #ifndef LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT
-#define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000 /** 60*/)  // detect every min
+#define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000)  // detect every seconds
 #endif
 
 #ifndef LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT
@@ -525,7 +525,7 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
         return;
     }
 }
-int elevator_fault_occurred(enum elevator_exception fault) {
+int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
     struct lift_fault_event* e = NULL;
     struct fault_report_statistics* s = NULL;
 
@@ -630,15 +630,17 @@ int elevator_fault_occurred(enum elevator_exception fault) {
     //    upload_fault_video(e);
     //}
 
-    if (e->pending == 0) {
-#if USE_LIFTFAULT_CONFIRM_TIME
-    // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
-    // filter it in upload_fault_video
-    if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-        upload_fault_video(e);
+    // we should report directly
+    if (immediate == 1) {
+        e->pending = 0;
     }
 
-#endif
+    if (e->pending == 0) {
+        // only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
+        // filter it in upload_fault_video
+        if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+            upload_fault_video(e);
+        }
         publish_fault_event(e);
     } else {
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
@@ -1034,6 +1036,7 @@ static void _restore_fault_event(void) {
     printf("size :%ld\n", size);
 
     if (len - sizeof(size_t) != size * sizeof(struct lift_fault_event)) {
+        free(data);
         // invalid drop
         unlink(FAULT_HISTORICAL);
         sync();

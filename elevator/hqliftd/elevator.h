@@ -146,7 +146,10 @@ int elevator_light_brightness();
 // not thread safe!
 // should only be called in main thread such as uv loop
 // maybe you should call statemachine_post_fault in uloop
-int elevator_fault_occurred(enum elevator_exception fault);
+// immediate: 1 - directly report without pending
+//            0 - maybe pending or wait keyevent when manual fault mode
+
+int elevator_fault_occurred(enum elevator_exception fault, int immediate);
 int elevator_fault_resolved(enum elevator_exception fault);
 
 int elevator_fault_review(int *type, uint64_t *occurred_ms);
