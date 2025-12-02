@@ -601,19 +601,19 @@ int elevator_property_set_elog_proto(struct property* self, struct property_valu
     return 0;
 }
 
-int elevator_property_get_elog_priority(struct property* self) {
+int elevator_property_get_elog_level(struct property* self) {
     if (!self) return -1;
-    struct sconf_proto proto = {"PRIORITY", PROTO_VALUE_NUMBER, {.number = 0}};
+    struct sconf_proto proto = {"LEVEL", PROTO_VALUE_NUMBER, {.number = 0}};
     sconf_load_with_proto(ELOG_CONFIG_PATH, &proto, 1);
     property_value_set_number(&self->value, proto.value.number);
     return 0;
 }
-int elevator_property_set_elog_priority(struct property* self, struct property_value* value) {
+int elevator_property_set_elog_level(struct property* self, struct property_value* value) {
     if (!self || !value || value->type != E_NUMBER) {
         return -1;
     }
 
-    struct sconf_proto proto = {"PRIORITY", PROTO_VALUE_NUMBER, {.number = value->val.number}};
+    struct sconf_proto proto = {"LEVEL", PROTO_VALUE_NUMBER, {.number = value->val.number}};
     sconf_save_with_proto(ELOG_CONFIG_PATH, &proto, 1);
     return 0;
 }

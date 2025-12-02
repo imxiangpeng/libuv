@@ -2,6 +2,7 @@
 // mxp, 20250703, extract the IoT management module from elevatord.
 
 #include "elinkd.h"
+
 #include "libubox/uloop.h"
 #define _GNU_SOURCE
 #include <assert.h>
@@ -54,9 +55,9 @@ enum {
     MSG_QUIT,
     MSG_IOT_INIT,
     MSG_ULOOP_TIMEOUT_SET,
+    MSG_ULOOP_TIMEOUT_CANCEL,
     MSG_POST_ASYNC_TASK,
 };
-
 
 // mxp, 20231029, simple timer task using libubox
 struct _inner_task {
@@ -144,8 +145,24 @@ static void _pipe_uloop_main_thread_handler(struct uloop_fd* u, unsigned int eve
 
             read(_pipefd[0], &t, sizeof(t));
             read(_pipefd[0], &msec, sizeof(msec));
+            if (!t) {
+                break;
+            }
 
             uloop_timeout_set(t, msec);
+
+            break;
+        }
+        case MSG_ULOOP_TIMEOUT_CANCEL: {
+            struct uloop_timeout* t = NULL;
+
+            read(_pipefd[0], &t, sizeof(t));
+
+            if (!t) {
+                break;
+            }
+
+            uloop_timeout_cancel(t);
 
             break;
         }
@@ -166,12 +183,20 @@ static void post_message(int which) {
     write(_pipefd[1], &which, sizeof(which));
 }
 
-void post_timer(struct uloop_timeout* t, int msec) {
+void timer_post(struct uloop_timeout* t, int msec) {
     struct {
         int which;
         struct uloop_timeout* t;
         int msec;
     } __attribute__((packed)) data = {MSG_ULOOP_TIMEOUT_SET, t, msec};
+    write(_pipefd[1], &data, sizeof(data));
+}
+
+void timer_cancel(struct uloop_timeout* t) {
+    struct {
+        int which;
+        struct uloop_timeout* t;
+    } __attribute__((packed)) data = {MSG_ULOOP_TIMEOUT_CANCEL, t};
     write(_pipefd[1], &data, sizeof(data));
 }
 
@@ -256,9 +281,9 @@ static void ubus_event_handler(struct ubus_context* ctx,
     (void)ev;
 
     struct blob_attr* tb[__OE_MAX] = {NULL};
-    char* str = blobmsg_format_json(msg, true);
-    HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
-    free(str);
+    // char* str = blobmsg_format_json(msg, true);
+    // HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    // free(str);
 
     if (strcmp(type, "ubus.object.add") == 0) {
         blobmsg_parse(object_event_policy, __OE_MAX, tb, blobmsg_data(msg),

@@ -534,15 +534,15 @@ static void _observer_on_event(struct motion_event* data) {
     if (!data)
         return;
 
-    if (_running_direction != data->direction) {
-        HR_LOGD("direction changed ......\n");
-    }
+    // if (_running_direction != data->direction) {
+    //     HR_LOGD("direction changed ......\n");
+    // }
 
     _running_direction = data->direction;
-    if (data->state == _running_state) {
-        //    return;
-        HR_LOGD("state not changed ......\n");
-    }
+    // if (data->state == _running_state) {
+    //     //    return;
+    //     HR_LOGD("state not changed ......\n");
+    // }
 
     // begin running
     if (_running_state == STOPPED) {

@@ -233,7 +233,7 @@ static int _on_publish(void** payload, int* len) {
         return -1;
 
     *len = strlen(*payload);
-    HR_LOGD("publish: %s\n", (char*)*payload);
+    // HR_LOGD("publish: %s\n", (char*)*payload);
 
     return 0;
 }
@@ -426,7 +426,7 @@ static int _on_property_set_message(void* payload, int len) {
 }
 
 static int _on_property_get_message(void* payload, int len) {
-    printf("get message %d -> %s\n", len, (char*)payload);
+    // printf("get message %d -> %s\n", len, (char*)payload);
     char* method = NULL;
     // double val = 0;
     // const char* val_str = NULL;

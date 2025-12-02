@@ -364,9 +364,9 @@ static void ubus_event_handler(struct ubus_context* ctx,
     (void)ev;
 
     struct blob_attr* tb[__OE_MAX] = {NULL};
-    char* str = blobmsg_format_json(msg, true);
-    HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
-    free(str);
+    // char* str = blobmsg_format_json(msg, true);
+    // HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    // free(str);
 
     if (strcmp(type, "ubus.object.add") == 0) {
         blobmsg_parse(object_event_policy, __OE_MAX, tb, blobmsg_data(msg),
@@ -472,6 +472,7 @@ static void ubus_event_handler(struct ubus_context* ctx,
             }
         } else if (0 == strcmp("fault", event)) {
             // receive fault from other module
+            // now it's only fanfukaiguanmen & guanmenyichang
             uint32_t fault = ELEVATOR_EXCEPTION_NONE;
             const char* type = NULL;
             int status = 0;
@@ -505,7 +506,7 @@ static void ubus_event_handler(struct ubus_context* ctx,
                  fault = ELEVATOR_EXCEPTION_EBIKE;
              }*/
 
-            HR_LOGD("type:%s, fault:%d, status:%d\n", type, fault, status);
+            HR_LOGW("type:%s, fault:%d, status:%d\n", type, fault, status);
 
             if (ELEVATOR_EXCEPTION_NONE == fault) {
                 return;

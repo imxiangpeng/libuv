@@ -224,7 +224,7 @@ static void iot__topic_async_cb(uv_async_t* handle) {
         int rc = uviot_mosquitto_publish(t->iot, &t->mid, t->self->topic,
                                          len, (const void*)payload,
                                          t->self->qos, false);
-        printf("publish :%d -> %s\n", rc, (char*)payload);
+        // printf("publish :%d -> %s\n", rc, (char*)payload);
         if (rc != MOSQ_ERR_SUCCESS) {
             HR_LOGE("publish failed :%d, errno:%d\n", rc, errno);
             if (t->self->qos > 0) {
@@ -596,7 +596,7 @@ static void uviot_impl_loop_poll_cb(uv_poll_t* handle, int status, int events) {
     if (!handle || !handle->data)
         return;
 
-    printf("%s(%d): ....status:%d, events:%d\n", __FUNCTION__, __LINE__, status, events);
+    // printf("%s(%d): ....status:%d, events:%d\n", __FUNCTION__, __LINE__, status, events);
     iot = (struct uviot_impl*)handle->data;
 
     mosq = iot->mosq;

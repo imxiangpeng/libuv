@@ -14,10 +14,13 @@
 #include <resolv.h>
 #include <string.h>
 
+#include "elinkd.h"
 #include "hr_log.h"
 #include "libubox/list.h"
 #include "libubox/uloop.h"
 #include "topic.h"
+
+#define USE_MOSQUITTO_EXTEND_LOOP_EVENT 0
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -60,6 +63,7 @@ struct iot__topic {
 struct iot_priv {
     struct mosquitto* mosq;
 
+    struct uloop_timeout timer;
     struct list_head topic_head;
 };
 
@@ -68,7 +72,6 @@ static struct iot_priv _priv = {
     .topic_head = LIST_HEAD_INIT(_priv.topic_head),
 };
 
-void post_timer(struct uloop_timeout* t, int msec);
 
 static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
     if (!t) return;
@@ -76,7 +79,7 @@ static void iot__topic_timeout_task_cb(struct uloop_timeout* t) {
 
     if (topic->self->period > 0) {
         // it's in uloop, also you can use uloop_timeout_set directly
-        post_timer /*uloop_timeout_set*/ (&topic->timer, topic->self->period);
+        timer_post /*uloop_timeout_set*/ (&topic->timer, topic->self->period);
     }
     if (mosquitto_socket(_priv.mosq) == -1) {
         return;
@@ -152,6 +155,11 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
     if (!mosq || !priv)
         return;
 
+    // stop connect timer
+    if (_priv.timer.pending != 0) {
+        timer_cancel(&_priv.timer);
+    }
+
     if (CONNACK_ACCEPTED != reason) {
         HR_LOGD("Connection error: %s\n", mosquitto_connack_string(reason));
         return;
@@ -187,7 +195,7 @@ static void _on_connect(struct mosquitto* mosq, void* obj, int reason) {
             if (p->self->period > 0) {
                 HR_LOGD("%s(%d): topic %s...start timer :%d, p->timer.cb:%p vs %p\n", __FUNCTION__, __LINE__, p->self->topic, p->self->period, p->timer.cb, iot__topic_timeout_task_cb);
                 // it's not uloop, do not use uloop_timeout_set directly
-                post_timer(&p->timer, p->self->period);
+                timer_post(&p->timer, p->self->period);
             }
         }
     }
@@ -197,6 +205,11 @@ static void _on_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
     (void)mosq;
     (void)userdata;
     (void)rc;
+
+    // stop connect timer
+    if (_priv.timer.pending != 0) {
+        timer_cancel(&_priv.timer);
+    }
     HR_LOGD("%s(%d): \n", __FUNCTION__, __LINE__);
 }
 
@@ -238,8 +251,70 @@ static void _on_message(struct mosquitto* mosq, void* obj, const struct mosquitt
     }
 }
 
+/*
+ * Our extended api
+ * stage:
+ *   0: Ready to enter mosquitto_loop
+ *   1: Exit from mosquitto thread
+ * result: result or fault code
+ */
+static void _on_loop_event(struct mosquitto *mosq, void* userdata, int stage, int result) {
+    (void)mosq;
+    (void)userdata;
+    (void)stage;
+    (void)result;
+
+    HR_LOGE("%s(%d): stage:%d, result:%d\n", __FUNCTION__, __LINE__, stage, result);
+
+    if (stage == 0) {
+        // we can cancel our connect task
+        // but we do keep the task until connected
+	} else if (stage == 1) {
+        HR_LOGE("%s(%d): stage:%d, result:%d, loop exit, restart whole app\n", __FUNCTION__, __LINE__, stage, result);
+        abort();
+    }
+}
+
+// we should make sure mosquitto_connect_async success or conn pending
+// when startup
+static void _connect_task(struct uloop_timeout* t) {
+    if (!t) {
+        return;
+    }
+
+    if (mosquitto_socket(_priv.mosq) != -1) {
+        HR_LOGD("%s(%d): socket is ready:%d, do nothing!\n", __FUNCTION__, __LINE__, mosquitto_socket(_priv.mosq));
+        return;
+    }
+
+    int rc = mosquitto_connect_async(_priv.mosq, BROKER_DEFAULT_SERVER, BROKER_DEFAULT_PORT, BROKER_DEFAULT_ALIVETIME);
+	HR_LOGD("%s(%d): connect:%s:%d, alive time:%d, code:%d, socket:%d\n", __FUNCTION__, __LINE__, BROKER_DEFAULT_SERVER, BROKER_DEFAULT_PORT, BROKER_DEFAULT_ALIVETIME, rc, mosquitto_socket(_priv.mosq));
+
+    if (rc != MOSQ_ERR_SUCCESS) {
+        // async maybe return MOSQ_ERR_CONN_PENDING
+        HR_LOGD("%s(%d): connect result:%d -> %s\n", __FUNCTION__, __LINE__, rc, mosquitto_strerror(rc));
+        if (rc == MOSQ_ERR_EAI) {
+            res_init();
+        }
+    }
+
+    // always retry when socket is invalid
+    // maybe concurrency issue with the mosquitto thread
+    if (mosquitto_socket(_priv.mosq) == -1) {
+        // reschedule connect again
+        // The retry is not required at a high frequency
+        // this process is only executed during startup.
+        timer_post(t, 5000);
+
+        return;
+    }
+
+    HR_LOGD("%s(%d): connect task done\n", __FUNCTION__, __LINE__);
+
+    return;
+}
+
 int iot_init() {
-    int rc = -1;
     struct mosquitto* mosq = NULL;
     char name[64] = {TIHUIYAN_DEVICE_NAME};
     char id[256] = {0};
@@ -258,6 +333,8 @@ int iot_init() {
 
     long long msec = 0;
     struct timespec ts;
+
+    memset((void*)&_priv.timer, 0, sizeof(_priv.timer));
 
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
         return -1;
@@ -343,19 +420,24 @@ int iot_init() {
 
     mosquitto_username_pw_set(mosq, username, password);
 
-    // no error async interface
-    mosquitto_connect_async(_priv.mosq, BROKER_DEFAULT_SERVER, BROKER_DEFAULT_PORT, BROKER_DEFAULT_ALIVETIME);
-    if (rc != MOSQ_ERR_SUCCESS) {
-        // async maybe return MOSQ_ERR_CONN_PENDING
-        HR_LOGD("%s(%d): connect result:%d -> %s\n", __FUNCTION__, __LINE__, rc, mosquitto_strerror(rc));
-        if (rc == MOSQ_ERR_EAI) {
-            res_init();
-        }
+    // reconnect
+    mosquitto_reconnect_delay_set(mosq, 2 /*delay*/, 30 /*max delay*/, false);
+
+#if USE_MOSQUITTO_EXTEND_LOOP_EVENT
+    mosquitto_loop_event_callback_set(mosq, _on_loop_event);
+#endif
+
+    // mxp, 20250703, use inner loop thread
+    // you can call it before or after mosquitto_connect_async
+    // it will loop wait connect state
+    // we prefer start loop early
+    if (MOSQ_ERR_SUCCESS != mosquitto_loop_start(_priv.mosq)) {
+        exit(0);
     }
 
-    // mxp, 20250703, use inner loop thread, you should call it after connected
-    // but i found it will loop wait connect state
-    mosquitto_loop_start(_priv.mosq);
+    // start connect task
+    _priv.timer.cb = _connect_task;
+    timer_post(&_priv.timer, 0);
 
     return 0;
 }
@@ -414,7 +496,7 @@ int iot_topic_publish_async(const struct topic* topic) {
 
         if (p->self == topic) {
             // it's not uloop, do not use uloop_timeout_set directly
-            post_timer(&p->timer, 0);
+            timer_post(&p->timer, 0);
         }
     }
 

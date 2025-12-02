@@ -278,7 +278,7 @@ static void do_calibration_when_needed(struct accelerometer_stream* self, double
         HR_LOGD("%s(%d) G:%f vs %f\n", __FUNCTION__, __LINE__, self->G, az_world);
         self->calibration_retries = 0;
         // self->G = round(sum * 10000 / self->calibration_retries_max) / 10000;
-        HR_LOGD("%s(%d): it's still: %lf, zero offset: %f %f %f, pitch:%f, roll:%f\n", __FUNCTION__, __LINE__, self->G, self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
+        HR_LOGW("%s(%d): it's still: %lf, zero offset: %f %f %f, pitch:%f, roll:%f\n", __FUNCTION__, __LINE__, self->G, self->zero_bias_accels[0], self->zero_bias_accels[1], self->zero_bias_accels[2], self->zero_bias_pitch, self->zero_bias_roll);
 
         self->is_calibration_completed = 1;
 #if 0

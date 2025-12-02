@@ -26,6 +26,8 @@
 // notice when a person is detected in the elevator while it is stationary and the doors are closed
 // #define SOMEONE_INSIDE_WHEN_DOOR_CLOSED_TIMEOUT 90000  // 60s
 
+// mxp, 20251125, release kunren fault when elevator is running
+
 static int _pipefd[2] = {-1};
 
 static enum state_machine_state _state = SM_ELEVATOR_UNINIT;
@@ -84,11 +86,11 @@ static void _wait_door_opened_after_stopped_cb(uv_timer_t* handle) {
 
     uelevator_get_status(&st);
     printf("%s(%d): come in door not opened after stopped...\n", __FUNCTION__, __LINE__);
-    HR_LOGD("%s(%d): come in door not opened after stopped..., door:%d, passenger:%d\n", __FUNCTION__, __LINE__, st.door_state, st.passenger_count);
+    HR_LOGW("%s(%d): come in door not opened after stopped..., door:%d, passenger:%d\n", __FUNCTION__, __LINE__, st.door_state, st.passenger_count);
 
     if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
         if (st.passenger_count > 0) {
-            HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+            HR_LOGW("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
 
             // kunren maybe disabled
             if (_eguard_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number == 0) {
@@ -111,7 +113,7 @@ static void _detect_someone_inside_when_long_stopped(uv_timer_t* handle) {
 
     if (0 == elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
         if (st.passenger_count > 0) {
-            HR_LOGD("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
+            HR_LOGW("%s(%d): !!! fire event: people is in elevator while door is not opened ...\n", __FUNCTION__, __LINE__);
 
             // kunren maybe disabled
             if (_eguard_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number == 0) {
@@ -154,7 +156,7 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
 
         if (status == 1) {
             elevator_fault_occurred(fault, 0);
-        } else if (status == 2) { // should report without pending
+        } else if (status == 2) {  // should report without pending
             elevator_fault_occurred(fault, 1);
         } else {
             elevator_fault_resolved(fault);
@@ -165,7 +167,10 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
     HR_LOGD("state machine message: %d(%s) received event %d(%s)\n", _state, state_str(_state), event, event_str(event));
 
     // finished trapped event when door opened in any case
-    if (SM_EVENT_DOOR_OPENED == event) {
+    if (SM_EVENT_DOOR_OPENED == event || SM_EVENT_RUNNING == event) {
+        if (uv_is_active((const uv_handle_t*)&_timer)) {
+            uv_timer_stop(&_timer);
+        }
         if (0 != elevator_fault_is_active(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED)) {
             elevator_fault_resolved(ELEVATOR_EXCEPTION_PEOPLE_TRAPPED);
         }
@@ -207,6 +212,12 @@ static void _statemachine_message_handle(uv_poll_t* handle, int status, int even
                     break;
                 case SM_EVENT_RUNNING:
                     HR_LOGD("%s(%d): !!! door not opened! current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
+                    _state = SM_ELEVATOR_RUNNING;
+
+                    if (uv_is_active((const uv_handle_t*)&_timer)) {
+                        uv_timer_stop(&_timer);
+                    }
+
                     break;
                 default:
                     printf("%s(%d): current state:%d(%s), not support event:%d(%s)\n", __FUNCTION__, __LINE__, _state, state_str(_state), event, event_str(event));
@@ -297,7 +308,7 @@ int statemachine_init(uv_loop_t* loop) {
         return -1;
     }
 
-    HR_LOGD("kunren :%ld, timeout:%ld\n",
+    HR_LOGW("kunren :%ld, timeout:%ld\n",
             _eguard_options[OPTION_EGUARD_KUNREN_DETECT_ENABLED].value.number,
             _eguard_options[OPTION_EGUARD_KUNREN_DETECT_TIMEOUT].value.number);
 

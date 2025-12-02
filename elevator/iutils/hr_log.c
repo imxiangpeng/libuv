@@ -62,13 +62,13 @@ static char _tags_filter[TAGS_SIZE][TAGS_LENGTH] = {{0}};
 
 enum {
     OPTION_PROTO = 0,
-    OPTION_PRIORITY,
+    OPTION_LEVEL,
     OPTION_TAGS,
     _OPTION_MAX,
 };
 static struct sconf_proto _options[_OPTION_MAX] = {
     {"PROTO", PROTO_VALUE_NUMBER, {.number = HRLOG_PROTO_RSYSLOG}},
-    {"PRIORITY", PROTO_VALUE_NUMBER, {.number = HR_LOG_WARN}},
+    {"LEVEL", PROTO_VALUE_NUMBER, {.number = HR_LOG_WARN}},
     {"TAGS", PROTO_VALUE_STRING, {.string = NULL}},
 };
 
@@ -302,12 +302,13 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
     char buf[LOG_BUF_SIZE] = {0};
     char* ptr = buf;
     size_t available = LOG_BUF_SIZE;
+    const char* l = NULL;
     struct tm tm;
     struct timespec ts;
 
     pthread_once(&persist_once_control, _init);
 
-    if (prio < _options[OPTION_PRIORITY].value.number) {
+    if (prio < _options[OPTION_LEVEL].value.number) {
         return 0;
     }
 
@@ -336,6 +337,35 @@ int _hr_log_printf(int prio, const char* tag, const char* fmt, ...) {
         ret = 0;
     available -= (size_t)ret;
     ptr += ret;
+
+    switch(prio) {
+        case HR_LOG_VERBOSE:
+            l = "V";
+            break;
+        case HR_LOG_DEBUG:
+            l = "D";
+            break;
+        case HR_LOG_INFO:
+            l = "I";
+            break;
+        case HR_LOG_WARN:
+            l = "W";
+            break;
+        case HR_LOG_ERROR:
+            l = "E";
+            break;
+        default:
+            l = "N";
+            break;
+    }
+
+    if (l) {
+        ret = snprintf(ptr, available, "%s ", l);
+        if (ret < 0)
+            ret = 0;
+        available -= (size_t)ret;
+        ptr += ret;
+    }
 
     // tag
     if (tag) {
