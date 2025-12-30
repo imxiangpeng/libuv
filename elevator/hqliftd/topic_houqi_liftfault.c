@@ -24,11 +24,21 @@
 #include "uelevator.h"
 #include "uviot.h"
 
-#if ENABLE_RESCURE_BTN
+// mxp, 20251230, 调整手动困人模式下检测逻辑
+// 由于其他模块采用中断方式检测 GPIO，所以这里我们无法再检测 GPIO 事件了。
+//
+// 原来的手动困人模式由内部检测 GPIO 调整为：
+//
+// 1. 内部仍然以 pending 状态保存事件
+// 2. 其他模块接收到 elevator.event.x.fault '{"type":"kunren", "status":1}' 事件后等待按键
+// 3. 在其他模块检测到按键后，调用 ubus send elevator.event.x.fault '{"type":"kunren", "status":2}' 来直接触发立即发送故障
+// 4. 我们在 elevator_fault_occurred 中会检测 pending 状态的困人事件，如果存在那么将其立马发送出去
+
+#if ENABLE_RESCUE_BTN
 #include <gpiod.h>
 
 #define GPIO_CHIP_NAME "/dev/gpiochip0"
-#define RESCURE_GPIO_PIN 6  // GPIOD_6
+#define RESCUE_GPIO_PIN 6  // GPIOD_6
 #endif
 
 #define EVENT_FAULT_TOPIC_NAME "LiftFault"
@@ -46,9 +56,9 @@
 #define USE_LIFTFAULT_CONFIRM_TIME 5000  // pending 5s before send fault
 
 // 困人事件处理流程：
-// 1. 在 RESCURE_MODE_AUTO 模式，elevator_fault_occurred 被调用的时候
+// 1. 在 RESCUE_MODE_AUTO 模式，elevator_fault_occurred 被调用的时候
 //    直接向平台发送困人事件，并且在结束的时候发送视频到 FTP
-// 2. 在 RESCURE_MODE_MANUAL 模式，elevator_fault_occurred 会这是事件为 pending 事件，初始值为 1
+// 2. 在 RESCUE_MODE_MANUAL 模式，elevator_fault_occurred 会这是事件为 pending 事件，初始值为 1
 //    然后启动 500ms 间隔的定时器 _people_trapped_fault_detect 来检测救援按钮是否按下
 //    每次检测到按键就会将 pending 值 + 1， 如果达到 3 我们将确认故障发生，将事件推送给厚齐平台
 // 3. 在任意故障发生后，会启动间隔 1min 的定时器来检测事件发生时长，
@@ -74,13 +84,13 @@
 #define LIFTFAULT_FAULT_AUTO_RESOLVED_DETECT_TIMEOUT (1000)  // detect every seconds
 #endif
 
-#ifndef LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT
-#define LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT 300
+#ifndef LIFTFAULT_FAULT_RESCUE_BTN_DETECT_TIMEOUT
+#define LIFTFAULT_FAULT_RESCUE_BTN_DETECT_TIMEOUT 300
 #endif
 
-#ifndef LIFTFAULT_FAULT_RESCURE_PENDING_MAX
+#ifndef LIFTFAULT_FAULT_RESCUE_PENDING_MAX
 // initial pending 1,  3 - 1 = 2 * 300 ms
-#define LIFTFAULT_FAULT_RESCURE_PENDING_MAX 3
+#define LIFTFAULT_FAULT_RESCUE_PENDING_MAX 3
 #endif
 
 #define DUMP_FAULT_QUEUE_EVENTS()                                                           \
@@ -101,7 +111,9 @@
 // detect fault status:
 // 1. kunren (manual mode) should wait gpio to confirm
 // 2. kunren should be released after 90min
-static uv_timer_t _rescure_btn_timer;
+#if ENABLE_RESCUE_BTN
+static uv_timer_t _rescue_btn_timer;
+#endif
 static uv_timer_t _alive_timer;
 
 // fault event only in memory do not save
@@ -111,7 +123,7 @@ struct lift_fault_event {
     int64_t fault_end_time;
     char* video_url;
 
-    // manual mode: kunren should confirm with rescure button
+    // manual mode: kunren should confirm with rescue button
     // kunren event should not report without confirm in manual mode
     int pending;
 
@@ -263,7 +275,50 @@ static int _on_publish(void** payload, int* len) {
         /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
     }
     cJSON_AddStringToObject(fault, "faultEndTime", tmp);
-    cJSON_AddStringToObject(fault, "faultVideoUrl", "");
+
+    // init suffix of video path
+    memset((void*)tmp, 0, sizeof(tmp));
+    // only set when upload is enabled && ftp is valid
+    if (0 != _options[OPTION_FAULT_VIDEO_UPLOAD_SWITCH].value.number &&
+        NULL != _options[OPTION_FTP_ADDRESS].value.string) {
+        switch (e->type) {
+            case ELEVATOR_EXCEPTION_RUN_WITHOUT_DOOR_CLOSED:
+            case ELEVATOR_EXCEPTION_DOOR_REPEATED:
+            case ELEVATOR_EXCEPTION_DOOR_CLOSE_ERROR: {
+                t = e->fault_begin_time / 1000;
+                (void)localtime_r(&t, &tm);
+                int c = snprintf(tmp, sizeof(tmp), "/fault_files/%s/", elevator_deviceid());
+                if (c > 0) {
+                    /*size_t size =*/strftime(tmp + c, sizeof(tmp) - c, "%Y%m%d_%H%M%S.mp4", &tm);
+                }
+                break;
+            }
+            case ELEVATOR_EXCEPTION_EBIKE: {
+                t = e->fault_begin_time / 1000;
+                (void)localtime_r(&t, &tm);
+                int c = snprintf(tmp, sizeof(tmp), "/record/%s/", elevator_deviceid());
+                if (c > 0) {
+                    /*size_t size =*/strftime(tmp + c, sizeof(tmp) - c, "%Y%m%d_%H%M%S.mp4", &tm);
+                }
+                break;
+            }
+
+            case ELEVATOR_EXCEPTION_PEOPLE_TRAPPED: {
+                // report when finished
+                t = e->fault_begin_time / 1000;
+                (void)localtime_r(&t, &tm);
+                int c = snprintf(tmp, sizeof(tmp), "/event_files/%s/", elevator_deviceid());
+                if (c > 0) {
+                    /*size_t size =*/strftime(tmp + c, sizeof(tmp) - c, "%Y%m%d_%H%M%S.mp4", &tm);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    cJSON_AddStringToObject(fault, "faultVideoUrl", tmp);
 
     // take off from list
     hr_list_del(&e->entry);
@@ -330,10 +385,12 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
     _restore_fault_event();
 
     // init timer for sendvideo & sendsate command timeout
-    memset((void*)&_rescure_btn_timer, 0, sizeof(_rescure_btn_timer));
-    memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
+#if ENABLE_RESCUE_BTN
+    memset((void*)&_rescue_btn_timer, 0, sizeof(_rescue_btn_timer));
+    uv_timer_init(uv_default_loop(), &_rescue_btn_timer);
+#endif
 
-    uv_timer_init(uv_default_loop(), &_rescure_btn_timer);
+    memset((void*)&_alive_timer, 0, sizeof(_alive_timer));
     uv_timer_init(uv_default_loop(), &_alive_timer);
 
     // auto start alive timer when there is any idle which maybe resumed
@@ -346,11 +403,13 @@ int topic_houqi_liftfault_init(struct uviot* iot, const char* public_key, const 
 }
 
 int topic_houqi_liftfault_deinit(void) {
-    if (_rescure_btn_timer.type != UV_UNKNOWN_HANDLE) {
-        if (!uv_is_closing((uv_handle_t*)&_rescure_btn_timer)) {
-            uv_close((uv_handle_t*)&_rescure_btn_timer, NULL);
+#if ENABLE_RESCUE_BTN
+    if (_rescue_btn_timer.type != UV_UNKNOWN_HANDLE) {
+        if (!uv_is_closing((uv_handle_t*)&_rescue_btn_timer)) {
+            uv_close((uv_handle_t*)&_rescue_btn_timer, NULL);
         }
     }
+#endif
     if (_alive_timer.type != UV_UNKNOWN_HANDLE) {
         if (!uv_is_closing((uv_handle_t*)&_alive_timer)) {
             uv_close((uv_handle_t*)&_alive_timer, NULL);
@@ -423,7 +482,7 @@ begin:
 
                     hr_list_del(&e->entry);
                     publish_fault_event(e);
-                    upload_fault_video(e); // no trapped
+                    upload_fault_video(e);  // no trapped
                     continue;
                 }
             }
@@ -446,12 +505,12 @@ begin:
     }
 }
 
-#if ENABLE_RESCURE_BTN
+#if ENABLE_RESCUE_BTN
 // 0: no press
 // 1: press
-static int _people_trapped_fault_wait_rescure_button(void) {
+static int _people_trapped_fault_wait_rescue_button(void) {
     // low: press active
-    return gpiod_ctxless_get_value(GPIO_CHIP_NAME, RESCURE_GPIO_PIN, true, "rescure-btn");
+    return gpiod_ctxless_get_value(GPIO_CHIP_NAME, RESCUE_GPIO_PIN, true, "rescue-btn");
 #if 0    
     int ret = 0;
     struct gpiod_chip* chip = gpiod_chip_open(GPIO_CHIP_NAME);
@@ -459,11 +518,11 @@ static int _people_trapped_fault_wait_rescure_button(void) {
         return 0;
     }
 
-    struct gpiod_line* line = gpiod_chip_get_line(chip, RESCURE_GPIO_PIN);
+    struct gpiod_line* line = gpiod_chip_get_line(chip, RESCUE_GPIO_PIN);
     if (!line) {
         goto out;
     }
-    if (gpiod_line_request_input(line, "rescure-btn") < 0) {
+    if (gpiod_line_request_input(line, "rescue-btn") < 0) {
         goto out;
     }
     int val = gpiod_line_get_value(line);
@@ -482,15 +541,16 @@ out:
 }
 #endif
 
-// 1. detect rescure button when it's pending
-static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
+#if ENABLE_RESCUE_BTN
+// 1. detect rescue button when it's pending
+static void _people_trapped_fault_rescue_btn_detect(uv_timer_t* handle) {
     (void)handle;
     struct lift_fault_event *e = NULL, *f = NULL;
 
-    int pressed = 1;
-#if ENABLE_RESCURE_BTN
+    int pressed = 0;
+#if ENABLE_RESCUE_BTN
     // detect button without lock
-    pressed = _people_trapped_fault_wait_rescure_button();
+    pressed = _people_trapped_fault_wait_rescue_button();
 #endif
 
     // 1. lookup pending kunren event
@@ -502,7 +562,7 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
     }
 
     if (!e) {
-        uv_timer_stop(&_rescure_btn_timer);
+        uv_timer_stop(&_rescue_btn_timer);
         return;
     }
 
@@ -512,11 +572,11 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
         return;
     }
     // 2. the event is pending
-    // detect rescure gpio button
+    // detect rescue gpio button
     e->pending++;
 
-    // kunren event has been confirmed from rescure button, fire it
-    if (e->pending >= LIFTFAULT_FAULT_RESCURE_PENDING_MAX) {
+    // kunren event has been confirmed from rescue button, fire it
+    if (e->pending >= LIFTFAULT_FAULT_RESCUE_PENDING_MAX) {
         e->pending = 0;
         HR_LOGD("%s(%d) fault:0x%x -> %s, pending:%d, fire!!!\n", __FUNCTION__, __LINE__, e->type, fault_to_string(e->type), e->pending);
         // delete from idle and queue into message
@@ -525,6 +585,8 @@ static void _people_trapped_fault_rescure_btn_detect(uv_timer_t* handle) {
         return;
     }
 }
+#endif
+
 int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
     struct lift_fault_event* e = NULL;
     struct fault_report_statistics* s = NULL;
@@ -590,6 +652,20 @@ int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
         hr_list_for_each_entry(f, &_lift_fault_idle_queue, entry) {
             if (f->type == fault) {
                 HR_LOGE("%s(%d): fault:0x%X -> %s is occurring, do not report again\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
+
+#if !ENABLE_RESCUE_BTN
+                HR_LOGE("%s(%d): fault:0x%X -> %s, pending: %d, immediate:%d\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), e->pending, immediate);
+                if (immediate == 1 && e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED && e->pending != 0) {
+                    // button detect has been moved to other modules
+                    // it will trigger fault occurr using immediate == 1
+                    // so we directly send the pending event when we receive immediate fault
+                    // delete from idle and queue into message
+                    e->pending = 0;
+                    hr_list_del(&e->entry);
+                    publish_fault_event(e);
+                    return 0;
+                }
+#endif
                 return -1;
             }
         }
@@ -618,17 +694,17 @@ int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
     e->pending = 0;
 #endif
 
-    // mxp, 20250822, kunren fault should be confirmed by rescure button in manual mode
+    // mxp, 20250822, kunren fault should be confirmed by rescue button in manual mode
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-        HR_LOGD("%s(%d): fault:0x%X -> %s, rescure mode:%ld\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), _options[OPTION_RESCURE_MODE].value.number);
-        e->pending = _options[OPTION_RESCURE_MODE].value.number == RESCURE_MODE_AUTO ? 0 : 1;
+        HR_LOGD("%s(%d): fault:0x%X -> %s, rescue mode:%ld\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), _options[OPTION_RESCUE_MODE].value.number);
+        e->pending = _options[OPTION_RESCUE_MODE].value.number == RESCUE_MODE_AUTO ? 0 : 1;
     }
 
     //// only fanfukaiguanmen/guanmenyicang/kaimenxingti/ebike report in here
     //// filter it in upload_fault_video
-    //if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-    //    upload_fault_video(e);
-    //}
+    // if (e->type != ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
+    //     upload_fault_video(e);
+    // }
 
     // we should report directly
     if (immediate == 1) {
@@ -645,10 +721,12 @@ int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
     } else {
         hr_list_add_tail(&e->entry, &_lift_fault_idle_queue);
 
+#if ENABLE_RESCUE_BTN
         // only support ELEVATOR_EXCEPTION_PEOPLE_TRAPPED
         if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
-            uv_timer_start(&_rescure_btn_timer, _people_trapped_fault_rescure_btn_detect, LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT, LIFTFAULT_FAULT_RESCURE_BTN_DETECT_TIMEOUT);
+            uv_timer_start(&_rescue_btn_timer, _people_trapped_fault_rescue_btn_detect, LIFTFAULT_FAULT_RESCUE_BTN_DETECT_TIMEOUT, LIFTFAULT_FAULT_RESCUE_BTN_DETECT_TIMEOUT);
         }
+#endif
     }
 
     // detect every second
@@ -722,14 +800,6 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     e->fault_end_time = get_realtime_ms();
 
-    // we should drop pending event
-    if (e->pending != 0) {
-        HR_LOGD("%s(%d): fault:0x%X is pending event, drop it\n", __FUNCTION__, __LINE__, fault);
-        HR_INIT_LIST_HEAD(&e->entry);
-        free(e);
-        return 0;
-    }
-
     // mxp, 20250702, do not report & generate fault video when fault is disabled
     if (_options[OPTION_FAULT_REPORT_SWITCH].value.number == 0) {
         HR_INIT_LIST_HEAD(&e->entry);
@@ -739,6 +809,16 @@ int elevator_fault_resolved(enum elevator_exception fault) {
 
     // mxp, 20250707, broadcast fault event to system
     uelevator_send_fault_event(fault, 0);
+
+    // mxp, 20251218, workaround force send ubus fault event
+    // other modules depend it
+    // we should drop pending event
+    if (e->pending != 0) {
+        HR_LOGD("%s(%d): fault:0x%X is pending event, drop it\n", __FUNCTION__, __LINE__, fault);
+        HR_INIT_LIST_HEAD(&e->entry);
+        free(e);
+        return 0;
+    }
 
     // mxp, 20250620, people trapped video is upload when event is finished
     if (e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED) {
