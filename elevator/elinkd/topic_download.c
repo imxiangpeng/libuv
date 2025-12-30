@@ -1,3 +1,5 @@
+// mxp, 20251205, adjust query records in seperated thread
+// some bad tf card may causing block!(such as: LC202509B001000205)
 
 #define _GNU_SOURCE
 // #define _XOPEN_SOURCE 600
@@ -36,6 +38,11 @@
 
 #define SVC_METHOD_PREFIX "thing.service."
 
+enum {
+    IO_TASK_QUERY_RECORDS = 0,
+    IO_TASK_QUERY_MAX,
+};
+
 struct record {
     /*uint64_t*/ time_t timestamp;  // utc use timegm not mktime
     int duration;
@@ -45,8 +52,12 @@ struct record {
 
 static pthread_t _upload_tid = -1;
 static int _pipe_fd[2] = {-1, -1};
+static pthread_t _io_task_tid = -1;
+static int _io_task_pipe_fd[2] = {-1, -1};
 
 static char _stored_id[64] = {0};
+
+static struct topic _record_report_event;
 
 // do not care timezone, so we can convert again
 static time_t date_string_to_seconds(const char* date) {
@@ -198,8 +209,8 @@ static int do_upload(const char* local_path, const char* remote_url) {
         return -1;
     }
 
-    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L); // CURLOPT_POST
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST"); // use upload & force post
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);             // CURLOPT_POST
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");  // use upload & force post
     curl_easy_setopt(curl, CURLOPT_URL, remote_url);
     curl_easy_setopt(curl, CURLOPT_READDATA, fp);
     curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)filesize);
@@ -275,6 +286,150 @@ static void* background_upload_thread_routin(void* args) {
     return NULL;
 }
 
+int read_data(int fd, void* data, size_t len, int ms) {
+    fd_set read_fds;
+
+    struct timeval timeout = {.tv_sec = 0, .tv_usec = ms * 1000};
+
+    if (fd < 0 || !data) {
+        return -1;
+    }
+
+    FD_ZERO(&read_fds);
+    FD_SET(fd, &read_fds);
+
+    int ret = select(fd + 1, &read_fds, NULL, NULL, &timeout);
+    if (ret == -1) {
+        return -1;
+    } else if (ret == 0) {
+        return 0;
+    }
+
+    return read(fd, data, len);
+}
+
+int write_data(int fd, void* data, size_t len, int ms) {
+    fd_set write_fds;
+
+    struct timeval timeout = {.tv_sec = 0, .tv_usec = ms * 1000};
+
+    if (fd < 0 || !data) {
+        return -1;
+    }
+
+    FD_ZERO(&write_fds);
+    FD_SET(fd, &write_fds);
+
+    int ret = select(fd + 1, NULL, &write_fds, NULL, &timeout);
+    if (ret == -1) {
+        return -1;
+    } else if (ret == 0) {
+        return 0;
+    }
+
+    return write(fd, data, len);
+}
+
+static void* io_thread_routin(void* args) {
+    (void)args;
+
+    if (_io_task_pipe_fd[0] == -1) {
+        _io_task_tid = -1;
+        return NULL;
+    }
+
+    while (1) {
+        int cmd = -1;
+
+        ssize_t n = read(_io_task_pipe_fd[0], &cmd, sizeof(cmd));
+        if (n <= 0) {
+            continue;
+        }
+
+        switch (cmd) {
+            case IO_TASK_QUERY_RECORDS: {
+                time_t begin, end;
+
+                char* payload = NULL;
+                char tmp[256] = {0};
+                struct hrbuffer record_lists = {.data = NULL, .offset = 0, .size = 0, .preallocated = 0};
+
+                n = read_data(_io_task_pipe_fd[0], &begin, sizeof(begin), 500);
+
+                if (n != sizeof(begin)) {
+                    continue;
+                }
+                n = read_data(_io_task_pipe_fd[0], &end, sizeof(end), 500);
+                if (n != sizeof(end)) {
+                    continue;
+                }
+                if (hrbuffer_alloc(&record_lists, sizeof(struct record) * 300) < 0) {
+                    // failed
+                    continue;
+                }
+
+                HR_LOGD("begin:%ld -> end:%ld\n", begin, end);
+                int count = traverse_media_record_list(begin, end, &record_lists);
+                cJSON* root = cJSON_CreateObject();
+                if (!root) {
+                    hrbuffer_free(&record_lists);
+                    continue;
+                }
+
+                snprintf(tmp, sizeof(tmp), "%d", topic_generate_mid());
+                cJSON_AddStringToObject(root, "id", tmp);
+                cJSON_AddStringToObject(root, "version", "1.0.0");
+
+                cJSON* param = cJSON_AddArrayToObject(root, "params");
+
+                for (int i = 0; i < count; i++) {
+                    struct tm tm;
+                    time_t t;
+                    struct record* r = (struct record*)record_lists.data + i;
+
+                    HR_LOGD("timestamp:%ld, duration:%d, name:%s, size:%ld\n", r->timestamp, r->duration, r->name, r->size);
+                    cJSON* ele = cJSON_CreateObject();
+                    if (!ele) {
+                        continue;
+                    }
+
+                    cJSON_AddStringToObject(ele, "file_name", r->name);
+                    cJSON_AddNumberToObject(ele, "file_size", r->size);
+                    t = r->timestamp;
+                    (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
+                    /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
+                    cJSON_AddStringToObject(ele, "start_time", tmp);
+                    memset((void*)tmp, 0, sizeof(tmp));
+                    t += r->duration;
+                    (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
+                    /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
+                    cJSON_AddStringToObject(ele, "end_time", tmp);
+                    cJSON_AddItemToArray(param, ele);
+                }
+
+                hrbuffer_free(&record_lists);
+
+                payload = cJSON_PrintUnformatted(root);
+                cJSON_Delete(root);
+                if (!payload) {
+                    continue;
+                }
+
+                HR_LOGD("publish: %s\n", (char*)payload);
+
+                // mosquitto support multi thread
+                iot_topic_publish(&_record_report_event, payload, strlen(payload));
+
+                free(payload);
+            } break;
+            default:
+                break;
+        }
+    }
+
+    _io_task_tid = -1;
+    return NULL;
+}
 static struct topic _record_report_event = {
     .name = "event/RecordFileReportEvent/post",
     .topic = {0},
@@ -286,78 +441,52 @@ static struct topic _record_report_event = {
 
 // {"queryDate": "2025-08-06"}
 static int _GetVideoRecordFileList(cJSON* params) {
-    char* payload = NULL;
-    char tmp[256] = {0};
     const char* query_date = NULL;
     if (!params) {
         return -1;
     }
-
-    struct hrbuffer record_lists = {.data = NULL, .offset = 0, .size = 0, .preallocated = 0};
-
     query_date = cJSON_GetStringValue(cJSON_GetObjectItem(params, "queryDate"));
     if (!query_date) {
         return -1;
     }
-    if (hrbuffer_alloc(&record_lists, sizeof(struct record) * 300) < 0) {
-        // failed
-        return -1;
-    }
+
     time_t begin = date_string_to_seconds(query_date);
     time_t end = begin + 3600 * 24;
     printf("begin:%ld -> end:%ld\n", begin, end);
-    int count = traverse_media_record_list(begin, end, &record_lists);
 
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        hrbuffer_free(&record_lists);
-        return -1;
-    }
-
-    snprintf(tmp, sizeof(tmp), "%d", topic_generate_mid());
-    cJSON_AddStringToObject(root, "id", tmp);
-    cJSON_AddStringToObject(root, "version", "1.0.0");
-
-    cJSON* param = cJSON_AddArrayToObject(root, "params");
-
-    for (int i = 0; i < count; i++) {
-        struct tm tm;
-        time_t t;
-        struct record* r = (struct record*)record_lists.data + i;
-
-        printf("timestamp:%ld, duration:%d, name:%s, size:%ld\n", r->timestamp, r->duration, r->name, r->size);
-        cJSON* ele = cJSON_CreateObject();
-        if (!ele) {
-            continue;
+    if (_io_task_pipe_fd[0] == -1) {
+        if (0 != pipe(_io_task_pipe_fd)) {
+            return -1;
         }
+        fcntl(_io_task_pipe_fd[1], F_SETFL, fcntl(_io_task_pipe_fd[1], F_GETFL) | O_NONBLOCK);
 
-        cJSON_AddStringToObject(ele, "file_name", r->name);
-        cJSON_AddNumberToObject(ele, "file_size", r->size);
-        t = r->timestamp;
-        (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
-        /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
-        cJSON_AddStringToObject(ele, "start_time", tmp);
-        memset((void*)tmp, 0, sizeof(tmp));
-        t += r->duration;
-        (void)gmtime_r(&t, &tm);  // (void)localtime_r(&t, &tm);
-        /*size_t size =*/strftime(tmp, sizeof(tmp), "%Y-%m-%d %H:%M:%S", &tm);
-        cJSON_AddStringToObject(ele, "end_time", tmp);
-        cJSON_AddItemToArray(param, ele);
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (0 != pthread_create(&_io_task_tid, &attr, io_thread_routin, NULL)) {
+            close(_io_task_pipe_fd[0]);
+            close(_io_task_pipe_fd[1]);
+            return -1;
+        }
+        pthread_setname_np(_io_task_tid, "io task");
     }
 
-    hrbuffer_free(&record_lists);
-
-    payload = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!payload) {
+    if (_io_task_pipe_fd[1] == -1) {
         return -1;
     }
 
-    HR_LOGD("publish: %s\n", (char*)payload);
+    struct {
+        int cmd;
+        time_t begin;
+        time_t end;
+    } __attribute__((packed)) data = {IO_TASK_QUERY_RECORDS, begin, end};
 
-    iot_topic_publish(&_record_report_event, payload, strlen(payload));
-
-    free(payload);
+    // wait 20ms
+    int rc = write_data(_io_task_pipe_fd[1], (void*)&data, sizeof(data), 20);
+    if (rc != sizeof(data)) {
+        HR_LOGW("write query command error\n");
+    }
 
     return 0;
 }
@@ -400,11 +529,18 @@ static int _UploadVideoRecordFile(cJSON* params) {
             free(b);
             return -1;
         }
+        fcntl(_pipe_fd[1], F_SETFL, fcntl(_pipe_fd[1], F_GETFL) | O_NONBLOCK);
         pthread_attr_t attr;
         pthread_attr_init(&attr);
 
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-        pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL);
+        if (0 != pthread_create(&_upload_tid, &attr, background_upload_thread_routin, NULL)) {
+            free(b);
+            close(_pipe_fd[0]);
+            close(_pipe_fd[1]);
+            return -1;
+        }
+        pthread_setname_np(_upload_tid, "upload task");
     }
 
     if (_pipe_fd[1] == -1) {
@@ -414,7 +550,10 @@ static int _UploadVideoRecordFile(cJSON* params) {
     }
 
     // upload record in background;
-    write(_pipe_fd[1], (void*)b, len);
+    int rc = write_data(_pipe_fd[1], (void*)b, len, 200);
+    if (rc != len) {
+        HR_LOGW("write download command error\n");
+    }
 
     free(b);
 

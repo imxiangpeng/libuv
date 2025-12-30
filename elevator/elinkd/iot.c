@@ -271,7 +271,7 @@ static void _on_loop_event(struct mosquitto *mosq, void* userdata, int stage, in
         // but we do keep the task until connected
 	} else if (stage == 1) {
         HR_LOGE("%s(%d): stage:%d, result:%d, loop exit, restart whole app\n", __FUNCTION__, __LINE__, stage, result);
-        abort();
+        exit(1);
     }
 }
 
@@ -432,7 +432,8 @@ int iot_init() {
     // it will loop wait connect state
     // we prefer start loop early
     if (MOSQ_ERR_SUCCESS != mosquitto_loop_start(_priv.mosq)) {
-        exit(0);
+        HR_LOGE("%s(%d): mosquitto_loop_start failed\n", __FUNCTION__, __LINE__);
+        exit(1);
     }
 
     // start connect task
