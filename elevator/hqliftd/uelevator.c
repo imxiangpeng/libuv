@@ -581,9 +581,14 @@ static void ubus_event_handler(struct ubus_context* ctx,
             //         2 - force report immediately
             if (status != 0) {
                 HR_LOGD("simulate %s fire event!\n", type);
-                if (0 == elevator_fault_is_active(fault)) {
+                // allow kunren immediate report when we are in pending status
+                // from now we do not detect gpio in hqliftd
+                // gpio is detected using interrupt method in talk module, we can not detect it now
+                // do not filter here, elevator_fault_occurred will do it later
+                // if (0 == elevator_fault_is_active(fault) ||
+                //    (ELEVATOR_EXCEPTION_PEOPLE_TRAPPED == fault && status == 2)) {
                     statemachine_post_fault(fault, status);
-                }
+                //}
             } else {
                 HR_LOGD("simulate %s cancel event!\n", type);
                 if (0 != elevator_fault_is_active(fault)) {

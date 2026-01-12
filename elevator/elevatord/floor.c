@@ -158,6 +158,10 @@ static int floor_load_model(const char* path) {
         i++;
     }
 
+    if (base_id == -1) {
+        base_id = 0;
+    }
+
     // 1 lou height == 0
     _building.model[base_id].height_relative = 0;
     for (i = base_id - 1; i >= 0; i--) {

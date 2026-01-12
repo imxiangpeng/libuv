@@ -26,6 +26,7 @@
 
 // mxp, 20251230, 调整手动困人模式下检测逻辑
 // 由于其他模块采用中断方式检测 GPIO，所以这里我们无法再检测 GPIO 事件了。
+// (或许我们应该考虑采用 gpio-key 按键方式)
 //
 // 原来的手动困人模式由内部检测 GPIO 调整为：
 //
@@ -599,6 +600,11 @@ int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
 
     HR_LOGD("%s(%d): fault:0x%X -> %s\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
 
+    // if (0 != elevator_fault_is_active(fault) && (ELEVATOR_EXCEPTION_PEOPLE_TRAPPED != fault || immediate != 1)) {
+    //     HR_LOGE("%s(%d): fault:0x%X -> %s is occurring!\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
+    //     return 0;
+    // }
+
     _exception_indicator |= fault;
 
     DUMP_FAULT_QUEUE_EVENTS();
@@ -654,15 +660,15 @@ int elevator_fault_occurred(enum elevator_exception fault, int immediate) {
                 HR_LOGE("%s(%d): fault:0x%X -> %s is occurring, do not report again\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault));
 
 #if !ENABLE_RESCUE_BTN
-                HR_LOGE("%s(%d): fault:0x%X -> %s, pending: %d, immediate:%d\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), e->pending, immediate);
-                if (immediate == 1 && e->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED && e->pending != 0) {
+                HR_LOGE("%s(%d): fault:0x%X -> %s, pending: %d, immediate:%d\n", __FUNCTION__, __LINE__, fault, fault_to_string(fault), f->pending, immediate);
+                if (immediate == 1 && f->type == ELEVATOR_EXCEPTION_PEOPLE_TRAPPED && f->pending != 0) {
                     // button detect has been moved to other modules
                     // it will trigger fault occurr using immediate == 1
                     // so we directly send the pending event when we receive immediate fault
                     // delete from idle and queue into message
-                    e->pending = 0;
-                    hr_list_del(&e->entry);
-                    publish_fault_event(e);
+                    f->pending = 0;
+                    hr_list_del(&f->entry);
+                    publish_fault_event(f);
                     return 0;
                 }
 #endif
