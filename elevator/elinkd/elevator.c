@@ -1,8 +1,11 @@
 
 // mxp, 20250711, implement elevator function in elinkd
 
+
 #include "elevator.h"
 
+#include <math.h>
+#include <cjson/cJSON.h>
 #include <json-c/json_tokener.h>
 #include <stdint.h>
 
@@ -16,6 +19,8 @@
 #include "platform.h"
 #include "property.h"
 #include "sconf.h"
+#include "topic.h"
+#include "topic_event.h"
 #include "topic_property.h"
 
 #define ELEVATORD_NAME "elevatord"
@@ -35,9 +40,11 @@ enum elevator_direction {
     ELEVATOR_DIR_DOWN  // 2
 };
 
+// 0: closed, 1: opened
+// not match with hqliftd!
 enum elevator_door_state {
-    ELEVATOR_DOOR_OPEN = 0,
-    ELEVATOR_DOOR_CLOSE
+    ELEVATOR_DOOR_CLOSE = 0,
+    ELEVATOR_DOOR_OPEN
 };
 
 struct elevator_status {
@@ -618,7 +625,6 @@ int elevator_property_set_elog_level(struct property* self, struct property_valu
     return 0;
 }
 
-
 int elevator_property_get_elog_tags(struct property* self) {
     if (!self) return -1;
     struct sconf_proto proto = {"TAGS", PROTO_VALUE_STRING, {.string = NULL}};
@@ -804,9 +810,21 @@ int elevator_floor_update_floor_model_data(const char* data) {
     if (!model) {
         return -1;
     }
-
     return post_async_task(_elevatord_floor_update_floor_model_data, (void*)model);
 }
+
+static int _report_fault_event(void *args) {
+    const char* payload = (const char*)args;
+    if (!payload) {
+        return -1;
+    }
+    topic_event_publish_fault_event(payload);
+
+    free(args);
+
+    return 0;
+}
+
 void elevator_ubus_event_handler(struct ubus_context* ctx,
                                  struct ubus_event_handler* ev,
                                  const char* type,
@@ -816,9 +834,10 @@ void elevator_ubus_event_handler(struct ubus_context* ctx,
     (void)type;
     (void)msg;
 
-    // char* str = blobmsg_format_json(msg, true);
-    // HR_LOGD("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
-    // free(str);
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGE("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    printf("%s(%d) %s: %s\n", __FUNCTION__, __LINE__, type, str);
+    free(str);
 
     if (strncmp(type, ELEVATOR_EVENT_PREFIX, strlen(ELEVATOR_EVENT_PREFIX)) == 0) {
         const char* event = type + strlen(ELEVATOR_EVENT_PREFIX);
@@ -850,6 +869,13 @@ void elevator_ubus_event_handler(struct ubus_context* ctx,
             } else if (0 == strcmp("close", status)) {
                 _status.door_state = ELEVATOR_DOOR_CLOSE;
             }
+
+            if (properties_tbl[PROPERTY_DOOR_STATUS].value.val.number != _status.door_state) {
+                properties_tbl[PROPERTY_DOOR_STATUS].value.val.number = _status.door_state;
+                properties_tbl[PROPERTY_DOOR_STATUS].dirty = 1;
+                topic_property_report();
+            }
+
         } else if (0 == strcmp("person", event)) {
             int num = 0;
             struct blob_attr* tb[2] = {NULL};
@@ -867,6 +893,12 @@ void elevator_ubus_event_handler(struct ubus_context* ctx,
 
             num = blobmsg_get_u32(tb[0]);
             _status.passenger_count = num;
+
+            if (properties_tbl[PROPERTY_PASSENGER_COUNT].value.val.number != _status.passenger_count) {
+                properties_tbl[PROPERTY_PASSENGER_COUNT].value.val.number = _status.passenger_count;
+                properties_tbl[PROPERTY_PASSENGER_COUNT].dirty = 1;
+                topic_property_report();
+            }
         } else if (0 == strcmp("ebike", event)) {
             struct blob_attr* tb[2] = {NULL};
             static const struct blobmsg_policy policy[] = {
@@ -886,6 +918,56 @@ void elevator_ubus_event_handler(struct ubus_context* ctx,
             } else {
                 HR_LOGD("receive ebike cancel event!\n");
             }
+        } else if (0 == strcmp("fault", event)) {
+            char tmp[256] = {0};
+            cJSON *root = NULL, *param = NULL;
+            const char* type = NULL;
+            int status = 0;
+            struct blob_attr* tb[3] = {NULL};
+            static const struct blobmsg_policy policy[] = {
+                {.name = "type", .type = BLOBMSG_TYPE_STRING},
+                {.name = "status", .type = BLOBMSG_TYPE_INT32},
+                {NULL, BLOBMSG_TYPE_UNSPEC},
+            };
+
+            blobmsg_parse(policy, sizeof(policy) / sizeof(policy[0]), tb, blobmsg_data(msg),
+                          blobmsg_data_len(msg));
+
+            if (!tb[0] || !tb[1]) {
+                return;
+            }
+
+            type = blobmsg_get_string(tb[0]);
+            status = blobmsg_get_u32(tb[1]);
+
+            if (!type) {
+                return;
+            }
+
+            HR_LOGW("type:%s, status:%d\n", type, status);
+
+            root = cJSON_CreateObject();
+            if (!root) {
+                return;
+            }
+
+            snprintf(tmp, sizeof(tmp), "%d", topic_generate_mid());
+            cJSON_AddStringToObject(root, "id", tmp);
+            cJSON_AddStringToObject(root, "version", "1.0.0");
+
+            param = cJSON_AddObjectToObject(root, "params");
+            cJSON_AddStringToObject(param, "type", type);
+            cJSON_AddNumberToObject(param, "status", status);
+
+            const char* payload = cJSON_PrintUnformatted(root);
+            cJSON_Delete(root);
+            if (!payload)
+                return;
+
+            HR_LOGD("publish: %s\n", (char*)payload);
+
+            // payload will be freed in task
+            post_async_task(_report_fault_event, (void*)payload);
         }
     }
 }
@@ -908,9 +990,10 @@ int elevator_elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus
         return -1;
     }
 
-    // char* str = blobmsg_format_json(msg, true);
-    // HR_LOGE("elevatord event => %s:%s\n", method, str ? str : "");
-    // free(str);
+    char* str = blobmsg_format_json(msg, true);
+    HR_LOGE("elevatord event => %s:%s\n", method, str ? str : "");
+    printf("elevatord event => %s:%s\n", method, str ? str : "");
+    free(str);
 
     if (0 == strcmp(ELEVATORD_EVENT_SENSOR_CALIBRATION, method)) {
         struct blob_attr* tb[7] = {NULL};
@@ -985,6 +1068,50 @@ int elevator_elevatord_subscriber_callback(struct ubus_context* ctx, struct ubus
                                     blobmsg_get_double(tb[3]),
                                     blobmsg_get_double(tb[4]),
                                     blobmsg_get_u32(tb[5]));
+    } else if (0 == strcmp(ELEVATORD_EVENT_REALTIME, method)) {
+        enum {
+            RT_ACCEL,
+            RT_SPEED,
+            RT_DISTANCE,
+            RT_DIRECTION,
+            RT_FLOOR,
+            RT_JITTER_FREQ,
+            RT_JITTER_ACCEL,
+            __RT_MAX
+        };
+
+        static const struct blobmsg_policy realtime_policy[__RT_MAX] = {
+            [RT_ACCEL] = {.name = "accel", .type = BLOBMSG_TYPE_DOUBLE},
+            [RT_SPEED] = {.name = "velocity", .type = BLOBMSG_TYPE_DOUBLE},
+            [RT_DISTANCE] = {.name = "distance", .type = BLOBMSG_TYPE_DOUBLE},
+            [RT_DIRECTION] = {.name = "direction", .type = BLOBMSG_TYPE_INT32},
+            [RT_FLOOR] = {.name = "floor", .type = BLOBMSG_TYPE_INT32},
+            [RT_JITTER_FREQ] = {.name = "jitter_freq", .type = BLOBMSG_TYPE_DOUBLE},
+            [RT_JITTER_ACCEL] = {.name = "jitter_accel", .type = BLOBMSG_TYPE_DOUBLE},
+        };
+
+        static struct elevator_status status = {.door_state = ELEVATOR_DOOR_CLOSE};
+        struct blob_attr* tb[__RT_MAX] = {NULL};
+        blobmsg_parse(realtime_policy, __RT_MAX, tb, blobmsg_data(msg),
+                      blobmsg_data_len(msg));
+        if (tb[RT_ACCEL])
+            status.accel = blobmsg_get_double(tb[RT_ACCEL]);
+        if (tb[RT_SPEED])
+            status.speed = fabs(blobmsg_get_double(tb[RT_SPEED]));
+        if (tb[RT_DISTANCE])
+            status.distance = blobmsg_get_double(tb[RT_DISTANCE]);
+        if (tb[RT_DIRECTION]) {
+            status.direction = blobmsg_get_u32(tb[RT_DIRECTION]);
+        }
+        // cast from uint32_t
+        if (tb[RT_FLOOR])
+            status.current_floor = (int)blobmsg_get_u32(tb[RT_FLOOR]);
+
+        if (properties_tbl[PROPERTY_FLOOR].value.val.number != status.current_floor) {
+            properties_tbl[PROPERTY_FLOOR].value.val.number = status.current_floor;
+            properties_tbl[PROPERTY_FLOOR].dirty = 1;
+            topic_property_report();
+        }
     }
 
     return 0;

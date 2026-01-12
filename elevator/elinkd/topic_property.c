@@ -36,6 +36,7 @@ static int _on_property_publish(void** payload, int* len) {
     char tmp[256] = {0};
     cJSON *root = NULL, *param = NULL;
 
+    printf("%s(%d): publish property ...\n", __FUNCTION__, __LINE__);
     root = cJSON_CreateObject();
     if (!root)
         return -1;
@@ -65,6 +66,7 @@ static int _on_property_publish(void** payload, int* len) {
         // verify value's type
         switch (prop->value.type) {
             case E_NUMBER:
+    printf("%s(%d): publish number property ...\n", __FUNCTION__, __LINE__);
                 cJSON_AddNumberToObject(param, prop->name, prop->value.val.number);
                 break;
             case E_DECIMAL:

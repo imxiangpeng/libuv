@@ -105,6 +105,8 @@ struct property properties_tbl[__PROPERTY_MAX] = {
     [PROPERTY_FLOOR_MODEL] = {"floor_model", E_STRING, elevator_property_get_floor_model, NULL, {}, 0},
     // hqliftd
     [PROPERTY_HQLIFTD_CONFIG] = {"hqliftd_config", E_STRING, elevator_property_get_hqliftd_config, elevator_property_set_hqliftd_config, {}, 0},
+    [PROPERTY_DOOR_STATUS] = {"door_status", E_NUMBER, NULL, NULL, {E_NUMBER, .val.number = 0, .preallocated = 0}, 0},
+    [PROPERTY_PASSENGER_COUNT] = {"passenger_count", E_NUMBER, NULL, NULL, {E_NUMBER, .val.number = 0, .preallocated = 0}, 0},
     // eguard
     [PROPERTY_EGUARD_ALARM_SWITCH] = {"eguard_alarm_switch", E_NUMBER, elevator_property_get_eguard_alarm_switch, elevator_property_set_eguard_alarm_switch, {}, 1},
     [PROPERTY_EGUARD_ALARM_INTERVAL] = {"eguard_alarm_interval", E_NUMBER, elevator_property_get_eguard_alarm_interval, elevator_property_set_eguard_alarm_interval, {}, 1},

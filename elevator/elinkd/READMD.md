@@ -142,3 +142,24 @@ struct property {
 
 1.  `ubus` 接口不支持多线程调用，非主线程不允许调用；
 2.  主线程不允许执行耗时任务；
+
+
+## 变更记录
+
+### 2026-01-12
+
+1. 上报楼层号 `floor` 、门状态 `door_status` 、人数 `passenger_count` 等属性（无需调用 get 方法，采用主动变更上报方式）
+2. 上报故障信息（简化）`event/FaultEvent/post`
+
+    Topic: /sys/G9k7UzhGu8AZtlOf/LC202508B001000003/thing/event/AutoFloorCalibrationEvent/post
+
+    ```json
+    {
+      "id": "16",
+      "version": "1.0.0",
+      "fault": {
+        "type": "kunren",
+        "status": 1
+      }
+    }
+    ```

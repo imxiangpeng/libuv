@@ -1,18 +1,18 @@
 
 // mxp, 20250711, implement elevator AutoFloorCalibrationEvent event
 
+#include "topic_event.h"
+
 #include <cjson/cJSON.h>
+#include <libubox/list.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libubox/list.h>
 
 #include "elevator.h"
-#include "topic_event.h"
-#include "iot.h"
-
 #include "hr_log.h"
+#include "iot.h"
 #include "topic.h"
 static pthread_mutex_t _queue_mutex;
 
@@ -27,6 +27,15 @@ struct topic auto_floor_calibration_event_post = {
     .qos = 2,
     .type = TOPIC_TYPE_PUBLISH,
     .callback.on_publish = _on_auto_floor_calibration_event_publish,
+};
+
+struct topic fault_event_post = {
+    .name = "event/FaultEvent/post",
+    .topic = {0},
+    .period = 0,
+    .qos = 0,
+    .type = TOPIC_TYPE_PUBLISH,
+    .callback.on_publish = NULL,
 };
 
 struct floor_calibration_event* floor_calibration_event_alloc() {
@@ -115,8 +124,18 @@ static int _on_auto_floor_calibration_event_publish(void** payload, int* len) {
     return 0;
 }
 
+void topic_event_publish_fault_event(const char* payload) {
+    if (!payload) {
+        return;
+    }
+    iot_topic_publish(&fault_event_post, payload, strlen(payload));
+}
+
 int topic_event_init(const char* public_key, const char* device_name) {
     snprintf(auto_floor_calibration_event_post.topic, sizeof(auto_floor_calibration_event_post.topic), "/sys/%s/%s/thing/%s", public_key, device_name, auto_floor_calibration_event_post.name);
     iot_topic_register(&auto_floor_calibration_event_post);
+
+    snprintf(fault_event_post.topic, sizeof(fault_event_post.topic), "/sys/%s/%s/thing/%s", public_key, device_name, fault_event_post.name);
+    iot_topic_register(&fault_event_post);
     return 0;
 }
